@@ -657,13 +657,25 @@ class ObservationExecutor:
                     )
 
             if has_iq_task:
+                skip_auto_waterfall = any(
+                    task.get("type") == "iq_recording"
+                    and (task.get("config") or {}).get("enable_post_processing")
+                    and (task.get("config") or {}).get("delete_after_post_processing")
+                    for task in tasks
+                )
+                if skip_auto_waterfall:
+                    logger.info(
+                        "Skipping auto-waterfall generation because IQ recording will be deleted after SatDump"
+                    )
                 stopped_count = (
                     self.process_manager.recorder_manager.stop_all_recorders_for_session(
-                        sdr_id, session_id
+                        sdr_id, session_id, skip_auto_waterfall=skip_auto_waterfall
                     )
                 )
                 if stopped_count == 0:
-                    self.recorder_handler.stop_iq_recording_task(sdr_id, session_id)
+                    self.recorder_handler.stop_iq_recording_task(
+                        sdr_id, session_id, skip_auto_waterfall=skip_auto_waterfall
+                    )
 
                 await self._start_satdump_postprocessing(
                     observation_id, session_key, tasks, session.get("sdr", {}) or {}

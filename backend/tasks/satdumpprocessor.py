@@ -5,6 +5,7 @@ This task processes IQ recordings using SatDump with various satellite pipelines
 Supports progress tracking and graceful interruption.
 """
 
+import os
 import re
 import shutil
 import signal
@@ -134,16 +135,28 @@ def satdump_process_recording(
     output_dir_preexisted = output_path.exists()
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Build SatDump command using resolved absolute paths
+    # Build SatDump command using resolved absolute paths (SatDump 1.2.x CLI)
+    # satdump <pipeline> baseband <in> <out> --samplerate <sr> --baseband_format <fmt> ...
+    fmt_map = {
+        "f32": "cf32",
+        "i16": "cs16",
+        "i8": "cs8",
+        "u8": "cu8",
+        "w16": "w16",
+        "w8": "w8",
+    }
+    baseband_format = fmt_map.get(baseband_format, baseband_format)
+
     cmd = [
         "satdump",
-        "pipeline",
         satellite,
         "baseband",
         str(recording_file),
         str(output_path),
-        f"--samplerate={samplerate}",
-        f"--baseband_format={baseband_format}",
+        "--samplerate",
+        str(samplerate),
+        "--baseband_format",
+        str(baseband_format),
         "--fill_missing",
         "--dc_block",
     ]
@@ -184,9 +197,16 @@ def satdump_process_recording(
         _progress_queue.put({"type": "output", "output": "-" * 60, "stream": "stdout"})
 
     try:
+        # Isolate SatDump settings to avoid cross-version config breakage
+        satdump_cfg_dir = backend_dir / "data" / "satdump_config"
+        satdump_cfg_dir.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env["XDG_CONFIG_HOME"] = str(satdump_cfg_dir)
+
         # Start the subprocess
         process = subprocess.Popen(
             cmd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -194,6 +214,7 @@ def satdump_process_recording(
         )
 
         # Stream output
+        last_progress: Optional[float] = None
         while True:
             # Check for graceful shutdown
             if killer.kill_now:
@@ -243,18 +264,24 @@ def satdump_process_recording(
                             progress = float(match.group(1))
                     except Exception:
                         pass
+                if progress is not None:
+                    if last_progress is None or progress >= last_progress:
+                        last_progress = progress
+                progress_to_emit = last_progress
 
                 _progress_queue.put(
                     {
                         "type": "output",
                         "output": line,
                         "stream": "stdout",
-                        "progress": progress if progress is not None else None,
+                        "progress": progress_to_emit if progress_to_emit is not None else None,
                     }
                 )
 
         # Wait for process to complete
         return_code = process.wait()
+
+        # SatDump 1.2.x doesn't have `satdump process`, so skip post-processing here.
 
         # Check if output directory has any decoded products (images, data files)
         # SatDump v1.2.3 returns exit code 1 even when decoding succeeded
@@ -319,6 +346,7 @@ def satdump_process_recording(
                 _progress_queue.put({"type": "error", "error": error_msg, "stream": "stderr"})
             raise RuntimeError(error_msg)
 
+        # SatDump v1.2.x returns exit code 1 even when decoding succeeded
         if return_code == 0 or (return_code == 1 and has_output):
             if _progress_queue:
                 _progress_queue.put(

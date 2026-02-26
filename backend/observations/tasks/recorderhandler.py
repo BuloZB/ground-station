@@ -256,7 +256,9 @@ class RecorderHandler:
             logger.error(traceback.format_exc())
             return False
 
-    def stop_iq_recording_task(self, sdr_id: str, session_id: str) -> bool:
+    def stop_iq_recording_task(
+        self, sdr_id: str, session_id: str, skip_auto_waterfall: bool = False
+    ) -> bool:
         """
         Stop an IQ recording task.
 
@@ -268,7 +270,9 @@ class RecorderHandler:
             True if IQ recorder stopped successfully
         """
         try:
-            self.process_manager.stop_recorder(sdr_id, session_id)
+            self.process_manager.stop_recorder(
+                sdr_id, session_id, skip_auto_waterfall=skip_auto_waterfall
+            )
             logger.info(f"Stopped IQ recorder for session {session_id}")
             return True
         except Exception as e:
