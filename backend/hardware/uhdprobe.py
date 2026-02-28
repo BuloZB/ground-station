@@ -522,31 +522,24 @@ def probe_local_uhd_usrp(sdr_details):
             except Exception as e:
                 reply["log"].append(f"INFO: Could not get master clock rate: {e}")
 
-            # Check reference lock status (if external reference is used)
+            # Check reference lock status (if available)
             try:
-                if "external" in clock_info.get("clock_source", "").lower():
-                    # Try to get lock status - this varies by USRP model
-                    try:
-                        # Some USRPs have a ref_locked sensor
-                        sensors = usrp.get_mboard_sensor_names(0)
-                        reply["log"].append(f"INFO: Mboard sensors: {list(sensors)}")
-                        if "ref_locked" in sensors:
-                            ref_locked = usrp.get_mboard_sensor("ref_locked", 0)
-                            clock_info["ref_locked"] = ref_locked.to_bool()
-                            capabilities["sensors"].append("ref_locked")
-                            capabilities["sensor_values"]["ref_locked"] = ref_locked.to_bool()
-                            reply["log"].append(
-                                f"INFO: ref_locked sensor value: {capabilities['sensor_values']['ref_locked']}"
-                            )
-                            reply["log"].append(
-                                f"INFO: Reference locked: {clock_info['ref_locked']}"
-                            )
-                        else:
-                            reply["log"].append("INFO: Reference lock sensor not available")
-                    except Exception as e:
-                        reply["log"].append(f"INFO: Could not check reference lock status: {e}")
+                # Some USRPs have a ref_locked sensor
+                sensors = usrp.get_mboard_sensor_names(0)
+                reply["log"].append(f"INFO: Mboard sensors: {list(sensors)}")
+                if "ref_locked" in sensors:
+                    ref_locked = usrp.get_mboard_sensor("ref_locked", 0)
+                    clock_info["ref_locked"] = ref_locked.to_bool()
+                    capabilities["sensors"].append("ref_locked")
+                    capabilities["sensor_values"]["ref_locked"] = ref_locked.to_bool()
+                    reply["log"].append(
+                        f"INFO: ref_locked sensor value: {capabilities['sensor_values']['ref_locked']}"
+                    )
+                    reply["log"].append(f"INFO: Reference locked: {clock_info['ref_locked']}")
+                else:
+                    reply["log"].append("INFO: Reference lock sensor not available")
             except Exception as e:
-                reply["log"].append(f"INFO: Could not check reference configuration: {e}")
+                reply["log"].append(f"INFO: Could not check reference lock status: {e}")
 
         except Exception as e:
             reply["log"].append(f"WARNING: Could not get clock/time source information: {e}")
