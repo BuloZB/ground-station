@@ -16,11 +16,17 @@
 
 import argparse
 import os
+import secrets
 
 parser = argparse.ArgumentParser(description="Start the Ground Station app with custom arguments.")
 parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the server on")
 parser.add_argument("--port", type=int, default=5000, help="Port to run the server on")
 parser.add_argument("--db", type=str, default="data/db/gs.db", help="Path to the database file")
+parser.add_argument(
+    "--temp-db",
+    action="store_true",
+    help="Use a temporary /tmp/<random>.db database path (first-time mode)",
+)
 parser.add_argument(
     "--log-level",
     type=str,
@@ -58,6 +64,7 @@ if os.environ.get("ALEMBIC_CONTEXT"):
         host="0.0.0.0",
         port=5000,
         db="data/db/gs.db",
+        temp_db=False,
         log_level="INFO",
         log_config="logconfig.yaml",
         secret_key="YOUR_RANDOM_SECRET_KEY",
@@ -67,3 +74,10 @@ if os.environ.get("ALEMBIC_CONTEXT"):
     )
 else:
     arguments = parser.parse_args()
+
+if getattr(arguments, "temp_db", False):
+    temp_db_path = os.path.join("/tmp", f"{secrets.token_hex(8)}.db")
+    arguments.db = temp_db_path
+
+if getattr(arguments, "temp_db", False) or "GS_DB" not in os.environ:
+    os.environ["GS_DB"] = arguments.db

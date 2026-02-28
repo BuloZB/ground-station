@@ -73,6 +73,8 @@ def main() -> None:
     register_socketio_handlers(sio)
 
     logger.info("Configuring database connection...")
+    if arguments.temp_db:
+        logger.info(f"Temporary database enabled, using {arguments.db}")
     # Use asyncio.run to create/manage a temporary event loop (Python 3.12+ friendly)
     asyncio.run(init_db())
 

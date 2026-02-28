@@ -14,13 +14,22 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
+import os
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from common.arguments import arguments
 
+
 # sql alchemy engine
-# The db path from arguments already includes data/db/ prefix
-DATABASE_URL = f"sqlite+aiosqlite:///./{arguments.db}"
+def _build_database_url(db_path: str) -> str:
+    if os.path.isabs(db_path):
+        return f"sqlite+aiosqlite:///{os.path.abspath(db_path)}"
+    # The db path from arguments already includes data/db/ prefix
+    return f"sqlite+aiosqlite:///./{db_path}"
+
+
+DATABASE_URL = _build_database_url(arguments.db)
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,

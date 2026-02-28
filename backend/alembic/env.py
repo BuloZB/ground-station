@@ -26,8 +26,15 @@ db_path = os.environ.get("GS_DB", "data/db/gs.db")
 # access to the values within the .ini file in use.
 config = context.config
 
+
+def _build_database_url(path: str) -> str:
+    if os.path.isabs(path):
+        return f"sqlite+aiosqlite:///{os.path.abspath(path)}"
+    return f"sqlite+aiosqlite:///./{path}"
+
+
 # Set the SQLAlchemy URL from our application configuration
-config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///./{db_path}")
+config.set_main_option("sqlalchemy.url", _build_database_url(db_path))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
