@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     librtlsdr-dev \
     libairspy-dev \
+    libairspyhf-dev \
     libhackrf-dev \
     libboost-all-dev \
     swig \
@@ -140,6 +141,17 @@ RUN git clone --depth=1 https://github.com/pothosware/SoapyRTLSDR.git && \
 WORKDIR /src
 RUN git clone --depth=1 https://github.com/pothosware/SoapyAirspy.git && \
     cd SoapyAirspy && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    make -j$(nproc) && \
+    sudo make install -j$(nproc) && \
+    sudo ldconfig
+
+# compile SoapySDR-AirspyHF
+WORKDIR /src
+RUN git clone --depth=1 https://github.com/pothosware/SoapyAirspyHF.git && \
+    cd SoapyAirspyHF && \
     mkdir build && \
     cd build && \
     cmake .. && \

@@ -281,6 +281,7 @@ class SoapySDRDriverType(Enum):
     RTLSDR = "rtlsdr"
     HACKRF = "hackrf"
     AIRSPY = "airspy"
+    AIRSPYHF = "airspyhf"
     BLADERF = "bladerf"
     SDRPLAY = "sdrplay"
     LIME = "lime"
