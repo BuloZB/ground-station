@@ -10,9 +10,8 @@ The ground station application supports multiple themes with completely customiz
 
 1. **Dark** (default) - Standard dark theme with blue accents
 2. **Light** - Clean light theme for daytime use
-3. **Cyberpunk** - Neon cyan/magenta colors with dark blue backgrounds
-4. **Ocean Blue** - Deep blue nautical theme
-5. **Forest Green** - Nature-inspired green theme
+3. **Ocean Blue** - Deep blue nautical theme
+4**Forest Green** - Nature-inspired green theme
 
 ## Adding a New Theme
 
