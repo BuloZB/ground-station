@@ -65,7 +65,26 @@ class TestRotatorsCRUD:
         assert result["data"]["name"] == "Test Rotator"
         assert result["data"]["host"] == "localhost"
         assert result["data"]["port"] == 4533
+        assert result["data"]["azimuth_mode"] == "0_360"
         assert "id" in result["data"]
+
+    async def test_add_rotator_with_negative_azimuth_mode(self, db_session):
+        """Test successful rotator creation with -180_180 azimuth mode."""
+        rotator_data = {
+            "name": "Mode Rotator",
+            "host": "localhost",
+            "port": 4533,
+            "minaz": -180,
+            "maxaz": 180,
+            "minel": 0,
+            "maxel": 90,
+            "azimuth_mode": "-180_180",
+        }
+
+        result = await add_rotator(db_session, rotator_data)
+
+        assert result["success"] is True
+        assert result["data"]["azimuth_mode"] == "-180_180"
 
     async def test_fetch_rotators_all(self, db_session):
         """Test fetching all rotators."""

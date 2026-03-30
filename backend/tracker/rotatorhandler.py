@@ -56,6 +56,19 @@ class RotatorHandler:
         el_tol = float(self.tracker.el_tolerance)
         return bool(abs(current_az - target_az) <= az_tol and abs(current_el - target_el) <= el_tol)
 
+    def _get_azimuth_mode(self) -> str:
+        mode = str(self.tracker.rotator_details.get("azimuth_mode", "0_360"))
+        return mode if mode in {"0_360", "-180_180"} else "0_360"
+
+    def _normalize_azimuth_for_mode(self, azimuth: float, mode: str) -> float:
+        if mode == "-180_180":
+            normalized = azimuth % 360
+            return normalized if normalized <= 180 else normalized - 360
+        return azimuth % 360
+
+    def _to_command_azimuth(self, azimuth_0_360: float) -> float:
+        return self._normalize_azimuth_for_mode(azimuth_0_360, self._get_azimuth_mode())
+
     async def _issue_rotator_command(self, target_az, target_el):
         """Send a single rotator command and update in-flight state."""
         position_gen = self.tracker.rotator_controller.set_position(target_az, target_el)
@@ -286,9 +299,11 @@ class RotatorHandler:
         """Check if satellite position is within limits."""
         events = []
         out_of_bounds = False
+        mode = self._get_azimuth_mode()
+        sky_az = self._normalize_azimuth_for_mode(skypoint[0], mode)
 
         # Check azimuth limits
-        if skypoint[0] < self.tracker.azimuth_limits[0]:
+        if sky_az < self.tracker.azimuth_limits[0]:
             logger.debug(
                 f"Azimuth below minimum for satellite #{self.tracker.current_norad_id} {satellite_name}"
             )
@@ -300,7 +315,7 @@ class RotatorHandler:
             self.tracker.rotator_data["minazimuth"] = True
             self.tracker.rotator_data["maxazimuth"] = False
             out_of_bounds = True
-        elif skypoint[0] > self.tracker.azimuth_limits[1]:
+        elif sky_az > self.tracker.azimuth_limits[1]:
             logger.debug(
                 f"Azimuth above maximum for satellite #{self.tracker.current_norad_id} {satellite_name}"
             )
@@ -378,15 +393,19 @@ class RotatorHandler:
             and not self.tracker.rotator_data["outofbounds"]
             and not self.tracker.rotator_data["minelevation"]
         ):
+            mode = self._get_azimuth_mode()
+            sky_az = self._normalize_azimuth_for_mode(skypoint[0], mode)
+
             # Clamp target position to rotator limits
             target_az = max(
                 self.tracker.azimuth_limits[0],
-                min(skypoint[0], self.tracker.azimuth_limits[1]),
+                min(sky_az, self.tracker.azimuth_limits[1]),
             )
             target_el = max(
                 self.tracker.elevation_limits[0],
                 min(skypoint[1], self.tracker.elevation_limits[1]),
             )
+            command_target_az = self._to_command_azimuth(target_az)
 
             current_az = self.tracker.rotator_data["az"]
             current_el = self.tracker.rotator_data["el"]
@@ -395,10 +414,10 @@ class RotatorHandler:
             # No command currently in flight: send only if needed.
             if not state["in_flight"]:
                 needs_move = not self._target_within_tolerance(
-                    current_az, current_el, target_az, target_el
+                    current_az, current_el, command_target_az, target_el
                 )
                 if needs_move:
-                    await self._issue_rotator_command(target_az, target_el)
+                    await self._issue_rotator_command(command_target_az, target_el)
                 else:
                     self.tracker.rotator_data["slewing"] = False
 
@@ -423,7 +442,7 @@ class RotatorHandler:
 
                 # Retarget if the sky target moved far enough, or refresh on watchdog timeout.
                 target_drift = max(
-                    abs(target_az - active_target_az),
+                    abs(command_target_az - active_target_az),
                     abs(target_el - active_target_el),
                 )
                 command_age = time.time() - float(state["last_command_ts"] or 0.0)
@@ -431,7 +450,7 @@ class RotatorHandler:
                 should_refresh = command_age >= self.tracker.rotator_command_refresh_sec
 
                 if should_retarget or should_refresh:
-                    await self._issue_rotator_command(target_az, target_el)
+                    await self._issue_rotator_command(command_target_az, target_el)
 
         elif self.tracker.rotator_controller and self.tracker.current_rotator_state != "tracking":
             self._reset_slew_state()
@@ -450,7 +469,7 @@ class RotatorHandler:
                     min(new_el, self.tracker.elevation_limits[1]),
                 )
 
-                await self._issue_rotator_command(new_az, new_el)
+                await self._issue_rotator_command(self._to_command_azimuth(new_az), new_el)
         else:
             # No rotator available or movement blocked by limits.
             self._reset_slew_state()

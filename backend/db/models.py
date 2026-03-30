@@ -234,6 +234,7 @@ class Rotators(Base):
     port = Column(Integer, nullable=False)
     minaz = Column(Integer, nullable=False)
     maxaz = Column(Integer, nullable=False)
+    azimuth_mode = Column(String, nullable=False, default="0_360")
     minel = Column(Integer, nullable=False)
     maxel = Column(Integer, nullable=False)
     aztolerance = Column(Float, nullable=False, default=2.0)

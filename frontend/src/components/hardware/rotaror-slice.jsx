@@ -89,6 +89,7 @@ const defaultRotator = {
     port: 4532,
     minaz: 0,
     maxaz: 360,
+    azimuth_mode: '0_360',
     minel: 0,
     maxel: 90,
     aztolerance: 2.0,

@@ -22,7 +22,7 @@ import * as React from 'react';
 import Box from '@mui/material/Box';
 import {DataGrid, gridClasses} from "@mui/x-data-grid";
 import Stack from "@mui/material/Stack";
-import {Alert, AlertTitle, Button, InputAdornment, TextField, Typography} from "@mui/material";
+import {Alert, AlertTitle, Button, InputAdornment, MenuItem, TextField, Typography} from "@mui/material";
 import {useEffect, useState} from "react";
 import { useTranslation } from 'react-i18next';
 import DialogTitle from "@mui/material/DialogTitle";
@@ -79,6 +79,13 @@ export default function AntennaRotatorTable() {
         },
         {field: 'minaz', headerName: t('rotator.min_az'), type: 'number', flex: 1, minWidth: 80},
         {field: 'maxaz', headerName: t('rotator.max_az'), type: 'number', flex: 1, minWidth: 80},
+        {
+            field: 'azimuth_mode',
+            headerName: 'Azimuth Range',
+            flex: 1,
+            minWidth: 140,
+            valueFormatter: (value) => value === '-180_180' ? '-180 to 180' : '0 to 360'
+        },
         {field: 'minel', headerName: t('rotator.min_el'), type: 'number', flex: 1, minWidth: 80},
         {field: 'maxel', headerName: t('rotator.max_el'), type: 'number', flex: 1, minWidth: 80},
         {field: 'aztolerance', headerName: t('rotator.az_tolerance'), type: 'number', flex: 1, minWidth: 110},
@@ -133,6 +140,9 @@ export default function AntennaRotatorTable() {
         && Number(formValues.minaz) > Number(formValues.maxaz)) {
         validationErrors.minaz = 'Min azimuth must be <= max azimuth';
         validationErrors.maxaz = 'Min azimuth must be <= max azimuth';
+    }
+    if (!['0_360', '-180_180'].includes(formValues.azimuth_mode ?? '0_360')) {
+        validationErrors.azimuth_mode = 'Invalid azimuth mode';
     }
     if (isEmptyValue(formValues.minel)) {
         validationErrors.minel = 'Required';
@@ -317,6 +327,28 @@ export default function AntennaRotatorTable() {
                                         required
                                         InputProps={{ endAdornment: <InputAdornment position="end">°</InputAdornment> }}
                                     />
+                                    <TextField
+                                        name="azimuth_mode"
+                                        label="Azimuth Range"
+                                        select
+                                        fullWidth
+                                        size="small"
+                                        onChange={handleChange}
+                                        value={formValues.azimuth_mode ?? '0_360'}
+                                        error={Boolean(validationErrors.azimuth_mode)}
+                                        helperText={
+                                            validationErrors.azimuth_mode
+                                            || (
+                                                (formValues.azimuth_mode ?? '0_360') === '-180_180'
+                                                    ? 'Sends values above 180 as negative (e.g. 270 -> -90) to reduce north-crossing unwind on supported rotators/controllers.'
+                                                    : 'Sends standard positive azimuth values in the 0 to 360 range (default behavior).'
+                                            )
+                                        }
+                                        required
+                                    >
+                                        <MenuItem value="0_360">0 to 360</MenuItem>
+                                        <MenuItem value="-180_180">-180 to 180</MenuItem>
+                                    </TextField>
                                     <TextField
                                         name="minel"
                                         label={t('rotator.min_el')}

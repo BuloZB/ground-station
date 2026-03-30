@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from common.common import logger, serialize_object
 from db.models import Cameras, Rigs, Rotators, SDRs
 
+VALID_AZIMUTH_MODES = {"0_360", "-180_180"}
+
 
 async def fetch_rotators(
     session: AsyncSession, rotator_id: Optional[Union[uuid.UUID, str]] = None
@@ -58,6 +60,9 @@ async def add_rotator(session: AsyncSession, data: dict) -> dict:
     Create and add a new rotator record.
     """
     try:
+        azimuth_mode = data.get("azimuth_mode", "0_360")
+        assert azimuth_mode in VALID_AZIMUTH_MODES, "azimuth_mode must be 0_360 or -180_180"
+
         new_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
         stmt = (
@@ -69,6 +74,7 @@ async def add_rotator(session: AsyncSession, data: dict) -> dict:
                 port=data["port"],
                 minaz=data["minaz"],
                 maxaz=data["maxaz"],
+                azimuth_mode=azimuth_mode,
                 minel=data["minel"],
                 maxel=data["maxel"],
                 aztolerance=data.get("aztolerance", 2.0),
@@ -102,6 +108,10 @@ async def edit_rotator(session: AsyncSession, data: dict) -> dict:
 
         if not rotator_id:
             raise Exception("id is required.")
+
+        if "azimuth_mode" in data:
+            azimuth_mode = data["azimuth_mode"]
+            assert azimuth_mode in VALID_AZIMUTH_MODES, "azimuth_mode must be 0_360 or -180_180"
 
         del data["updated"]
         del data["added"]
