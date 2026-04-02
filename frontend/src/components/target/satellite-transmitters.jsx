@@ -31,6 +31,7 @@ import {
     Typography,
     Chip
 } from '@mui/material';
+import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 
 const TargetSatelliteTransmittersIsland = () => {
     const { t } = useTranslation('target');
@@ -59,6 +60,10 @@ const TargetSatelliteTransmittersIsland = () => {
         const sign = driftHz > 0 ? '+' : '';
         return `Δ ${sign}${(driftHz / 1e3).toFixed(1)} kHz`;
     };
+
+    const formatViolationText = () => t('satellite_transmitters.messages.frequency_violation')
+        .replace(/^[\s\u26A0\uFE0F!]+/u, '')
+        .trim();
 
     const BandBadge = ({ band }) => {
         return (
@@ -243,12 +248,19 @@ const TargetSatelliteTransmittersIsland = () => {
                 {transmitter.frequency_violation && (
                     <Box sx={{
                         mt: 0.55,
-                        p: 0.45,
-                        bgcolor: 'error.main',
-                        borderRadius: 0.6
+                        px: 0.6,
+                        py: 0.45,
+                        bgcolor: 'error.dark',
+                        borderRadius: 0.7,
+                        border: '1px solid',
+                        borderColor: 'error.main',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.45
                     }}>
-                        <Typography variant="caption" sx={{ color: 'error.contrastText', fontWeight: 800, fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                            ⚠ {t('satellite_transmitters.messages.frequency_violation')}
+                        <WarningAmberRoundedIcon sx={{ color: 'error.contrastText', fontSize: 13 }} />
+                        <Typography variant="caption" sx={{ color: 'error.contrastText', fontWeight: 800, fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.3px', lineHeight: 1.1 }}>
+                            {formatViolationText()}
                         </Typography>
                     </Box>
                 )}
