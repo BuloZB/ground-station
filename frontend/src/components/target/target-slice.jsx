@@ -50,6 +50,31 @@ const normalizeGroupOfSats = (sats = []) =>
         };
     });
 
+const normalizeCoveragePoints = (coverage = []) =>
+    Array.isArray(coverage)
+        ? coverage
+            .map((point) => {
+                if (Array.isArray(point) && point.length >= 2) {
+                    return [point[0], point[1]];
+                }
+                if (point && typeof point === 'object') {
+                    const lat = point.lat;
+                    const lon = point.lon ?? point.lng;
+                    if (lat != null && lon != null) {
+                        return [lat, lon];
+                    }
+                }
+                return null;
+            })
+            .filter(Boolean)
+        : [];
+
+const normalizeSatelliteData = (satelliteData = {}) => ({
+    ...satelliteData,
+    coverage: normalizeCoveragePoints(satelliteData.coverage),
+    transmitters: normalizeTransmitters(satelliteData.transmitters || []),
+});
+
 const transmitterIdentity = (tx = {}) =>
     String(
         tx.id
@@ -423,13 +448,12 @@ const targetSatTrackSlice = createSlice({
             }
 
             if (action.payload['satellite_data']) {
-                state.satelliteData.details = action.payload['satellite_data']['details'];
-                state.satelliteData.position = action.payload['satellite_data']['position'];
-                state.satelliteData.paths = action.payload['satellite_data']['paths'];
-                state.satelliteData.coverage = action.payload['satellite_data']['coverage'];
-                const incomingTransmitters = normalizeTransmitters(
-                    action.payload['satellite_data']['transmitters']
-                );
+                const normalizedSatelliteData = normalizeSatelliteData(action.payload['satellite_data']);
+                state.satelliteData.details = normalizedSatelliteData.details;
+                state.satelliteData.position = normalizedSatelliteData.position;
+                state.satelliteData.paths = normalizedSatelliteData.paths;
+                state.satelliteData.coverage = normalizedSatelliteData.coverage;
+                const incomingTransmitters = normalizedSatelliteData.transmitters;
                 const incomingNoradId = action.payload['satellite_data']?.details?.norad_id;
                 const lockMatchesSatellite = (
                     state.transmitterSyncLock?.noradId != null
@@ -792,14 +816,7 @@ const targetSatTrackSlice = createSlice({
             })
             .addCase(fetchSatellite.fulfilled, (state, action) => {
                 state.loading = false;
-                if (action.payload?.transmitters) {
-                    state.satelliteData = {
-                        ...action.payload,
-                        transmitters: normalizeTransmitters(action.payload.transmitters),
-                    };
-                } else {
-                    state.satelliteData = action.payload;
-                }
+                state.satelliteData = normalizeSatelliteData(action.payload);
                 state.error = null;
             })
             .addCase(fetchSatellite.rejected, (state, action) => {

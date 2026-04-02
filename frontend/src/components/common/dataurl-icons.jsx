@@ -17,7 +17,7 @@
  */
 
 
-import {Icon as LeafletIcon} from "leaflet";
+import {Icon as LeafletIcon, divIcon} from "leaflet";
 import { Icon } from '@mui/material';
 
 export const VFO1Icon = ({ size = 28, ...props }) => {
@@ -139,11 +139,12 @@ export const satelliteIcon = new LeafletIcon ({
     popupAnchor : [0, 0] // point from which the popup should open relative to the iconAnchor
 })
 
-export const satelliteIcon2 = new LeafletIcon ({
-    iconUrl : "data:image/png;base64,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",
-    iconSize : [24, 24], // size of the icon
-    iconAnchor : [12, 12], // point of the icon which will correspond to marker's location
-    popupAnchor : [10, 10] // point from which the popup should open relative to the iconAnchor
+export const satelliteIcon2 = divIcon({
+    className: 'overview-satellite-test-icon',
+    html: '<div style="width:12px;height:12px;background:#38bdf8;border:1px solid #e0f2fe;transform:rotate(45deg);box-shadow:0 0 0 1px rgba(0,0,0,0.55),0 0 7px rgba(56,189,248,0.75);display:flex;align-items:center;justify-content:center;"><div style="width:3px;height:3px;background:#f8fafc;border-radius:50%;transform:rotate(-45deg);"></div></div>',
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -6],
 });
 
 export const homeIcon = new LeafletIcon ({
