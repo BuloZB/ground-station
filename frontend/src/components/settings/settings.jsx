@@ -17,9 +17,7 @@
  *
  */
 
-
-
-import React, {useEffect, useState} from 'react';
+import React from 'react';
 import {
     Box,
     Tab,
@@ -27,14 +25,12 @@ import {
     Alert,
     AlertTitle, Typography
 } from '@mui/material';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import Paper from "@mui/material/Paper";
 import Tabs, { tabsClasses } from '@mui/material/Tabs';
 import {gridLayoutStoreName as overviewGridLayoutName} from '../overview/main-layout.jsx';
 import {gridLayoutStoreName as targetGridLayoutName} from '../target/main-layout.jsx';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import Grid from "@mui/material/Grid";
 import AntennaRotatorTable from "../hardware/rotator-table.jsx";
 import RigTable from "../hardware/rig-table.jsx";
@@ -113,24 +109,39 @@ function getTabCategory(value) {
 
 export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, initialTab}) {
     const { t } = useTranslation('settings');
-    const [activeMainTab, setActiveMainTab] = useState(initialMainTab);
-    const [activeTab, setActiveTab] = useState(initialTab);
+    const location = useLocation();
 
-    const handleMainTabChange = (event, newValue) => {
-        setActiveMainTab(newValue);
-        setActiveTab(tabsTree[newValue][0]);
+    const getTabFromPath = (pathname) => {
+        switch (pathname) {
+            case "/hardware/rig":
+                return "rigcontrol";
+            case "/hardware/rotator":
+                return "rotatorcontrol";
+            case "/hardware/cameras":
+                return "camera";
+            case "/hardware/sdrs":
+                return "sdrs";
+            case "/satellites/tlesources":
+                return "tlesources";
+            case "/satellites/satellites":
+                return "satellites";
+            case "/satellites/groups":
+                return "groups";
+            case "/settings/preferences":
+                return "preferences";
+            case "/settings/location":
+                return "location";
+            case "/settings/maintenance":
+                return "maintenance";
+            case "/settings/about":
+                return "about";
+            default:
+                return initialTab;
+        }
     };
 
-    const handleTabChange = (event, newValue) => {
-        setActiveTab(newValue);
-        const mainTab = getTabCategory(newValue);
-        setActiveMainTab(mainTab);
-    };
-
-    // Forms for each tab can be extracted into separate components if desired:
-    const LocationForm = () => (
-        <LocationPage/>
-    );
+    const activeTab = getTabFromPath(location.pathname);
+    const activeMainTab = getTabCategory(activeTab) ?? initialMainTab;
 
     let tabsList = [];
     // Define arrays of tabs for each main category
@@ -170,7 +181,6 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
             },
         }}
         value={activeTab}
-        onChange={handleTabChange}
         aria-label={t('tabs.configuration_tabs')}
         scrollButtons={true}
         variant="scrollable"
@@ -186,7 +196,7 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
             activeTabContent = <PreferencesForm/>;
             break;
         case "location":
-            activeTabContent = <LocationForm/>;
+            activeTabContent = <LocationPage/>;
             break;
         case "rigcontrol":
             activeTabContent = <RigControlForm/>;
@@ -229,7 +239,6 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
                      bottomBorder: '1px #4c4c4c solid',
                  }}
                  value={activeMainTab}
-                 onChange={handleMainTabChange}
                  aria-label={t('tabs.main_settings_tabs')}
                  scrollButtons={true}
                  variant="fullWidth"
@@ -244,15 +253,6 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
          </Box>
     );
 });
-
-// Fix for missing marker icons in React-Leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
-    iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-});
-
 
 const RotatorControlForm = () => {
 

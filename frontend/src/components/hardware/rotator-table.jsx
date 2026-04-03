@@ -23,7 +23,7 @@ import Box from '@mui/material/Box';
 import {DataGrid, gridClasses} from "@mui/x-data-grid";
 import Stack from "@mui/material/Stack";
 import {Alert, AlertTitle, Button, InputAdornment, MenuItem, TextField, Typography} from "@mui/material";
-import {useEffect, useState} from "react";
+import {useEffect, useMemo, useState} from "react";
 import { useTranslation } from 'react-i18next';
 import DialogTitle from "@mui/material/DialogTitle";
 import Dialog from "@mui/material/Dialog";
@@ -43,6 +43,8 @@ import {
     resetFormValues,
 } from './rotaror-slice.jsx';
 import Paper from "@mui/material/Paper";
+import {toRowSelectionModel, toSelectedIds} from '../../utils/datagrid-selection.js';
+import SelectionActionBar from './selection-action-bar.jsx';
 
 
 export default function AntennaRotatorTable() {
@@ -50,6 +52,7 @@ export default function AntennaRotatorTable() {
     const dispatch = useDispatch();
     const [selected, setSelected] = useState([]);
     const [pageSize, setPageSize] = useState(10);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
     const { t } = useTranslation('hardware');
     const {
         loading,
@@ -60,7 +63,10 @@ export default function AntennaRotatorTable() {
         openDeleteConfirm,
         formValues
     } = useSelector((state) => state.rotators);
+    const rowSelectionModel = useMemo(() => toRowSelectionModel(selected), [selected]);
     const isEditing = Boolean(formValues.id);
+    const requiresDeleteConfirmationText = selected.length > 1;
+    const canConfirmDelete = !requiresDeleteConfirmationText || deleteConfirmText.trim() === 'DELETE';
 
     const columns = [
         {field: 'name', headerName: t('rotator.name'), flex: 1, minWidth: 150},
@@ -81,10 +87,13 @@ export default function AntennaRotatorTable() {
         {field: 'maxaz', headerName: t('rotator.max_az'), type: 'number', flex: 1, minWidth: 80},
         {
             field: 'azimuth_mode',
-            headerName: 'Azimuth Range',
+            headerName: t('rotator.azimuth_range'),
             flex: 1,
             minWidth: 140,
-            valueFormatter: (value) => value === '-180_180' ? '-180 to 180' : '0 to 360'
+            valueFormatter: (value) =>
+                value === '-180_180'
+                    ? t('rotator.azimuth_mode_neg180_180')
+                    : t('rotator.azimuth_mode_0_360')
         },
         {field: 'minel', headerName: t('rotator.min_el'), type: 'number', flex: 1, minWidth: 80},
         {field: 'maxel', headerName: t('rotator.max_el'), type: 'number', flex: 1, minWidth: 80},
@@ -117,62 +126,62 @@ export default function AntennaRotatorTable() {
     }
 
     const validationErrors = {};
-    if (!formValues.name?.trim()) validationErrors.name = 'Required';
-    if (!formValues.host?.trim()) validationErrors.host = 'Required';
+    if (!formValues.name?.trim()) validationErrors.name = t('shared.required');
+    if (!formValues.host?.trim()) validationErrors.host = t('shared.required');
     if (!formValues.port && formValues.port !== 0) {
-        validationErrors.port = 'Required';
+        validationErrors.port = t('shared.required');
     } else if (Number(formValues.port) <= 0 || Number(formValues.port) > 65535) {
-        validationErrors.port = 'Port must be 1-65535';
+        validationErrors.port = t('shared.port_range');
     }
     const isEmptyValue = (value) => value === '' || value === null || value === undefined;
     if (isEmptyValue(formValues.minaz)) {
-        validationErrors.minaz = 'Required';
+        validationErrors.minaz = t('shared.required');
     } else if (Number.isNaN(Number(formValues.minaz))) {
-        validationErrors.minaz = 'Must be a number';
+        validationErrors.minaz = t('shared.must_be_number');
     }
     if (isEmptyValue(formValues.maxaz)) {
-        validationErrors.maxaz = 'Required';
+        validationErrors.maxaz = t('shared.required');
     } else if (Number.isNaN(Number(formValues.maxaz))) {
-        validationErrors.maxaz = 'Must be a number';
+        validationErrors.maxaz = t('shared.must_be_number');
     }
     if (!isEmptyValue(formValues.minaz)
         && !isEmptyValue(formValues.maxaz)
         && Number(formValues.minaz) > Number(formValues.maxaz)) {
-        validationErrors.minaz = 'Min azimuth must be <= max azimuth';
-        validationErrors.maxaz = 'Min azimuth must be <= max azimuth';
+        validationErrors.minaz = t('rotator.validation.min_az_lte_max_az');
+        validationErrors.maxaz = t('rotator.validation.min_az_lte_max_az');
     }
     if (!['0_360', '-180_180'].includes(formValues.azimuth_mode ?? '0_360')) {
-        validationErrors.azimuth_mode = 'Invalid azimuth mode';
+        validationErrors.azimuth_mode = t('rotator.validation.invalid_azimuth_mode');
     }
     if (isEmptyValue(formValues.minel)) {
-        validationErrors.minel = 'Required';
+        validationErrors.minel = t('shared.required');
     } else if (Number.isNaN(Number(formValues.minel))) {
-        validationErrors.minel = 'Must be a number';
+        validationErrors.minel = t('shared.must_be_number');
     }
     if (isEmptyValue(formValues.maxel)) {
-        validationErrors.maxel = 'Required';
+        validationErrors.maxel = t('shared.required');
     } else if (Number.isNaN(Number(formValues.maxel))) {
-        validationErrors.maxel = 'Must be a number';
+        validationErrors.maxel = t('shared.must_be_number');
     }
     if (!isEmptyValue(formValues.minel)
         && !isEmptyValue(formValues.maxel)
         && Number(formValues.minel) > Number(formValues.maxel)) {
-        validationErrors.minel = 'Min elevation must be <= max elevation';
-        validationErrors.maxel = 'Min elevation must be <= max elevation';
+        validationErrors.minel = t('rotator.validation.min_el_lte_max_el');
+        validationErrors.maxel = t('rotator.validation.min_el_lte_max_el');
     }
     if (isEmptyValue(formValues.aztolerance)) {
-        validationErrors.aztolerance = 'Required';
+        validationErrors.aztolerance = t('shared.required');
     } else if (Number.isNaN(Number(formValues.aztolerance))) {
-        validationErrors.aztolerance = 'Must be a number';
+        validationErrors.aztolerance = t('shared.must_be_number');
     } else if (Number(formValues.aztolerance) < 0) {
-        validationErrors.aztolerance = 'Must be >= 0';
+        validationErrors.aztolerance = t('shared.must_be_gte_zero');
     }
     if (isEmptyValue(formValues.eltolerance)) {
-        validationErrors.eltolerance = 'Required';
+        validationErrors.eltolerance = t('shared.required');
     } else if (Number.isNaN(Number(formValues.eltolerance))) {
-        validationErrors.eltolerance = 'Must be a number';
+        validationErrors.eltolerance = t('shared.must_be_number');
     } else if (Number(formValues.eltolerance) < 0) {
-        validationErrors.eltolerance = 'Must be >= 0';
+        validationErrors.eltolerance = t('shared.must_be_gte_zero');
     }
     const hasValidationErrors = Object.keys(validationErrors).length > 0;
 
@@ -201,9 +210,8 @@ export default function AntennaRotatorTable() {
                         rows={rotators}
                         columns={columns}
                         checkboxSelection
-                        disableSelectionOnClick
                         onRowSelectionModelChange={(selected) => {
-                            setSelected(selected);
+                            setSelected(toSelectedIds(selected));
                         }}
                         initialState={{
                             pagination: {paginationModel: {pageSize: 5}},
@@ -211,9 +219,9 @@ export default function AntennaRotatorTable() {
                                 sortModel: [{field: 'name', sort: 'desc'}],
                             },
                         }}
-                        selectionModel={selected}
+                        rowSelectionModel={rowSelectionModel}
                         pageSize={pageSize}
-                        pageSizeOptions={[5, 10, 25, {value: -1, label: 'All'}]}
+                        pageSizeOptions={[5, 10, 25, {value: -1, label: t('shared.all')}]}
                         onPageSizeChange={(newPageSize) => setPageSize(newPageSize)}
                         rowsPerPageOptions={[5, 10, 25]}
                         getRowId={(row) => row.id}
@@ -237,16 +245,49 @@ export default function AntennaRotatorTable() {
                             },
                         }}
                     />
+                    <SelectionActionBar
+                        selectedCount={selected.length}
+                        onClearSelection={() => setSelected([])}
+                        primaryActions={
+                            <>
+                                <Button
+                                    variant="contained"
+                                    onClick={() => {
+                                        dispatch(resetFormValues());
+                                        dispatch(setOpenAddDialog(true));
+                                    }}
+                                    disabled={loading}
+                                >
+                                    {t('rotator.add')}
+                                </Button>
+                                <Button
+                                    variant="contained"
+                                    disabled={selected.length !== 1 || loading}
+                                    onClick={() => {
+                                        const selectedRow = rotators.find(row => row.id === selected[0]);
+                                        if (selectedRow) {
+                                            dispatch(setFormValues(selectedRow));
+                                            dispatch(setOpenAddDialog(true));
+                                        }
+                                    }}
+                                >
+                                    {t('rotator.edit')}
+                                </Button>
+                                <Button
+                                    variant="contained"
+                                    disabled={selected.length < 1 || loading}
+                                    color="error"
+                                    onClick={() => {
+                                        setDeleteConfirmText('');
+                                        dispatch(setOpenDeleteConfirm(true));
+                                    }}
+                                >
+                                    {t('rotator.delete')}
+                                </Button>
+                            </>
+                        }
+                    />
                     <Stack direction="row" spacing={2} style={{marginTop: 15}}>
-                        <Button
-                            variant="contained"
-                            onClick={() => {
-                                dispatch(resetFormValues());
-                                dispatch(setOpenAddDialog(true));
-                            }}
-                        >
-                            {t('rotator.add')}
-                        </Button>
                         <Dialog
                             fullWidth={true}
                             open={openAddDialog}
@@ -329,7 +370,7 @@ export default function AntennaRotatorTable() {
                                     />
                                     <TextField
                                         name="azimuth_mode"
-                                        label="Azimuth Range"
+                                        label={t('rotator.azimuth_range')}
                                         select
                                         fullWidth
                                         size="small"
@@ -340,14 +381,14 @@ export default function AntennaRotatorTable() {
                                             validationErrors.azimuth_mode
                                             || (
                                                 (formValues.azimuth_mode ?? '0_360') === '-180_180'
-                                                    ? 'Sends values above 180 as negative (e.g. 270 -> -90) to reduce north-crossing unwind on supported rotators/controllers.'
-                                                    : 'Sends standard positive azimuth values in the 0 to 360 range (default behavior).'
+                                                    ? t('rotator.azimuth_mode_help_neg180_180')
+                                                    : t('rotator.azimuth_mode_help_0_360')
                                             )
                                         }
                                         required
                                     >
-                                        <MenuItem value="0_360">0 to 360</MenuItem>
-                                        <MenuItem value="-180_180">-180 to 180</MenuItem>
+                                        <MenuItem value="0_360">{t('rotator.azimuth_mode_0_360')}</MenuItem>
+                                        <MenuItem value="-180_180">{t('rotator.azimuth_mode_neg180_180')}</MenuItem>
                                     </TextField>
                                     <TextField
                                         name="minel"
@@ -374,9 +415,7 @@ export default function AntennaRotatorTable() {
                                         InputProps={{ endAdornment: <InputAdornment position="end">°</InputAdornment> }}
                                     />
                                     <Alert severity="warning" sx={{ mt: 0.5 }}>
-                                        Tolerance settings control the deadband for rotator movement. Setting these
-                                        values too low can cause excessive commands, jitter, or errors on some hardware.
-                                        Default safe value is 2°.
+                                        {t('rotator.tolerance_warning')}
                                     </Alert>
                                     <TextField
                                         name="aztolerance"
@@ -387,7 +426,7 @@ export default function AntennaRotatorTable() {
                                         onChange={handleChange}
                                         value={formValues.aztolerance}
                                         error={Boolean(validationErrors.aztolerance)}
-                                        helperText={validationErrors.aztolerance ? validationErrors.aztolerance : 'Lower values may stress some rotators.'}
+                                        helperText={validationErrors.aztolerance ? validationErrors.aztolerance : t('rotator.tolerance_helper')}
                                         required
                                         InputProps={{
                                             endAdornment: (
@@ -413,7 +452,7 @@ export default function AntennaRotatorTable() {
                                         onChange={handleChange}
                                         value={formValues.eltolerance}
                                         error={Boolean(validationErrors.eltolerance)}
-                                        helperText={validationErrors.eltolerance ? validationErrors.eltolerance : 'Lower values may stress some rotators.'}
+                                        helperText={validationErrors.eltolerance ? validationErrors.eltolerance : t('rotator.tolerance_helper')}
                                         required
                                         InputProps={{
                                             endAdornment: (
@@ -458,36 +497,18 @@ export default function AntennaRotatorTable() {
                                     color="success"
                                     variant="contained"
                                     onClick={handleSubmit}
-                                    disabled={hasValidationErrors}
+                                    disabled={hasValidationErrors || loading}
                                 >
                                     {t('rotator.submit')}
                                 </Button>
                             </DialogActions>
                         </Dialog>
-                        <Button
-                            variant="contained"
-                            disabled={selected.length !== 1}
-                            onClick={() => {
-                                const selectedRow = rotators.find(row => row.id === selected[0]);
-                                if (selectedRow) {
-                                    dispatch(setFormValues(selectedRow));
-                                    dispatch(setOpenAddDialog(true));
-                                }
-                            }}
-                        >
-                            {t('rotator.edit')}
-                        </Button>
-                        <Button
-                            variant="contained"
-                            disabled={selected.length < 1}
-                            color="error"
-                            onClick={() => dispatch(setOpenDeleteConfirm(true))}
-                        >
-                            {t('rotator.delete')}
-                        </Button>
                         <Dialog
                             open={openDeleteConfirm}
-                            onClose={() => dispatch(setOpenDeleteConfirm(false))}
+                            onClose={() => {
+                                setDeleteConfirmText('');
+                                dispatch(setOpenDeleteConfirm(false));
+                            }}
                             maxWidth="sm"
                             fullWidth
                             PaperProps={{
@@ -533,8 +554,20 @@ export default function AntennaRotatorTable() {
                                     {t('rotator.confirm_delete_message')}
                                 </Typography>
                                 <Typography variant="body2" sx={{ mb: 2, fontWeight: 600, color: 'text.secondary' }}>
-                                    {selected.length === 1 ? 'Rotator to be deleted:' : `${selected.length} Rotators to be deleted:`}
+                                    {selected.length === 1
+                                        ? t('rotator.delete_list_single')
+                                        : t('rotator.delete_list_plural', { count: selected.length })}
                                 </Typography>
+                                {requiresDeleteConfirmationText && (
+                                    <TextField
+                                        fullWidth
+                                        size="small"
+                                        label={t('common.type_delete_to_confirm', 'Type DELETE to confirm')}
+                                        value={deleteConfirmText}
+                                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                                        sx={{ mb: 2 }}
+                                    />
+                                )}
                                 <Box sx={{
                                     maxHeight: 300,
                                     overflowY: 'auto',
@@ -558,21 +591,21 @@ export default function AntennaRotatorTable() {
                                                 </Typography>
                                                 <Box sx={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 1, columnGap: 2 }}>
                                                     <Typography variant="body2" sx={{ fontSize: '0.813rem', color: 'text.secondary', fontWeight: 500 }}>
-                                                        Host:
+                                                        {t('rotator.host')}:
                                                     </Typography>
                                                     <Typography variant="body2" sx={{ fontSize: '0.813rem', color: 'text.primary' }}>
                                                         {rotator.host}:{rotator.port}
                                                     </Typography>
 
                                                     <Typography variant="body2" sx={{ fontSize: '0.813rem', color: 'text.secondary', fontWeight: 500 }}>
-                                                        Azimuth:
+                                                        {t('rotator.azimuth_range')}:
                                                     </Typography>
                                                     <Typography variant="body2" sx={{ fontSize: '0.813rem', color: 'text.primary' }}>
                                                         {rotator.minaz}° - {rotator.maxaz}°
                                                     </Typography>
 
                                                     <Typography variant="body2" sx={{ fontSize: '0.813rem', color: 'text.secondary', fontWeight: 500 }}>
-                                                        Elevation:
+                                                        {t('rotator.elevation_range')}:
                                                     </Typography>
                                                     <Typography variant="body2" sx={{ fontSize: '0.813rem', color: 'text.primary' }}>
                                                         {rotator.minel}° - {rotator.maxel}°
@@ -608,6 +641,7 @@ export default function AntennaRotatorTable() {
                                     variant="contained"
                                     onClick={handleDelete}
                                     color="error"
+                                    disabled={!canConfirmDelete || loading}
                                     sx={{
                                         minWidth: 100,
                                         textTransform: 'none',

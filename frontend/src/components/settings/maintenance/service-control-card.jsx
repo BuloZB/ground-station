@@ -17,124 +17,263 @@
  *
  */
 
-import React, { useState } from 'react';
-import { Typography, Divider, Button, Dialog, DialogTitle, DialogContent, DialogActions, Alert, AlertTitle, CircularProgress } from '@mui/material';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+    Alert,
+    AlertTitle,
+    Box,
+    Button,
+    Chip,
+    CircularProgress,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    Divider,
+    Stack,
+    Typography,
+} from '@mui/material';
 import Grid from '@mui/material/Grid';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import { useSocket } from "../../common/socket.jsx";
+import { useSocket } from '../../common/socket.jsx';
 import { useTranslation } from 'react-i18next';
+
+const RESTART_COUNTDOWN_SECONDS = 15;
 
 const ServiceControlCard = () => {
     const { socket } = useSocket();
     const { t } = useTranslation('settings');
-    const [isRestarting, setIsRestarting] = useState(false);
-    const [restartMessage, setRestartMessage] = useState('');
+
     const [confirmRestartOpen, setConfirmRestartOpen] = useState(false);
+    const [restartState, setRestartState] = useState('idle');
+    const [statusMessage, setStatusMessage] = useState('');
+    const [countdown, setCountdown] = useState(RESTART_COUNTDOWN_SECONDS);
+    const [requestedAt, setRequestedAt] = useState(null);
+
+    const countdownIntervalRef = useRef(null);
+
+    const isRestarting = restartState === 'requesting' || restartState === 'countdown';
+
+    useEffect(() => {
+        return () => {
+            if (countdownIntervalRef.current) {
+                clearInterval(countdownIntervalRef.current);
+                countdownIntervalRef.current = null;
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (restartState !== 'countdown') {
+            return undefined;
+        }
+
+        if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+        }
+
+        countdownIntervalRef.current = setInterval(() => {
+            setCountdown((current) => {
+                if (current <= 1) {
+                    if (countdownIntervalRef.current) {
+                        clearInterval(countdownIntervalRef.current);
+                        countdownIntervalRef.current = null;
+                    }
+                    setRestartState('reloading');
+                    setStatusMessage(t('maintenance.restart_reloading_now', { defaultValue: 'Reloading now to reconnect to service...' }));
+                    window.location.reload();
+                    return 0;
+                }
+                return current - 1;
+            });
+        }, 1000);
+
+        return () => {
+            if (countdownIntervalRef.current) {
+                clearInterval(countdownIntervalRef.current);
+                countdownIntervalRef.current = null;
+            }
+        };
+    }, [restartState, t]);
 
     const handleServiceRestart = () => {
+        if (!socket) {
+            setRestartState('error');
+            setStatusMessage(t('maintenance.restart_no_socket', { defaultValue: 'No active socket connection. Please reconnect and try again.' }));
+            return;
+        }
+
         setConfirmRestartOpen(false);
-        setIsRestarting(true);
-        setRestartMessage('Initiating service restart...');
+        setRestartState('requesting');
+        setStatusMessage(t('maintenance.restart_requesting', { defaultValue: 'Sending restart request to backend service...' }));
 
-        socket.emit("service_control", "restart_service", null, (response) => {
-            if (response.status === "success") {
-                setRestartMessage('Service is restarting. All connections will be terminated.');
+        const now = new Date();
+        setRequestedAt(now);
 
-                // Start countdown
-                let countdown = 15;
-                const countdownInterval = setInterval(() => {
-                    setRestartMessage(`Service restarting... Page will reload in ${countdown} seconds`);
-                    countdown--;
-
-                    if (countdown <= 0) {
-                        clearInterval(countdownInterval);
-                    }
-                }, 1000);
-            } else {
-                console.error('Service restart failed:', response.error);
-                setRestartMessage(`Failed to restart service: ${response.error}`);
-                setIsRestarting(false);
+        socket.emit('service_control', 'restart_service', null, (response) => {
+            if (response?.status === 'success') {
+                setCountdown(RESTART_COUNTDOWN_SECONDS);
+                setRestartState('countdown');
+                setStatusMessage(
+                    t('maintenance.restart_accepted', {
+                        defaultValue: 'Restart accepted. Existing connections will terminate. Auto-reload starts in {{seconds}} seconds.',
+                        seconds: RESTART_COUNTDOWN_SECONDS,
+                    })
+                );
+                return;
             }
+
+            setRestartState('error');
+            setStatusMessage(
+                t('maintenance.restart_failed', {
+                    defaultValue: 'Failed to restart service: {{error}}',
+                    error: response?.error || t('maintenance.unknown_error', { defaultValue: 'unknown error' }),
+                })
+            );
         });
     };
+
+    const statusSeverity = restartState === 'error' ? 'error' : 'warning';
+
+    const statusText = restartState === 'countdown'
+        ? t('maintenance.restart_countdown_message', {
+            defaultValue: 'Service restarting. Page reload in {{seconds}} seconds.',
+            seconds: countdown,
+        })
+        : statusMessage;
 
     return (
         <>
             <Typography variant="h6" gutterBottom>
-                Service Control
+                {t('maintenance.service_control_header', { defaultValue: 'Service Control' })}
             </Typography>
             <Divider sx={{ mb: 2 }} />
 
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                    <AlertTitle>{t('maintenance.service_control_title')}</AlertTitle>
-                    {t('maintenance.service_control_subtitle')}
-                </Alert>
+            <Alert severity={statusSeverity} sx={{ mb: 2 }} role="status" aria-live="polite">
+                <AlertTitle>{t('maintenance.service_control_title')}</AlertTitle>
+                {t('maintenance.service_control_subtitle')}
+                {statusText && (
+                    <Typography variant="body2" sx={{ mt: 0.75, fontWeight: 600 }}>
+                        {statusText}
+                    </Typography>
+                )}
+            </Alert>
 
-                <Grid container spacing={2} columns={16}>
-                    <Grid size={10}>
-                        {t('maintenance.restart_service')}
+            <Grid container spacing={2} columns={12}>
+                <Grid size={{ xs: 12, md: 8 }}>
+                    <Stack spacing={0.75}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                            {t('maintenance.restart_service')}
+                        </Typography>
                         <Typography variant="body2" color="text.secondary">
                             {t('maintenance.restart_service_description')}
                         </Typography>
-                    </Grid>
-                    <Grid size={6} sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Button
-                            variant="contained"
-                            color="error"
-                            startIcon={isRestarting ? <CircularProgress size={20} color="inherit" /> : <RestartAltIcon />}
-                            onClick={() => setConfirmRestartOpen(true)}
-                            disabled={isRestarting}
-                            fullWidth
-                            size="small"
-                        >
-                            {isRestarting ? t('maintenance.restarting') : t('maintenance.restart_service_button')}
-                        </Button>
-                    </Grid>
-
-                    {restartMessage && (
-                        <Grid size={16}>
-                            <Alert
-                                severity={restartMessage.includes('Failed') ? "error" : "warning"}
-                                sx={{ mt: 1 }}
-                            >
-                                {restartMessage}
-                            </Alert>
-                        </Grid>
-                    )}
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                            <Chip
+                                size="small"
+                                color={socket?.connected ? 'success' : 'default'}
+                                label={socket?.connected
+                                    ? t('maintenance.socket_connected', { defaultValue: 'Socket connected' })
+                                    : t('maintenance.socket_disconnected', { defaultValue: 'Socket disconnected' })}
+                            />
+                            {requestedAt && (
+                                <Chip
+                                    size="small"
+                                    variant="outlined"
+                                    label={t('maintenance.requested_at', {
+                                        defaultValue: 'Requested at: {{time}}',
+                                        time: requestedAt.toLocaleTimeString(),
+                                    })}
+                                />
+                            )}
+                        </Stack>
+                    </Stack>
                 </Grid>
 
-            {/* Service Restart Confirmation Dialog */}
-            <Dialog open={confirmRestartOpen} onClose={() => setConfirmRestartOpen(false)}>
+                <Grid size={{ xs: 12, md: 4 }} sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Button
+                        variant="contained"
+                        color="error"
+                        startIcon={isRestarting ? <CircularProgress size={20} color="inherit" /> : <RestartAltIcon />}
+                        onClick={() => setConfirmRestartOpen(true)}
+                        disabled={isRestarting}
+                        fullWidth
+                    >
+                        {isRestarting ? t('maintenance.restarting') : t('maintenance.restart_service_button')}
+                    </Button>
+                </Grid>
+
+            </Grid>
+
+            <Dialog
+                open={confirmRestartOpen}
+                onClose={() => !isRestarting && setConfirmRestartOpen(false)}
+                fullWidth
+                maxWidth="sm"
+            >
                 <DialogTitle>{t('maintenance.confirm_restart_title')}</DialogTitle>
                 <DialogContent>
-                    <Typography paragraph>
-                        {t('maintenance.confirm_restart_message')}
-                    </Typography>
-                    <ul>
-                        <li>{t('maintenance.restart_item_1')}</li>
-                        <li>{t('maintenance.restart_item_2')}</li>
-                        <li>{t('maintenance.restart_item_3')}</li>
-                        <li>{t('maintenance.restart_item_4')}</li>
-                        <li>{t('maintenance.restart_item_5')}</li>
-                        <li>{t('maintenance.restart_item_6')}</li>
-                    </ul>
-                    <Typography paragraph>
-                        {t('maintenance.confirm_restart_question')}
-                    </Typography>
+                    <Stack spacing={1.5}>
+                        <Typography variant="body2">
+                            {t('maintenance.confirm_restart_message')}
+                        </Typography>
 
-                    <Alert severity="info" sx={{ mt: 2 }}>
-                        <AlertTitle>{t('maintenance.deployment_note')}</AlertTitle>
-                        <Typography variant="body2">
-                            <strong>Docker deployment:</strong> {t('maintenance.deployment_docker')}
+                        <Box>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                {t('maintenance.impact_title', { defaultValue: 'What will happen' })}
+                            </Typography>
+                            <Box component="ul" sx={{ mt: 0.5, mb: 0, pl: 2 }}>
+                                <li>{t('maintenance.restart_item_1')}</li>
+                                <li>{t('maintenance.restart_item_2')}</li>
+                                <li>{t('maintenance.restart_item_3')}</li>
+                                <li>{t('maintenance.restart_item_4')}</li>
+                                <li>{t('maintenance.restart_item_5')}</li>
+                                <li>{t('maintenance.restart_item_6')}</li>
+                            </Box>
+                        </Box>
+
+                        <Box
+                            sx={{
+                                border: '1px solid',
+                                borderColor: 'info.main',
+                                borderRadius: 1,
+                                p: 1.5,
+                                backgroundColor: 'action.hover',
+                            }}
+                        >
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.75 }}>
+                                {t('maintenance.deployment_note')}
+                            </Typography>
+                            <Typography variant="body2" sx={{ mb: 0.5 }}>
+                                <strong>{t('maintenance.deployment_docker_label', { defaultValue: 'Docker deployment:' })}</strong>{' '}
+                                {t('maintenance.deployment_docker')}
+                            </Typography>
+                            <Typography variant="body2">
+                                <strong>{t('maintenance.deployment_standalone_label', { defaultValue: 'Standalone/Development deployment:' })}</strong>{' '}
+                                {t('maintenance.deployment_standalone')}
+                            </Typography>
+                        </Box>
+
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {t('maintenance.confirm_restart_question')}
                         </Typography>
-                        <Typography variant="body2">
-                            <strong>Standalone/Development deployment:</strong> {t('maintenance.deployment_standalone')}
-                        </Typography>
-                    </Alert>
+                    </Stack>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setConfirmRestartOpen(false)}>{t('maintenance.cancel')}</Button>
-                    <Button onClick={handleServiceRestart} color="error" variant="contained">
+                    <Button
+                        onClick={() => setConfirmRestartOpen(false)}
+                        disabled={isRestarting}
+                    >
+                        {t('maintenance.cancel')}
+                    </Button>
+                    <Button
+                        onClick={handleServiceRestart}
+                        color="error"
+                        variant="contained"
+                        disabled={isRestarting}
+                        startIcon={isRestarting ? <CircularProgress size={18} color="inherit" /> : null}
+                    >
                         {t('maintenance.yes_restart')}
                     </Button>
                 </DialogActions>

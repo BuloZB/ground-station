@@ -17,136 +17,401 @@
  *
  */
 
-import Paper from "@mui/material/Paper";
-import { Box } from "@mui/material";
-import Grid from "@mui/material/Grid";
-import React, { useState } from "react";
-import { tabsClasses } from '@mui/material/Tabs';
-import { AntTab, AntTabs } from "../common/common.jsx";
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import {
-    GridLayoutStorageCard,
-    ReduxPersistentSettingsCard,
-    ServiceControlCard,
-    CanvasDebugCard,
+    Box,
+    Chip,
+    Grid,
+    Paper,
+    Stack,
+    Typography,
+} from '@mui/material';
+import { tabsClasses } from '@mui/material/Tabs';
+import StorageIcon from '@mui/icons-material/Storage';
+import DashboardCustomizeIcon from '@mui/icons-material/DashboardCustomize';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
+import BugReportIcon from '@mui/icons-material/BugReport';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
+import MemoryIcon from '@mui/icons-material/Memory';
+import DnsIcon from '@mui/icons-material/Dns';
+import HistoryIcon from '@mui/icons-material/History';
+import ArticleIcon from '@mui/icons-material/Article';
+import { useTranslation } from 'react-i18next';
+import { AntTab, AntTabs } from '../common/common.jsx';
+import {
     BrowserFeaturesCard,
-    SocketInfoCard,
-    LibraryVersionsCard,
-    ReduxStateInspectorCard,
+    CanvasDebugCard,
     DatabaseBackupCard,
-    TransmitterImportCard,
-    SystemInfoCard,
+    EventLogConsoleCard,
+    GridLayoutStorageCard,
+    LibraryVersionsCard,
+    ReduxPersistentSettingsCard,
+    ReduxStateInspectorCard,
+    ServiceControlCard,
     SessionSnapshotCard,
-    EventLogConsoleCard
+    SocketInfoCard,
+    SystemInfoCard,
+    TransmitterImportCard,
 } from './maintenance/index.jsx';
 
-const MaintenanceForm = () => {
-    // Main tab state
-    const [mainTab, setMainTab] = useState(0);
+const TAB_QUERY_PARAM = 'mtab';
 
-    // TabPanel component for tab content
-    const TabPanel = ({ children, value, index }) => (
-        <div role="tabpanel" hidden={value !== index}>
-            {value === index && <Paper elevation={1} sx={{ p: 2 }}>{children}</Paper>}
-        </div>
+const MaintenanceForm = () => {
+    const { t } = useTranslation('settings');
+    const location = useLocation();
+    const navigate = useNavigate();
+    const panelRef = useRef(null);
+
+    const tabMeta = useMemo(() => ([
+        {
+            key: 'frontend-state',
+            group: 'state',
+            label: t('maintenance.tabs.frontend_state', { defaultValue: 'Frontend State' }),
+            subtitle: t('maintenance.tabs.frontend_state_subtitle', { defaultValue: 'Local storage and persisted client state' }),
+            icon: <DashboardCustomizeIcon fontSize="small" />,
+        },
+        {
+            key: 'redux-inspector',
+            group: 'state',
+            label: t('maintenance.tabs.redux_inspector', { defaultValue: 'Redux Inspector' }),
+            subtitle: t('maintenance.tabs.redux_inspector_subtitle', { defaultValue: 'Inspect and debug Redux state' }),
+            icon: <AccountTreeIcon fontSize="small" />,
+        },
+        {
+            key: 'sessions',
+            group: 'state',
+            label: t('maintenance.tabs.sessions', { defaultValue: 'Sessions' }),
+            subtitle: t('maintenance.tabs.sessions_subtitle', { defaultValue: 'Connected clients and runtime snapshots' }),
+            icon: <HistoryIcon fontSize="small" />,
+        },
+        {
+            key: 'message-log',
+            group: 'state',
+            label: t('maintenance.tabs.message_log', { defaultValue: 'Message Log' }),
+            subtitle: t('maintenance.tabs.message_log_subtitle', { defaultValue: 'Realtime event stream and console output' }),
+            icon: <ArticleIcon fontSize="small" />,
+        },
+        {
+            key: 'diagnostics',
+            group: 'diagnostics',
+            label: t('maintenance.tabs.diagnostics', { defaultValue: 'Diagnostics' }),
+            subtitle: t('maintenance.tabs.diagnostics_subtitle', { defaultValue: 'Browser and socket diagnostics' }),
+            icon: <BugReportIcon fontSize="small" />,
+        },
+        {
+            key: 'dependencies',
+            group: 'diagnostics',
+            label: t('maintenance.tabs.dependencies', { defaultValue: 'Dependencies' }),
+            subtitle: t('maintenance.tabs.dependencies_subtitle', { defaultValue: 'Library and runtime version inventory' }),
+            icon: <Inventory2Icon fontSize="small" />,
+        },
+        {
+            key: 'system-info',
+            group: 'diagnostics',
+            label: t('maintenance.tabs.system_info', { defaultValue: 'System Info' }),
+            subtitle: t('maintenance.tabs.system_info_subtitle', { defaultValue: 'Host metrics and machine details' }),
+            icon: <DnsIcon fontSize="small" />,
+        },
+        {
+            key: 'system-control',
+            group: 'operations',
+            label: t('maintenance.tabs.system_control', { defaultValue: 'System Control' }),
+            subtitle: t('maintenance.tabs.system_control_subtitle', { defaultValue: 'Service-level restart and control actions' }),
+            icon: <PowerSettingsNewIcon fontSize="small" />,
+            risk: 'danger',
+            riskLabel: t('maintenance.tabs.risk_danger', { defaultValue: 'Danger' }),
+        },
+        {
+            key: 'database',
+            group: 'operations',
+            label: t('maintenance.tabs.database', { defaultValue: 'Database' }),
+            subtitle: t('maintenance.tabs.database_subtitle', { defaultValue: 'Backup, restore, and transmitter import' }),
+            icon: <StorageIcon fontSize="small" />,
+            risk: 'danger',
+            riskLabel: t('maintenance.tabs.risk_danger', { defaultValue: 'Danger' }),
+        },
+    ]), [t]);
+
+    const tabByKey = useMemo(
+        () => Object.fromEntries(tabMeta.map((tab) => [tab.key, tab])),
+        [tabMeta]
     );
 
+    const getInitialTabKey = () => {
+        const params = new URLSearchParams(location.search);
+        const queryTab = params.get(TAB_QUERY_PARAM);
+        return queryTab && tabByKey[queryTab] ? queryTab : 'frontend-state';
+    };
+
+    const [activeTabKey, setActiveTabKey] = useState(getInitialTabKey);
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const queryTab = params.get(TAB_QUERY_PARAM);
+        if (queryTab && tabByKey[queryTab]) {
+            setActiveTabKey((current) => (current === queryTab ? current : queryTab));
+        }
+    }, [location.search, tabByKey]);
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        if (params.get(TAB_QUERY_PARAM) !== activeTabKey) {
+            params.set(TAB_QUERY_PARAM, activeTabKey);
+            navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+        }
+    }, [activeTabKey, location.pathname, location.search, navigate]);
+
+    useEffect(() => {
+        if (panelRef.current) {
+            // Keep keyboard accessibility focus without forcing viewport scroll.
+            panelRef.current.focus({ preventScroll: true });
+        }
+    }, [activeTabKey]);
+
+    const activeTab = tabByKey[activeTabKey] || tabMeta[0];
+
+    const renderTabLabel = (tab) => (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 0.25 }}>
+            <Box sx={{ textAlign: 'left' }}>
+                <Typography
+                    variant="body2"
+                    sx={{
+                        lineHeight: 1.2,
+                        color: tab.risk === 'danger' ? 'warning.main' : 'text.primary',
+                    }}
+                >
+                    {tab.label}
+                </Typography>
+            </Box>
+            {tab.risk === 'danger' && (
+                <Chip
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    label={tab.riskLabel}
+                    sx={{ display: { xs: 'none', xl: 'inline-flex' } }}
+                />
+            )}
+        </Stack>
+    );
+
+    const TabPanel = ({ tabKey, children }) => {
+        const isActive = activeTabKey === tabKey;
+        return (
+            <Box
+                role="tabpanel"
+                id={`maintenance-tabpanel-${tabKey}`}
+                aria-labelledby={`maintenance-tab-${tabKey}`}
+                hidden={!isActive}
+                tabIndex={isActive ? 0 : -1}
+                ref={isActive ? panelRef : null}
+                sx={{ outline: 'none' }}
+            >
+                {isActive && (
+                    <Box sx={{ p: { xs: 1, sm: 1.5, md: 2 } }}>
+                        {children}
+                    </Box>
+                )}
+            </Box>
+        );
+    };
+
     return (
-        <Paper elevation={0} sx={{ padding: 0, marginTop: 0  }}>
-            <Box component="form" sx={{ mt: 0, p: 0, bgcolor: 'background.paper' }}>
+        <Paper elevation={3} sx={{ p: 0, mt: 0 }}>
+            <Box>
                 <AntTabs
-                    value={mainTab}
-                    onChange={(e, newValue) => setMainTab(newValue)}
+                    value={activeTabKey}
+                    onChange={(_event, newValue) => setActiveTabKey(newValue)}
+                    variant="scrollable"
+                    scrollButtons
+                    allowScrollButtonsMobile
+                    aria-label={t('maintenance.tabs.aria', { defaultValue: 'maintenance tabs' })}
                     sx={{
                         borderBottom: 1,
                         borderColor: 'divider',
-                        mb: 0,
+                        mb: 1,
+                        '& .MuiTabs-indicator': {
+                            display: 'none',
+                        },
+                        '& .MuiTab-root.Mui-selected': {
+                            backgroundColor: 'action.selected',
+                            color: 'text.primary',
+                        },
                         [`& .${tabsClasses.scrollButtons}`]: {
                             '&.Mui-disabled': { opacity: 0.3 },
                         },
                     }}
-                    scrollButtons
-                    allowScrollButtonsMobile
-                    variant="scrollable"
-                    aria-label="maintenance tabs"
                 >
-                    <AntTab value={0} label="Frontend State" />
-                    <AntTab value={1} label="Redux Inspector" />
-                    <AntTab value={2} label="System Control" />
-                    <AntTab value={3} label="Diagnostics" />
-                    <AntTab value={4} label="Database" />
-                    <AntTab value={5} label="Dependencies" />
-                    <AntTab value={6} label="System Info" />
-                    <AntTab value={7} label="Sessions" />
-                    <AntTab value={8} label="Message log" />
+                    {tabMeta.map((tab) => (
+                        <AntTab
+                            key={tab.key}
+                            value={tab.key}
+                            id={`maintenance-tab-${tab.key}`}
+                            aria-controls={`maintenance-tabpanel-${tab.key}`}
+                            label={renderTabLabel(tab)}
+                        />
+                    ))}
                 </AntTabs>
 
-                {/* Tab 0: Frontend State */}
-                <TabPanel value={mainTab} index={0}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <GridLayoutStorageCard />
+                <TabPanel tabKey="frontend-state">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12, md: 6 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        height: '100%',
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <GridLayoutStorageCard />
+                                </Paper>
+                            </Grid>
+                            <Grid size={{ xs: 12, md: 6 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        height: '100%',
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <ReduxPersistentSettingsCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <ReduxPersistentSettingsCard />
-                        </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
 
-                {/* Tab 1: Redux Inspector */}
-                <TabPanel value={mainTab} index={1}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12 }}>
-                            <ReduxStateInspectorCard />
+                <TabPanel tabKey="redux-inspector">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <ReduxStateInspectorCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
 
-                {/* Tab 2: System Control */}
-                <TabPanel value={mainTab} index={2}>
-                    <Grid container spacing={2}>
-                        <Grid size={12}>
-                            <ServiceControlCard />
+                <TabPanel tabKey="system-control">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <ServiceControlCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
 
-                {/* Tab 3: Diagnostics */}
-                <TabPanel value={mainTab} index={3}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <BrowserFeaturesCard />
-                            <CanvasDebugCard />
-                        </Grid>
+                <TabPanel tabKey="diagnostics">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12, md: 6 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                        height: '100%',
+                                    }}
+                                >
+                                    <BrowserFeaturesCard />
+                                    <CanvasDebugCard />
+                                </Paper>
+                            </Grid>
 
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <SocketInfoCard />
+                            <Grid size={{ xs: 12, md: 6 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                        height: '100%',
+                                    }}
+                                >
+                                    <SocketInfoCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
 
-                {/* Tab 4: Database */}
-                <TabPanel value={mainTab} index={4}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12 }}>
-                            <DatabaseBackupCard />
+                <TabPanel tabKey="database">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <DatabaseBackupCard />
+                                </Paper>
+                            </Grid>
+                            <Grid size={{ xs: 12 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <TransmitterImportCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                        <Grid size={{ xs: 12 }}>
-                            <TransmitterImportCard />
-                        </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
 
-                {/* Tab 5: Dependencies */}
-                <TabPanel value={mainTab} index={5}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12 }}>
-                            <LibraryVersionsCard />
+                <TabPanel tabKey="dependencies">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <LibraryVersionsCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
 
-                {/* Tab 6: System Info */}
-                <TabPanel value={mainTab} index={6}>
+                <TabPanel tabKey="system-info">
                     <Grid container spacing={2}>
                         <Grid size={{ xs: 12 }}>
                             <SystemInfoCard />
@@ -154,22 +419,42 @@ const MaintenanceForm = () => {
                     </Grid>
                 </TabPanel>
 
-                {/* Tab 7: Sessions Snapshot */}
-                <TabPanel value={mainTab} index={7}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12 }}>
-                            <SessionSnapshotCard />
+                <TabPanel tabKey="sessions">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <SessionSnapshotCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
 
-                {/* Tab 8: Message log */}
-                <TabPanel value={mainTab} index={8}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12 }}>
-                            <EventLogConsoleCard />
+                <TabPanel tabKey="message-log">
+                    <Stack spacing={2}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12 }}>
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        borderColor: 'divider',
+                                        borderRadius: 1.5,
+                                    }}
+                                >
+                                    <EventLogConsoleCard />
+                                </Paper>
+                            </Grid>
                         </Grid>
-                    </Grid>
+                    </Stack>
                 </TabPanel>
             </Box>
         </Paper>

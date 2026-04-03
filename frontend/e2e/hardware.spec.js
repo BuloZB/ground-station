@@ -18,16 +18,30 @@ const openAddDialogWithLocationFallback = async (page) => {
   const getAddButton = () => page.locator('button', { hasText: /add|new|create/i }).first();
 
   try {
-    await getAddButton().waitFor({ state: 'visible', timeout: 5000 });
+    await expect(getAddButton()).toBeVisible({ timeout: 5000 });
+    await expect(getAddButton()).toBeEnabled({ timeout: 10000 });
   } catch {
     await ensureLocationIsSet(page);
     await page.goto(currentUrl);
     await page.waitForLoadState('domcontentloaded');
-    await getAddButton().waitFor({ state: 'visible' });
+    await expect(getAddButton()).toBeVisible();
+    await expect(getAddButton()).toBeEnabled({ timeout: 10000 });
   }
 
+  await getAddButton().scrollIntoViewIfNeeded();
   await getAddButton().click();
   return page.getByRole('dialog');
+};
+
+const confirmDeleteInDialog = async (dialog) => {
+  const typeDeleteInput = dialog.getByLabel(/type delete to confirm/i);
+  if (await typeDeleteInput.isVisible().catch(() => false)) {
+    await typeDeleteInput.fill('DELETE');
+  }
+
+  const confirmButton = dialog.getByRole('button', { name: /^delete$/i });
+  await expect(confirmButton).toBeEnabled();
+  await confirmButton.click();
 };
 
 test.describe('Rig Configuration', () => {
@@ -141,7 +155,7 @@ test.describe('Rig Configuration', () => {
 
     await page.getByRole('button', { name: /^delete$/i }).click();
     const deleteDialog = page.getByRole('dialog');
-    await deleteDialog.getByRole('button', { name: /^delete$/i }).click();
+    await confirmDeleteInDialog(deleteDialog);
     await expect(page.locator('.MuiDataGrid-row').filter({ hasText: rigNameA })).toHaveCount(0);
     await expect(page.locator('.MuiDataGrid-row').filter({ hasText: rigNameB })).toHaveCount(0);
   });
@@ -268,7 +282,7 @@ test.describe('Rotator Configuration', () => {
 
     await page.getByRole('button', { name: /^delete$/i }).click();
     const deleteDialog = page.getByRole('dialog');
-    await deleteDialog.getByRole('button', { name: /^delete$/i }).click();
+    await confirmDeleteInDialog(deleteDialog);
     await expect(page.locator('.MuiDataGrid-row').filter({ hasText: rotatorNameA })).toHaveCount(0);
     await expect(page.locator('.MuiDataGrid-row').filter({ hasText: rotatorNameB })).toHaveCount(0);
   });
@@ -426,7 +440,7 @@ test.describe('SDR Configuration', () => {
 
     await page.getByRole('button', { name: /^delete$/i }).click();
     const deleteDialog = page.getByRole('dialog');
-    await deleteDialog.getByRole('button', { name: /^delete$/i }).click();
+    await confirmDeleteInDialog(deleteDialog);
 
     await expect(page.locator('.MuiDataGrid-row').filter({ hasText: nameA })).toHaveCount(0);
     await expect(page.locator('.MuiDataGrid-row').filter({ hasText: nameB })).toHaveCount(0);

@@ -1,5 +1,7 @@
 # Copyright (c) 2025 Efstratios Goudelis
 
+import time
+
 import pytest
 
 from tracker.rotatorhandler import RotatorHandler
@@ -64,3 +66,55 @@ async def test_tracking_command_stays_0_to_360_in_default_mode():
     await handler.control_rotator_position((270.0, 45.0))
 
     assert sent == [(270.0, 45.0)]
+
+
+def test_target_within_tolerance_handles_wraparound():
+    tracker = _DummyTracker("0_360")
+    handler = RotatorHandler(tracker)
+
+    tracker.az_tolerance = 3.0
+    tracker.el_tolerance = 2.0
+
+    assert handler._target_within_tolerance(359.0, 45.0, 1.0, 45.0)
+
+
+def test_target_within_tolerance_handles_mixed_azimuth_representations():
+    tracker = _DummyTracker("-180_180")
+    handler = RotatorHandler(tracker)
+
+    tracker.az_tolerance = 2.0
+    tracker.el_tolerance = 2.0
+
+    assert handler._target_within_tolerance(270.0, 20.0, -90.0, 20.0)
+
+
+@pytest.mark.asyncio
+async def test_in_flight_command_settles_across_0_360_boundary():
+    tracker = _DummyTracker("0_360")
+    handler = RotatorHandler(tracker)
+
+    tracker.rotator_data["az"] = 359.0
+    tracker.rotator_data["el"] = 45.0
+    tracker.rotator_command_state.update(
+        {
+            "in_flight": True,
+            "target_az": 1.0,
+            "target_el": 45.0,
+            "last_command_ts": time.time(),
+            "settle_hits": 0,
+        }
+    )
+    tracker.rotator_settle_hits_required = 2
+    tracker.rotator_retarget_threshold_deg = 999.0
+    tracker.rotator_command_refresh_sec = 999.0
+
+    async def _noop_issue(target_az, target_el):
+        return None
+
+    handler._issue_rotator_command = _noop_issue
+
+    await handler.control_rotator_position((1.0, 45.0))
+    await handler.control_rotator_position((1.0, 45.0))
+
+    assert tracker.rotator_command_state["in_flight"] is False
+    assert tracker.rotator_data["slewing"] is False

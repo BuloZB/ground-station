@@ -54,7 +54,13 @@ class RotatorHandler:
     def _target_within_tolerance(self, current_az, current_el, target_az, target_el) -> bool:
         az_tol = float(self.tracker.az_tolerance)
         el_tol = float(self.tracker.el_tolerance)
-        return bool(abs(current_az - target_az) <= az_tol and abs(current_el - target_el) <= el_tol)
+        az_err = self._angular_distance_deg(current_az, target_az)
+        return bool(az_err <= az_tol and abs(current_el - target_el) <= el_tol)
+
+    @staticmethod
+    def _angular_distance_deg(a: float, b: float) -> float:
+        """Smallest angular distance between two azimuth values in degrees."""
+        return abs(((a - b + 180.0) % 360.0) - 180.0)
 
     def _get_azimuth_mode(self) -> str:
         mode = str(self.tracker.rotator_details.get("azimuth_mode", "0_360"))
@@ -442,7 +448,7 @@ class RotatorHandler:
 
                 # Retarget if the sky target moved far enough, or refresh on watchdog timeout.
                 target_drift = max(
-                    abs(command_target_az - active_target_az),
+                    self._angular_distance_deg(command_target_az, active_target_az),
                     abs(target_el - active_target_el),
                 )
                 command_age = time.time() - float(state["last_command_ts"] or 0.0)

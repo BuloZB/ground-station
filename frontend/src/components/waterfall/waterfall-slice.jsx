@@ -28,6 +28,10 @@ import {getAvailableColorMaps} from "./worker-modules/color-maps.js";
 // Mobile detection
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
+const getDefaultWaterfallRendererMode = () => {
+    return 'worker';
+};
+
 export const getSDRConfigParameters = createAsyncThunk(
     'waterfall/getSDRConfigParameters',
     async ({socket, selectedSDRId}, {rejectWithValue}) => {
@@ -105,6 +109,7 @@ export const saveWaterfallSnapshot = createAsyncThunk(
 );
 
 const initialState = {
+    waterfallRendererMode: getDefaultWaterfallRendererMode(), // 'worker' | 'dom-tiles'
     fftDataOverflow: false,
     fftDataOverflowLimit: 20,
     colorMaps: getAvailableColorMaps(),
@@ -202,6 +207,9 @@ export const waterfallSlice = createSlice({
     reducers: {
         setColorMap: (state, action) => {
             state.colorMap = action.payload;
+        },
+        setWaterfallRendererMode: (state, action) => {
+            state.waterfallRendererMode = action.payload;
         },
         setColorMaps: (state, action) => {
             state.colorMaps = action.payload;
@@ -595,6 +603,7 @@ export const waterfallSlice = createSlice({
 export const {
     setFFTdataOverflow,
     setColorMap,
+    setWaterfallRendererMode,
     setColorMaps,
     setDbRange,
     setFFTSize,

@@ -26,7 +26,10 @@ import {
     Polygon,
     useMapEvents,
 } from 'react-leaflet';
-import {Box, Fab, Slider, Typography, Tooltip, IconButton} from "@mui/material";
+import {Box, Fab, Slider, Typography, Tooltip, IconButton, useTheme} from "@mui/material";
+import { styled } from '@mui/material/styles';
+import { Tooltip as LeafletTooltip } from 'react-leaflet';
+import L from 'leaflet';
 import {SatelliteAlt} from '@mui/icons-material';
 import HomeIcon from '@mui/icons-material/Home';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
@@ -84,8 +87,33 @@ import {useSocket} from "../common/socket.jsx";
 
 const storageMapZoomValueKey = "target-map-zoom-level";
 
+// Match overview tracked-satellite tooltip style.
+const TrackedSatelliteTooltip = styled(LeafletTooltip)(({ theme }) => ({
+    color: theme.palette.text.primary,
+    backgroundColor: theme.palette.error.dark,
+    borderRadius: theme.shape.borderRadius,
+    borderColor: theme.palette.error.main,
+    zIndex: 1000,
+    '&::before': {
+        borderBottomColor: `${theme.palette.error.main} !important`,
+    },
+}));
+
 // global leaflet map object
 let MapObject = null;
+const isFiniteNumber = (value) => Number.isFinite(Number(value));
+const isValidLatLon = (lat, lon) => isFiniteNumber(lat) && isFiniteNumber(lon);
+const isValidLatLonPoint = (point) =>
+    Array.isArray(point)
+    && point.length === 2
+    && isValidLatLon(point[0], point[1]);
+const isValidLatLonObjectPoint = (point) =>
+    point
+    && typeof point === 'object'
+    && !Array.isArray(point)
+    && isValidLatLon(point.lat, point.lon);
+const isValidCoveragePoint = (point) =>
+    isValidLatLonPoint(point) || isValidLatLonObjectPoint(point);
 
 const MapSlider = function ({handleSliderChange}) {
     const marks = [
@@ -230,6 +258,7 @@ const TargetSatelliteMapContainer = ({}) => {
     const {socket} = useSocket();
     const dispatch = useDispatch();
     const { t } = useTranslation('target');
+    const theme = useTheme();
     const {
         groupId,
         satelliteId: noradId,
@@ -267,7 +296,7 @@ const TargetSatelliteMapContainer = ({}) => {
     const [currentFutureSatellitesPaths, setCurrentFutureSatellitesPaths] = useState([]);
     const [currentSatellitesPosition, setCurrentSatellitesPosition] = useState([]);
     const [currentSatellitesCoverage, setCurrentSatellitesCoverage] = useState([]);
-    const coverageRef = useRef(null);
+    const [currentCrosshairs, setCurrentCrosshairs] = useState([]);
     const handleSetMapZoomLevel = useCallback((zoomLevel) => {
         dispatch(setMapZoomLevel(zoomLevel));
     }, [dispatch]);
@@ -306,12 +335,14 @@ const TargetSatelliteMapContainer = ({}) => {
             const velocity = satellitePosition['vel'];
             const paths = satellitePaths;
             const coverage = satelliteCoverage;
+            const hasValidSatellitePoint = isValidLatLon(latitude, longitude);
 
             // generate current positions for the group of satellites
             let currentPos = [];
             let currentCoverage = [];
             let currentFuturePaths = [];
             let currentPastPaths = [];
+            let currentCrosshair = [];
 
             // focus map on satellite, center on latitude only
             //let mapCoords = MapObject.getCenter();
@@ -344,24 +375,77 @@ const TargetSatelliteMapContainer = ({}) => {
                 />)
             }
 
-            if (showTooltip) {
+            if (hasValidSatellitePoint) {
+                const crosshairColor = theme.palette.error.main;
+                const squareIcon = L.divIcon({
+                    className: 'custom-square-marker',
+                    html: `<div style="width: 30px; height: 30px; border: 2px solid ${crosshairColor}; opacity: 0.8; box-sizing: border-box;"></div>`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15],
+                });
+
+                currentCrosshair.push(
+                    <React.Fragment key={`crosshair-${satelliteId}`}>
+                        <Marker
+                            position={[latitude, longitude]}
+                            icon={squareIcon}
+                            interactive={false}
+                        />
+                        <Polyline
+                            positions={[
+                                [latitude, -180],
+                                [latitude, 180],
+                            ]}
+                            pathOptions={{
+                                color: crosshairColor,
+                                weight: 1,
+                                opacity: 1,
+                                smoothFactor: 1,
+                            }}
+                        />
+                        <Polyline
+                            positions={[
+                                [-90, longitude],
+                                [90, longitude],
+                            ]}
+                            pathOptions={{
+                                color: crosshairColor,
+                                weight: 1,
+                                opacity: 1,
+                                smoothFactor: 1,
+                            }}
+                        />
+                    </React.Fragment>
+                );
+            }
+
+            if (hasValidSatellitePoint && showTooltip) {
                 currentPos.push(<Marker key={"marker-" + satelliteId} position={[latitude, longitude]}
                                         icon={satelliteIcon2}>
-                    <ThemedLeafletTooltip direction="bottom" offset={[0, 10]} opacity={1} permanent>
-                        {satelliteName} - {humanizeAltitude(altitude) + " km, " + humanizeVelocity(velocity) + " km/s"}
-                    </ThemedLeafletTooltip>
+                    <TrackedSatelliteTooltip
+                        direction="bottom"
+                        offset={[0, 15]}
+                        opacity={1}
+                        permanent
+                        className={"tooltip-satellite"}
+                        interactive={true}
+                    >
+                        <strong>
+                            <span>{'◎ '}</span>
+                            {satelliteName} - {parseInt(altitude) + " km, " + velocity.toFixed(2) + " km/s"}
+                        </strong>
+                    </TrackedSatelliteTooltip>
                 </Marker>);
-            } else {
+            } else if (hasValidSatellitePoint) {
                 currentPos.push(<Marker key={"marker-" + satelliteId} position={[latitude, longitude]}
                                         icon={satelliteIcon2}>
                 </Marker>);
             }
 
-            if (coverage) {
+            if (Array.isArray(coverage) && coverage.length > 0 && coverage.every(isValidCoveragePoint)) {
                 //let coverage = [];
                 //coverage = getSatelliteCoverageCircle(latitude, longitude, altitude, 360);
                 currentCoverage.push(<Polyline
-                    ref={coverageRef}
                     noClip={true}
                     key={"coverage-" + satelliteDetails['name']}
                     pathOptions={{
@@ -378,9 +462,11 @@ const TargetSatelliteMapContainer = ({}) => {
             setCurrentFutureSatellitesPaths(currentFuturePaths);
             setCurrentSatellitesPosition(currentPos);
             setCurrentSatellitesCoverage(currentCoverage);
+            setCurrentCrosshairs(currentCrosshair);
 
         } else {
             //console.warn("No satellite data found for norad id: ", noradId, satelliteDetails);
+            setCurrentCrosshairs([]);
         }
 
         // Day/night boundary
@@ -403,15 +489,19 @@ const TargetSatelliteMapContainer = ({}) => {
         MapObject = map.target;
     };
 
+    // Keep target map locked to the selected satellite on every position update.
     useEffect(() => {
-        if (coverageRef.current) {
-            // Fit the map to the polygon's bounds
-            MapObject.fitBounds(coverageRef.current.getBounds(), {
-                    padding: [15, 15],
-                }
-            );
-        }
-    }, [MapObject, satellitePosition, sliderTimeOffset, noradId]);
+        if (!MapObject) return;
+
+        const selectedNoradId = String(noradId ?? '');
+        const loadedNoradId = String(satelliteDetails?.norad_id ?? '');
+        const lat = satellitePosition?.lat;
+        const lon = satellitePosition?.lon;
+        if (!isValidLatLon(lat, lon)) return;
+        if (loadedNoradId !== selectedNoradId) return;
+
+        MapObject.setView([lat, lon], MapObject.getZoom(), { animate: false });
+    }, [noradId, satelliteDetails?.norad_id, satellitePosition?.lat, satellitePosition?.lon]);
 
     useEffect(() => {
         const intervalId = setInterval(() => {
@@ -519,11 +609,11 @@ const TargetSatelliteMapContainer = ({}) => {
                 }}/>
 
                 {sunPos && showSunIcon ? (
-                    <Marker position={sunPos} icon={sunIcon} opacity={0.5}/>
+                    isValidLatLonPoint(sunPos) ? <Marker position={sunPos} icon={sunIcon} opacity={0.5}/> : null
                 ) : null}
 
                 {moonPos && showMoonIcon ? (
-                    <Marker position={moonPos} icon={moonIcon} opacity={0.5}/>
+                    isValidLatLonPoint(moonPos) ? <Marker position={moonPos} icon={moonIcon} opacity={0.5}/> : null
                 ) : null}
 
                 {daySidePolygon.length > 1 && showTerminatorLine && (
@@ -559,6 +649,7 @@ const TargetSatelliteMapContainer = ({}) => {
 
                 {showPastOrbitPath ? currentPastSatellitesPaths : null}
                 {showFutureOrbitPath ? currentFutureSatellitesPaths : null}
+                {currentCrosshairs}
                 {currentSatellitesPosition}
                 {showSatelliteCoverage ? currentSatellitesCoverage : null}
 

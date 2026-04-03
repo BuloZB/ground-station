@@ -89,6 +89,13 @@ L.Icon.Default.mergeOptions({
 });
 
 const storageMapZoomValueKey = 'overview-map-zoom-level';
+const satelliteIconDimCircle = L.divIcon({
+    className: 'overview-satellite-dim-icon',
+    html: '<div style="width:10px;height:10px;border-radius:50%;background:#38bdf8;border:1px solid #e0f2fe;box-shadow:0 0 0 1px rgba(0,0,0,0.45),0 0 5px rgba(56,189,248,0.45);"></div>',
+    iconSize: [10, 10],
+    iconAnchor: [5, 5],
+    popupAnchor: [0, -5],
+});
 
 const CenterHomeButton = React.memo(function CenterHomeButton() {
     const { t } = useTranslation('overview');
@@ -192,6 +199,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
     const arrowControlsRef = useRef(null);
     const elevationHistoryRef = useRef({}); // Store elevation history for each satellite
     const mapInvalidateIntervalRef = useRef(null); // Store interval ID for cleanup
+    const initialInvalidateTimeoutsRef = useRef([]); // Store initial invalidate timeouts for cleanup
 
     const handleSetMapZoomLevel = useCallback(
         (zoomLevel) => {
@@ -524,7 +532,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                             trackingSatelliteId={trackingSatelliteId}
                             selectedSatelliteId={selectedSatelliteId}
                             markerEventHandlers={markerEventHandlers}
-                            satelliteIcon={satelliteIcon2}
+                            satelliteIcon={isVisible ? satelliteIcon2 : satelliteIconDimCircle}
                             opacity={1}
                             handleSetTrackingOnBackend={handleSetTrackingOnBackend}
                         />
@@ -544,7 +552,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                         <Marker
                             key={'marker-' + satellite['norad_id']}
                             position={[lat, lon]}
-                            icon={satelliteIcon2}
+                            icon={satelliteIconDimCircle}
                             eventHandlers={markerEventHandlers}
                             opacity={0.6}
                         ></Marker>
@@ -639,8 +647,31 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
         const initialMapZoom = savedZoomLevel ? parseFloat(savedZoomLevel) : 1;
         dispatch(setMapZoomLevel(initialMapZoom));
 
+        const handleLayoutChange = () => {
+            if (!MapObject || !MapObject._container || !document.contains(MapObject._container)) {
+                return;
+            }
+
+            // Recalculate after DOM/layout commits.
+            requestAnimationFrame(() => {
+                if (MapObject && MapObject._container && document.contains(MapObject._container)) {
+                    MapObject.invalidateSize({ pan: false, debounceMoveend: true });
+                }
+            });
+            setTimeout(() => {
+                if (MapObject && MapObject._container && document.contains(MapObject._container)) {
+                    MapObject.invalidateSize({ pan: false, debounceMoveend: true });
+                }
+            }, 120);
+        };
+
+        window.addEventListener('overview-map-layout-change', handleLayoutChange);
+
         // Cleanup: clear the map invalidate interval when component unmounts
         return () => {
+            window.removeEventListener('overview-map-layout-change', handleLayoutChange);
+            initialInvalidateTimeoutsRef.current.forEach(clearTimeout);
+            initialInvalidateTimeoutsRef.current = [];
             if (mapInvalidateIntervalRef.current) {
                 clearInterval(mapInvalidateIntervalRef.current);
                 mapInvalidateIntervalRef.current = null;
@@ -651,6 +682,16 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
     const handleWhenReady = (map) => {
         // map is ready
         MapObject = map.target;
+
+        // Grid/layout can settle shortly after initial render; force non-panning size sync.
+        initialInvalidateTimeoutsRef.current.forEach(clearTimeout);
+        initialInvalidateTimeoutsRef.current = [0, 150, 500].map((delay) =>
+            setTimeout(() => {
+                if (MapObject && MapObject._container && document.contains(MapObject._container)) {
+                    MapObject.invalidateSize({ pan: false, debounceMoveend: true });
+                }
+            }, delay)
+        );
 
         // Clear any existing interval before creating a new one
         if (mapInvalidateIntervalRef.current) {
@@ -669,7 +710,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                     return;
                 }
 
-                MapObject.invalidateSize();
+                MapObject.invalidateSize({ pan: false, debounceMoveend: true });
             } catch (e) {
                 // Silently ignore - this can happen during rapid component unmount/remount
                 // Only log if it's not the _leaflet_pos error
