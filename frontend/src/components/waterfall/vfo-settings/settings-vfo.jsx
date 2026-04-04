@@ -45,9 +45,6 @@ const VfoAccordion = ({
     // Use custom hooks for state management
     const {
         vfoMuted,
-        vfoBufferLengths,
-        vfoAudioLevels,
-        vfoRfPower,
         handleVfoMuteToggle
     } = useVfoAudioState();
 
@@ -72,15 +69,19 @@ const VfoAccordion = ({
     const [transcriptionParamsVfoIndex, setTranscriptionParamsVfoIndex] = React.useState(null);
 
     // Dialog handlers
-    const handleOpenDecoderParams = (vfoIndex) => {
+    const handleOpenDecoderParams = React.useCallback((vfoIndex) => {
         setDecoderParamsVfoIndex(vfoIndex);
         setDecoderParamsDialogOpen(true);
-    };
+    }, []);
 
-    const handleOpenTranscriptionParams = (vfoIndex) => {
+    const handleOpenTranscriptionParams = React.useCallback((vfoIndex) => {
         setTranscriptionParamsVfoIndex(vfoIndex);
         setTranscriptionParamsDialogOpen(true);
-    };
+    }, []);
+
+    const handleOpenTransmittersDialog = React.useCallback(() => {
+        setTransmittersDialogOpen(true);
+    }, []);
 
     return (
         <Accordion expanded={expanded} onChange={onAccordionChange}>
@@ -192,35 +193,30 @@ const VfoAccordion = ({
                     ))}
                 </Tabs>
 
-                {/* VFO Tab Panels */}
-                {[1, 2, 3, 4].map((vfoIndex) => (
-                    <VfoTabPanel
-                        key={vfoIndex}
-                        vfoIndex={vfoIndex}
-                        visible={(selectedVFOTab + 1) === vfoIndex}
-                        vfoMarkers={vfoMarkers}
-                        vfoActive={vfoActive}
-                        vfoMuted={vfoMuted}
-                        vfoBufferLengths={vfoBufferLengths}
-                        vfoAudioLevels={vfoAudioLevels}
-                        vfoRfPower={vfoRfPower}
-                        transmitters={transmitters}
-                        targetSatelliteName={targetSatelliteName}
-                        geminiConfigured={geminiConfigured}
-                        deepgramConfigured={deepgramConfigured}
-                        onVFOActiveChange={onVFOActiveChange}
-                        onVFOPropertyChange={onVFOPropertyChange}
-                        onMuteToggle={handleVfoMuteToggle}
-                        onTranscriptionToggle={onTranscriptionToggle}
-                        onOpenTransmittersDialog={() => setTransmittersDialogOpen(true)}
-                        onOpenDecoderParamsDialog={handleOpenDecoderParams}
-                        onOpenTranscriptionParamsDialog={handleOpenTranscriptionParams}
-                        getVFODecoderInfo={getVFODecoderInfo}
-                        centerFrequency={centerFrequency}
-                        sampleRate={sampleRate}
-                        onCenterFrequencyChange={onCenterFrequencyChange}
-                    />
-                ))}
+                {/* VFO Tab Panel (render only active tab for performance) */}
+                <VfoTabPanel
+                    key={selectedVFOTab + 1}
+                    vfoIndex={selectedVFOTab + 1}
+                    visible={true}
+                    vfoMarkers={vfoMarkers}
+                    vfoActive={vfoActive}
+                    vfoMuted={vfoMuted}
+                    transmitters={transmitters}
+                    targetSatelliteName={targetSatelliteName}
+                    geminiConfigured={geminiConfigured}
+                    deepgramConfigured={deepgramConfigured}
+                    onVFOActiveChange={onVFOActiveChange}
+                    onVFOPropertyChange={onVFOPropertyChange}
+                    onMuteToggle={handleVfoMuteToggle}
+                    onTranscriptionToggle={onTranscriptionToggle}
+                    onOpenTransmittersDialog={handleOpenTransmittersDialog}
+                    onOpenDecoderParamsDialog={handleOpenDecoderParams}
+                    onOpenTranscriptionParamsDialog={handleOpenTranscriptionParams}
+                    getVFODecoderInfo={getVFODecoderInfo}
+                    centerFrequency={centerFrequency}
+                    sampleRate={sampleRate}
+                    onCenterFrequencyChange={onCenterFrequencyChange}
+                />
             </AccordionDetails>
 
             {/* Transmitters Dialog */}
@@ -255,4 +251,24 @@ const VfoAccordion = ({
     );
 };
 
-export default VfoAccordion;
+function areVfoAccordionPropsEqual(prevProps, nextProps) {
+    return (
+        prevProps.expanded === nextProps.expanded &&
+        prevProps.onAccordionChange === nextProps.onAccordionChange &&
+        prevProps.selectedVFOTab === nextProps.selectedVFOTab &&
+        prevProps.onVFOTabChange === nextProps.onVFOTabChange &&
+        prevProps.vfoColors === nextProps.vfoColors &&
+        prevProps.vfoMarkers === nextProps.vfoMarkers &&
+        prevProps.vfoActive === nextProps.vfoActive &&
+        prevProps.onVFOActiveChange === nextProps.onVFOActiveChange &&
+        prevProps.onVFOPropertyChange === nextProps.onVFOPropertyChange &&
+        prevProps.onTranscriptionToggle === nextProps.onTranscriptionToggle &&
+        prevProps.geminiConfigured === nextProps.geminiConfigured &&
+        prevProps.deepgramConfigured === nextProps.deepgramConfigured &&
+        prevProps.centerFrequency === nextProps.centerFrequency &&
+        prevProps.sampleRate === nextProps.sampleRate &&
+        prevProps.onCenterFrequencyChange === nextProps.onCenterFrequencyChange
+    );
+}
+
+export default React.memo(VfoAccordion, areVfoAccordionPropsEqual);

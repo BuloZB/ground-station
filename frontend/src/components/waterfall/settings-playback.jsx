@@ -56,6 +56,8 @@ import { fetchSDRs } from '../hardware/sdr-slice.jsx';
 import RecordingDialog from '../filebrowser/recording-dialog.jsx';
 import { store } from '../common/store.jsx';
 
+const PLAYBACK_COUNTDOWN_UPDATE_MS = 250;
+
 function formatBytes(bytes) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -130,29 +132,36 @@ const PlaybackAccordion = ({
     const [playbackCountdown, setPlaybackCountdown] = useState(0);
 
     useEffect(() => {
-        if (!isStreaming || !playbackRemainingSecondsRef) {
+        if (!expanded || !isStreaming || !playbackRemainingSecondsRef) {
             setPlaybackCountdown(0);
             return;
         }
 
-        // Update countdown every 100ms for smoother updates
         const updateCountdown = () => {
             const remaining = playbackRemainingSecondsRef.current;
-            if (remaining !== null && remaining >= 0) {
-                setPlaybackCountdown(remaining);
-            } else {
-                setPlaybackCountdown(0);
-            }
+            const nextSeconds = (remaining !== null && remaining >= 0) ? Math.ceil(remaining) : 0;
+            setPlaybackCountdown(prev => (prev === nextSeconds ? prev : nextSeconds));
         };
 
-        // Initial update
         updateCountdown();
 
-        // Set up interval to update every 100ms
-        const intervalId = setInterval(updateCountdown, 100);
+        let rafId = 0;
+        let lastTs = 0;
+        const tick = (ts) => {
+            if (document.hidden) {
+                rafId = requestAnimationFrame(tick);
+                return;
+            }
+            if (ts - lastTs >= PLAYBACK_COUNTDOWN_UPDATE_MS) {
+                lastTs = ts;
+                updateCountdown();
+            }
+            rafId = requestAnimationFrame(tick);
+        };
+        rafId = requestAnimationFrame(tick);
 
-        return () => clearInterval(intervalId);
-    }, [isStreaming, playbackRemainingSecondsRef]);
+        return () => cancelAnimationFrame(rafId);
+    }, [expanded, isStreaming, playbackRemainingSecondsRef]);
 
     // Filter, sort, and paginate recordings in the frontend
     const recordings = useMemo(() => {

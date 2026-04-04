@@ -209,6 +209,8 @@ function ToolbarActions() {
     );
 }
 
+const MemoToolbarActions = React.memo(ToolbarActions);
+
 function ActiveObservationIndicator() {
     const observations = useSelector((state) => state.scheduler?.observations || []);
     const { timezone, locale } = useUserTimeSettings();
@@ -1177,7 +1179,7 @@ export default function Layout() {
                         <ActiveObservationIndicator />
                         <UpcomingObservationIndicator />
                     </Box>
-                    <ToolbarActions />
+                    <MemoToolbarActions />
                 </Toolbar>
             </CustomAppBar>
 

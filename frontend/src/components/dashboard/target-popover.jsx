@@ -33,7 +33,7 @@ import {
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useSelector } from "react-redux";
+import { shallowEqual, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import Tooltip from "@mui/material/Tooltip";
 import { useTranslation } from 'react-i18next';
@@ -53,6 +53,18 @@ import { calculateElevationCurve } from "../../utils/elevation-curve-calculator.
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDate as formatDateHelper } from '../../utils/date-time.js';
 
+const EMPTY_OPEN_TARGET_DATA = Object.freeze({
+    satelliteData: {
+        details: {},
+        position: {},
+        transmitters: [],
+    },
+    trackingState: {},
+    rotatorData: {},
+    satellitePasses: [],
+    groundStationLocation: null,
+});
+
 const SatelliteInfoPopover = () => {
     const theme = useTheme();
     const buttonRef = useRef(null);
@@ -62,9 +74,60 @@ const SatelliteInfoPopover = () => {
     const { t } = useTranslation('dashboard');
     const { timezone, locale } = useUserTimeSettings();
 
-    // Get satellite data from Redux store
-    const { satelliteData, trackingState, rotatorData, satellitePasses, activePass } = useSelector(state => state.targetSatTrack);
-    const groundStationLocation = useSelector((state) => state.location.location);
+    const open = Boolean(anchorEl);
+
+    // Keep closed-state subscriptions intentionally lightweight.
+    const targetSummary = useSelector((state) => {
+        const target = state.targetSatTrack || {};
+        const details = target.satelliteData?.details || {};
+        const position = target.satelliteData?.position || {};
+
+        return {
+            noradId: details.norad_id ?? null,
+            name: details.name ?? '',
+            elevation: Number.isFinite(position.el) ? Math.round(position.el * 10) / 10 : position.el,
+            trackingNoradId: target.trackingState?.norad_id ?? null,
+            minElevation: target.rotatorData?.minel ?? 0,
+        };
+    }, shallowEqual);
+
+    const openTargetData = useSelector((state) => {
+        if (!open) {
+            return EMPTY_OPEN_TARGET_DATA;
+        }
+        return {
+            satelliteData: state.targetSatTrack?.satelliteData || EMPTY_OPEN_TARGET_DATA.satelliteData,
+            trackingState: state.targetSatTrack?.trackingState || EMPTY_OPEN_TARGET_DATA.trackingState,
+            rotatorData: state.targetSatTrack?.rotatorData || EMPTY_OPEN_TARGET_DATA.rotatorData,
+            satellitePasses: state.targetSatTrack?.satellitePasses || EMPTY_OPEN_TARGET_DATA.satellitePasses,
+            groundStationLocation: state.location?.location || EMPTY_OPEN_TARGET_DATA.groundStationLocation,
+        };
+    }, shallowEqual);
+
+    const satelliteData = useMemo(() => (
+        open
+            ? openTargetData.satelliteData
+            : {
+                details: {
+                    norad_id: targetSummary.noradId,
+                    name: targetSummary.name,
+                },
+                position: {
+                    el: targetSummary.elevation,
+                },
+                transmitters: [],
+            }
+    ), [open, openTargetData.satelliteData, targetSummary.noradId, targetSummary.name, targetSummary.elevation]);
+
+    const trackingState = useMemo(() => (
+        open ? openTargetData.trackingState : { norad_id: targetSummary.trackingNoradId }
+    ), [open, openTargetData.trackingState, targetSummary.trackingNoradId]);
+
+    const rotatorData = useMemo(() => (
+        open ? openTargetData.rotatorData : { minel: targetSummary.minElevation }
+    ), [open, openTargetData.rotatorData, targetSummary.minElevation]);
+    const satellitePasses = open ? openTargetData.satellitePasses : EMPTY_OPEN_TARGET_DATA.satellitePasses;
+    const groundStationLocation = open ? openTargetData.groundStationLocation : EMPTY_OPEN_TARGET_DATA.groundStationLocation;
 
     // Combine details and transmitters for the TransmittersTable component
     const targetSatelliteData = satelliteData.details ? {
@@ -86,8 +149,6 @@ const SatelliteInfoPopover = () => {
             handleClose(); // Close the popover after navigation
         }
     };
-
-    const open = Boolean(anchorEl);
 
     // Format date helper - use common function
     const formatDate = (dateString) => {
@@ -226,10 +287,14 @@ const SatelliteInfoPopover = () => {
         });
     };
 
-    const currentActivePass = getCurrentActivePass();
+    const currentActivePass = useMemo(() => {
+        if (!open) return null;
+        return getCurrentActivePass();
+    }, [open, satellitePasses, satelliteData.details?.norad_id]);
 
     // Calculate elevation curve for the active pass on-the-fly
     const enhancedActivePass = useMemo(() => {
+        if (!open) return null;
         if (!currentActivePass || !satelliteData.details.tle1 || !groundStationLocation) {
             return currentActivePass;
         }
@@ -253,6 +318,7 @@ const SatelliteInfoPopover = () => {
 
     // Memoize the next pass calculation to prevent unnecessary recalculations
     const nextPass = useMemo(() => {
+        if (!open) return null;
         if (!satellitePasses || satellitePasses.length === 0 || !satelliteData.details.norad_id) return null;
 
         const now = new Date();
@@ -490,6 +556,7 @@ const SatelliteInfoPopover = () => {
                     horizontal: 'right',
                 }}
             >
+                {open && (
                 <Box sx={{
                     borderRadius: 0,
                     border: '1px solid',
@@ -714,6 +781,7 @@ const SatelliteInfoPopover = () => {
                         />
                     </Box>
                 </Box>
+                )}
             </Popover>
 
             {/* Transmitters Dialog */}
@@ -728,4 +796,4 @@ const SatelliteInfoPopover = () => {
     );
 };
 
-export default SatelliteInfoPopover;
+export default React.memo(SatelliteInfoPopover);

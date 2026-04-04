@@ -224,12 +224,12 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         dispatch(setExpandedPanels(updateExpandedPanels(expandedPanels)));
     };
 
-    const getValidGainElements = (sdrId) => {
+    const getValidGainElements = useCallback((sdrId) => {
         const caps = sdrCapabilities?.[sdrId];
         return Array.isArray(caps?.gain_elements?.rx) ? caps.gain_elements.rx : [];
-    };
+    }, [sdrCapabilities]);
 
-    const filterGains = (gains, sdrId) => {
+    const filterGains = useCallback((gains, sdrId) => {
         if (!gains || typeof gains !== 'object') {
             return {};
         }
@@ -244,7 +244,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             }
         });
         return filtered;
-    };
+    }, [getValidGainElements]);
 
     // Convert to useCallback to ensure stability of the function reference
     const sendSDRConfigToBackend = useCallback((updates = {}) => {
@@ -549,7 +549,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         return sendSDRConfigToBackend({soapyAgc: enabled});
     };
 
-    function handleTransmitterChange(event) {
+    const handleTransmitterChange = useCallback((event) => {
         // If a transmitter was selected, then set the SDR center frequency
         dispatch(setSelectedTransmitterId(event.target.value));
 
@@ -573,9 +573,9 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
 
         dispatch(setCenterFrequency(newCenterFrequency));
         sendSDRConfigToBackend({centerFrequency: newCenterFrequency});
-    }
+    }, [dispatch, rigData, sampleRate, sendSDRConfigToBackend]);
 
-    function handleOffsetModeChange(event) {
+    const handleOffsetModeChange = useCallback((event) => {
         const offsetValue = event.target.value;
 
         if (offsetValue === "none") {
@@ -590,15 +590,15 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             dispatch(setSelectedOffsetMode(offsetValue));
             return sendSDRConfigToBackend({offsetFrequency: parseInt(offsetValue)});
         }
-    }
+    }, [dispatch, selectedOffsetValue, sendSDRConfigToBackend]);
 
-    function handleOffsetValueChange(param) {
+    const handleOffsetValueChange = useCallback((param) => {
         const offsetValue = param.target.value;
         dispatch(setSelectedOffsetValue(offsetValue));
         return sendSDRConfigToBackend({offsetFrequency: parseInt(offsetValue)});
-    }
+    }, [dispatch, sendSDRConfigToBackend]);
 
-    function getProperTransmitterId() {
+    const getProperTransmitterId = useCallback(() => {
         const transmitters = rigData?.transmitters || [];
         if (transmitters.length > 0 && selectedTransmitterId) {
             if (transmitters.find(t => t.id === selectedTransmitterId)) {
@@ -609,29 +609,170 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         } else {
             return "none";
         }
-    }
+    }, [rigData, selectedTransmitterId]);
 
-    const handleVFOPropertyChange = (vfoNumber, updates) => {
+    const handleSdrAccordionChange = useCallback((event, isExpanded) => {
+        const panel = 'sdr';
+        const updateExpandedPanels = (currentExpandedPanels) => {
+            if (isExpanded) {
+                return currentExpandedPanels.includes(panel)
+                    ? currentExpandedPanels
+                    : [...currentExpandedPanels, panel];
+            }
+            return currentExpandedPanels.filter(p => p !== panel);
+        };
+        dispatch(setExpandedPanels(updateExpandedPanels(expandedPanels)));
+    }, [dispatch, expandedPanels]);
+
+    const handleFreqAccordionChange = useCallback((event, isExpanded) => {
+        const panel = 'freqControl';
+        const updateExpandedPanels = (currentExpandedPanels) => {
+            if (isExpanded) {
+                return currentExpandedPanels.includes(panel)
+                    ? currentExpandedPanels
+                    : [...currentExpandedPanels, panel];
+            }
+            return currentExpandedPanels.filter(p => p !== panel);
+        };
+        dispatch(setExpandedPanels(updateExpandedPanels(expandedPanels)));
+    }, [dispatch, expandedPanels]);
+
+    const handleGainChange = useCallback((value) => {
+        dispatch(setGain(value));
+        sendSDRConfigToBackend({gain: value});
+    }, [dispatch, sendSDRConfigToBackend]);
+
+    const handleSampleRateChange = useCallback((value) => {
+        dispatch(setSampleRate(value));
+        sendSDRConfigToBackend({sampleRate: value});
+    }, [dispatch, sendSDRConfigToBackend]);
+
+    const handleAntennaChange = useCallback((value) => {
+        dispatch(setSelectedAntenna(value));
+        sendSDRConfigToBackend({antenna: value});
+    }, [dispatch, sendSDRConfigToBackend]);
+
+    const handleBiasTChange = useCallback((checked) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        dispatch(setSdrBiasT({ sdrId: selectedSDRId, value: checked }));
+        sendSDRConfigToBackend({biasT: checked});
+    }, [dispatch, selectedSDRId, sendSDRConfigToBackend]);
+
+    const handleBitpackChange = useCallback((checked) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        dispatch(setSdrBitpack({ sdrId: selectedSDRId, value: checked }));
+        sendSDRConfigToBackend({
+            sdrSettings: {
+                ...(sdrSettings || {}),
+                bitpack: checked,
+                gains: sdrSettings?.gains || {},
+            },
+        });
+    }, [dispatch, selectedSDRId, sdrSettings, sendSDRConfigToBackend]);
+
+    const handleGainElementChange = useCallback((name, value) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        const validGainElements = getValidGainElements(selectedSDRId);
+        if (validGainElements.length > 0 && !validGainElements.includes(name)) {
+            return;
+        }
+        const nextGains = {
+            ...(sdrSettings?.gains || {}),
+            [name]: value,
+        };
+        dispatch(setSdrGainElement({ sdrId: selectedSDRId, name, value }));
+        sendSDRConfigToBackend({
+            sdrSettings: {
+                ...(sdrSettings || {}),
+                bitpack: sdrSettings?.bitpack ?? null,
+                gains: filterGains(nextGains, selectedSDRId),
+            },
+        });
+    }, [dispatch, selectedSDRId, sdrSettings, getValidGainElements, filterGains, sendSDRConfigToBackend]);
+
+    const handleClockSourceChange = useCallback((value) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        dispatch(setSdrClockSource({ sdrId: selectedSDRId, value }));
+        sendSDRConfigToBackend({
+            sdrSettings: {
+                ...(sdrSettings || {}),
+                clockSource: value,
+            },
+        });
+    }, [dispatch, selectedSDRId, sdrSettings, sendSDRConfigToBackend]);
+
+    const handleTimeSourceChange = useCallback((value) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        dispatch(setSdrTimeSource({ sdrId: selectedSDRId, value }));
+        sendSDRConfigToBackend({
+            sdrSettings: {
+                ...(sdrSettings || {}),
+                timeSource: value,
+            },
+        });
+    }, [dispatch, selectedSDRId, sdrSettings, sendSDRConfigToBackend]);
+
+    const handleTunerAgcChange = useCallback((checked) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        dispatch(setSdrTunerAgc({ sdrId: selectedSDRId, value: checked }));
+        sendSDRConfigToBackend({tunerAgc: checked});
+    }, [dispatch, selectedSDRId, sendSDRConfigToBackend]);
+
+    const handleSoapyAgcChange = useCallback((checked) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        dispatch(setSdrSoapyAgc({ sdrId: selectedSDRId, value: checked }));
+        sendSDRConfigToBackend({soapyAgc: checked});
+    }, [dispatch, selectedSDRId, sendSDRConfigToBackend]);
+
+    const handleRtlAgcChange = useCallback((checked) => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+        dispatch(setSdrRtlAgc({ sdrId: selectedSDRId, value: checked }));
+        sendSDRConfigToBackend({rtlAgc: checked});
+    }, [dispatch, selectedSDRId, sendSDRConfigToBackend]);
+
+    const handleFrequencyDialChange = useCallback((newFrequency) => {
+        let nextCenterFrequency = newFrequency * 1000.0;
+        dispatch(setCenterFrequency(nextCenterFrequency));
+        sendSDRConfigToBackend({centerFrequency: nextCenterFrequency});
+    }, [dispatch, sendSDRConfigToBackend]);
+
+    const handleVFOPropertyChange = useCallback((vfoNumber, updates) => {
         dispatch(setVFOProperty({ vfoNumber, updates }));
-    };
+    }, [dispatch]);
 
-    const handleVFOActiveChange = (vfoNumber, isActive) => {
+    const handleVFOActiveChange = useCallback((vfoNumber, isActive) => {
         if (isActive) {
             dispatch(setVfoActive(vfoNumber));
         } else {
             dispatch(setVfoInactive(vfoNumber));
         }
-    };
+    }, [dispatch]);
 
-    const handleVFOListenChange = (vfoNumber, isListening) => {
+    const handleVFOListenChange = useCallback((vfoNumber, isListening) => {
         if (isListening) {
             dispatch(setSelectedVFO(vfoNumber));
         } else {
             dispatch(setSelectedVFO(null));
         }
-    };
+    }, [dispatch]);
 
-    const handleTranscriptionToggle = (vfoNumber, enabled, provider = 'gemini') => {
+    const handleTranscriptionToggle = useCallback((vfoNumber, enabled, provider = 'gemini') => {
         // Use VFO's existing values, fallback to default
         const currentVfo = vfoMarkers[vfoNumber];
         const language = currentVfo?.transcriptionLanguage || 'auto';
@@ -660,14 +801,32 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                 toast.error(t('vfo.transcription_error', `Failed to toggle transcription: ${response.error}`));
             }
         });
-    };
+    }, [dispatch, socket, t, vfoMarkers]);
 
-    const handleVFOTabChange = (newValue) => {
+    const handleVFOTabChange = useCallback((newValue) => {
         dispatch(setSelectedVFOTab(newValue));
         // Convert tab index (0-3) to VFO number (1-4) and select the VFO marker
         const vfoNumber = newValue + 1;
         dispatch(setSelectedVFO(vfoNumber));
-    };
+    }, [dispatch]);
+
+    const handleVfoAccordionChange = useCallback((event, isExpanded) => {
+        const panel = 'vfo';
+        const updateExpandedPanels = (currentExpandedPanels) => {
+            if (isExpanded) {
+                return currentExpandedPanels.includes(panel)
+                    ? currentExpandedPanels
+                    : [...currentExpandedPanels, panel];
+            }
+            return currentExpandedPanels.filter(p => p !== panel);
+        };
+        dispatch(setExpandedPanels(updateExpandedPanels(expandedPanels)));
+    }, [dispatch, expandedPanels]);
+
+    const handleVfoCenterFrequencyChange = useCallback((newFreq) => {
+        dispatch(setCenterFrequency(newFreq));
+        sendSDRConfigToBackend({centerFrequency: newFreq});
+    }, [dispatch, sendSDRConfigToBackend]);
 
     // Sync VFO tab selection when a VFO is selected on the canvas
     // Only sync when selectedVFO changes (not when tab changes manually)
@@ -892,7 +1051,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
 
                 <SdrAccordion
                     expanded={expandedPanels.includes('sdr')}
-                    onAccordionChange={handleAccordionChange('sdr')}
+                    onAccordionChange={handleSdrAccordionChange}
                     gettingSDRParameters={gettingSDRParameters}
                     isStreaming={isStreaming}
                     sdrs={sdrs}
@@ -900,51 +1059,39 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     onSDRChange={handleSDRChange}
                     gainValues={gainValues}
                     localGain={localGain}
-                    onGainChange={(value) => {
-                        setLocalGain(value);
-                        dispatch(updateSDRGain(value));
-                    }}
+                    onGainChange={handleGainChange}
                     sampleRateValues={sampleRateValues}
                     localSampleRate={localSampleRate}
-                    onSampleRateChange={(value) => {
-                        if (!isRecording) {
-                            setLocalSampleRate(value);
-                            dispatch(updateSampleRate(value));
-                        }
-                    }}
+                    onSampleRateChange={handleSampleRateChange}
                     antennasList={antennasList}
                     selectedAntenna={selectedAntenna}
-                    onAntennaChange={(value) => dispatch(updateSelectedAntenna(value))}
+                    onAntennaChange={handleAntennaChange}
                     sdrCapabilities={sdrCapabilities}
                     sdrSettings={sdrSettings}
                     hasBiasT={hasBiasT}
                     biasT={biasT}
-                    onBiasTChange={(checked) => dispatch(updateBiasT(checked))}
-                    onBitpackChange={(checked) => dispatch(updateBitpack(checked))}
-                    onGainElementChange={(name, value) => dispatch(updateGainElement(name, value))}
-                    onClockSourceChange={(value) => dispatch(updateClockSource(value))}
-                    onTimeSourceChange={(value) => dispatch(updateTimeSource(value))}
+                    onBiasTChange={handleBiasTChange}
+                    onBitpackChange={handleBitpackChange}
+                    onGainElementChange={handleGainElementChange}
+                    onClockSourceChange={handleClockSourceChange}
+                    onTimeSourceChange={handleTimeSourceChange}
                     hasTunerAgc={hasTunerAgc}
                     tunerAgc={tunerAgc}
-                    onTunerAgcChange={(checked) => dispatch(updateTunerAgc(checked))}
+                    onTunerAgcChange={handleTunerAgcChange}
                     hasSoapyAgc={hasSoapyAgc}
                     soapyAgc={soapyAgc}
-                    onSoapyAgcChange={(checked) => dispatch(updateSoapyAgc(checked))}
+                    onSoapyAgcChange={handleSoapyAgcChange}
                     hasRtlAgc={hasRtlAgc}
                     rtlAgc={rtlAgc}
-                    onRtlAgcChange={(checked) => dispatch(updateRtlAgc(checked))}
+                    onRtlAgcChange={handleRtlAgcChange}
                     isRecording={isRecording}
                 />
 
                 <FrequencyControlAccordion
                     expanded={expandedPanels.includes('freqControl')}
-                    onAccordionChange={handleAccordionChange('freqControl')}
+                    onAccordionChange={handleFreqAccordionChange}
                     centerFrequency={centerFrequency}
-                    onCenterFrequencyChange={(newFrequency) => {
-                        if (!isRecording) {
-                            dispatch(updateCenterFrequency(newFrequency));
-                        }
-                    }}
+                    onCenterFrequencyChange={handleFrequencyDialChange}
                     availableTransmitters={rigData?.transmitters || []}
                     getProperTransmitterId={getProperTransmitterId}
                     onTransmitterChange={handleTransmitterChange}
@@ -959,7 +1106,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
 
                 <VfoAccordion
                     expanded={expandedPanels.includes('vfo')}
-                    onAccordionChange={handleAccordionChange('vfo')}
+                    onAccordionChange={handleVfoAccordionChange}
                     selectedVFOTab={selectedVFOTab}
                     onVFOTabChange={handleVFOTabChange}
                     vfoColors={vfoColors}
@@ -974,10 +1121,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     deepgramConfigured={deepgramConfigured}
                     centerFrequency={centerFrequency}
                     sampleRate={sampleRate}
-                    onCenterFrequencyChange={(newFreq) => {
-                        dispatch(setCenterFrequency(newFreq));
-                        sendSDRConfigToBackend({centerFrequency: newFreq});
-                    }}
+                    onCenterFrequencyChange={handleVfoCenterFrequencyChange}
                 />
 
                 <FftAccordion

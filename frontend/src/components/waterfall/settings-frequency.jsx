@@ -38,7 +38,7 @@ const FrequencyControlAccordion = ({
                                        isRecording,
                                        selectedSDRId,
                                        isStreaming,
-                                   }) => {
+}) => {
     const { t } = useTranslation('waterfall');
     const [anchorEl, setAnchorEl] = React.useState(null);
     const buttonGroupRef = React.useRef(null);
@@ -383,4 +383,23 @@ const FrequencyControlAccordion = ({
     );
 };
 
-export default FrequencyControlAccordion;
+function areFrequencyControlAccordionPropsEqual(prevProps, nextProps) {
+    return (
+        prevProps.expanded === nextProps.expanded &&
+        prevProps.onAccordionChange === nextProps.onAccordionChange &&
+        prevProps.centerFrequency === nextProps.centerFrequency &&
+        prevProps.onCenterFrequencyChange === nextProps.onCenterFrequencyChange &&
+        prevProps.availableTransmitters === nextProps.availableTransmitters &&
+        prevProps.getProperTransmitterId === nextProps.getProperTransmitterId &&
+        prevProps.onTransmitterChange === nextProps.onTransmitterChange &&
+        prevProps.selectedOffsetMode === nextProps.selectedOffsetMode &&
+        prevProps.onOffsetModeChange === nextProps.onOffsetModeChange &&
+        prevProps.selectedOffsetValue === nextProps.selectedOffsetValue &&
+        prevProps.onOffsetValueChange === nextProps.onOffsetValueChange &&
+        prevProps.isRecording === nextProps.isRecording &&
+        prevProps.selectedSDRId === nextProps.selectedSDRId &&
+        prevProps.isStreaming === nextProps.isStreaming
+    );
+}
+
+export default React.memo(FrequencyControlAccordion, areFrequencyControlAccordionPropsEqual);

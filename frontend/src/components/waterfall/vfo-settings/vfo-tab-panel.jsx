@@ -8,7 +8,7 @@ import React from 'react';
 import { Box } from '@mui/material';
 import { VfoActivateButton, VfoMuteButton, VfoFrequencyDisplay } from './vfo-controls.jsx';
 import VFOAudioRecorderButton from './vfo-audio-recorder-button.jsx';
-import { RfPowerMeter, AudioLevelMeter, AudioBufferMeter } from './vfo-meters.jsx';
+import { VfoLiveMeters } from './vfo-meters.jsx';
 import { SquelchSlider, VolumeSlider } from './vfo-sliders.jsx';
 import { DecoderStatusDisplay } from './vfo-decoder-status.jsx';
 import { TransmitterLockSelect, TransmitterEditLink, LockedTransmitterAlert } from './vfo-transmitter-lock.jsx';
@@ -25,15 +25,12 @@ import RotaryEncoder from '../rotator-encoder.jsx';
  * Complete VFO Tab Panel Component
  * Combines all VFO controls and displays for a single VFO
  */
-export const VfoTabPanel = ({
+const VfoTabPanelComponent = ({
     vfoIndex,
     visible,
     vfoMarkers,
     vfoActive,
     vfoMuted,
-    vfoBufferLengths,
-    vfoAudioLevels,
-    vfoRfPower,
     transmitters,
     targetSatelliteName,
     geminiConfigured,
@@ -76,17 +73,9 @@ export const VfoTabPanel = ({
                 <VfoFrequencyDisplay frequency={vfo?.frequency || 0} />
 
                 {/* Meters */}
-                <RfPowerMeter
+                <VfoLiveMeters
+                    vfoIndex={vfoIndex}
                     vfoActive={vfoActive[vfoIndex]}
-                    rfPower={vfoRfPower[vfoIndex]}
-                />
-                <AudioLevelMeter
-                    vfoActive={vfoActive[vfoIndex]}
-                    audioLevel={vfoAudioLevels[vfoIndex]}
-                />
-                <AudioBufferMeter
-                    vfoActive={vfoActive[vfoIndex]}
-                    bufferLength={vfoBufferLengths[vfoIndex]}
                 />
 
                 {/* Sliders */}
@@ -94,7 +83,6 @@ export const VfoTabPanel = ({
                     vfoIndex={vfoIndex}
                     vfoActive={vfoActive[vfoIndex]}
                     squelch={vfo?.squelch || -150}
-                    rfPower={vfoRfPower[vfoIndex]}
                     onVFOPropertyChange={onVFOPropertyChange}
                 />
                 <VolumeSlider
@@ -186,3 +174,36 @@ export const VfoTabPanel = ({
         </Box>
     );
 };
+
+function areVfoTabPanelPropsEqual(prevProps, nextProps) {
+    if (prevProps.visible !== nextProps.visible) return false;
+    if (!prevProps.visible && !nextProps.visible) return true;
+    if (prevProps.vfoIndex !== nextProps.vfoIndex) return false;
+
+    const idx = nextProps.vfoIndex;
+    const prevVfo = prevProps.vfoMarkers[idx];
+    const nextVfo = nextProps.vfoMarkers[idx];
+
+    return (
+        prevVfo === nextVfo &&
+        prevProps.vfoActive[idx] === nextProps.vfoActive[idx] &&
+        prevProps.vfoMuted[idx] === nextProps.vfoMuted[idx] &&
+        prevProps.transmitters === nextProps.transmitters &&
+        prevProps.targetSatelliteName === nextProps.targetSatelliteName &&
+        prevProps.geminiConfigured === nextProps.geminiConfigured &&
+        prevProps.deepgramConfigured === nextProps.deepgramConfigured &&
+        prevProps.onVFOActiveChange === nextProps.onVFOActiveChange &&
+        prevProps.onVFOPropertyChange === nextProps.onVFOPropertyChange &&
+        prevProps.onMuteToggle === nextProps.onMuteToggle &&
+        prevProps.onTranscriptionToggle === nextProps.onTranscriptionToggle &&
+        prevProps.onOpenTransmittersDialog === nextProps.onOpenTransmittersDialog &&
+        prevProps.onOpenDecoderParamsDialog === nextProps.onOpenDecoderParamsDialog &&
+        prevProps.onOpenTranscriptionParamsDialog === nextProps.onOpenTranscriptionParamsDialog &&
+        prevProps.getVFODecoderInfo === nextProps.getVFODecoderInfo &&
+        prevProps.centerFrequency === nextProps.centerFrequency &&
+        prevProps.sampleRate === nextProps.sampleRate &&
+        prevProps.onCenterFrequencyChange === nextProps.onCenterFrequencyChange
+    );
+}
+
+export const VfoTabPanel = React.memo(VfoTabPanelComponent, areVfoTabPanelPropsEqual);

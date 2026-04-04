@@ -18,10 +18,9 @@
  */
 
 
-import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './i18n/config.js'
-import {BrowserRouter, createBrowserRouter, Route, RouterProvider, Routes} from "react-router";
+import {createBrowserRouter, RouterProvider} from "react-router";
 import {
     SettingsTabLocation,
     SettingsTabRotator,
@@ -39,15 +38,14 @@ import GlobalSatelliteTrackLayout from "./components/overview/main-layout.jsx";
 import App from "./App.jsx";
 import Layout from "./components/dashboard/dashboard-layout.jsx";
 import TargetSatelliteLayout from "./components/target/main-layout.jsx";
-import MainWaterfallDisplay from "./components/waterfall/waterfall-island.jsx";
-import {SocketProvider, useSocket} from './components/common/socket.jsx';
+import {SocketProvider} from './components/common/socket.jsx';
 import { Provider as ReduxProvider} from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { store, persistor } from './components/common/store.jsx';
 import ErrorPage from './components/common/error-page.jsx';
+import NotFoundPage from './components/common/not-found-page.jsx';
 import MainLayout from "./components/waterfall/main-layout.jsx";
 import {WakeLockProvider} from "./components/dashboard/wake-lock-provider.jsx";
-import { AudioProvider, useAudio } from "./components/dashboard/audio-provider.jsx";
 import SatelliteInfoPage from "./components/satellites/satellite-info-page.jsx";
 import FilebrowserMain from "./components/filebrowser/filebrowser-main.jsx";
 import ScheduledObservationsLayout from "./components/scheduler/main-layout.jsx";
@@ -56,14 +54,15 @@ import ScheduledObservationsLayout from "./components/scheduler/main-layout.jsx"
 const router = createBrowserRouter([
     {
         Component: App, // root layout route
+        errorElement: <ErrorPage />,
         children: [
             {
                 path: "/",
                 Component: Layout,
+                errorElement: <ErrorPage />,
                 children: [
                     {
                         path: "",
-                        errorElement: <ErrorPage />,
                         Component: GlobalSatelliteTrackLayout,
                     },
                     {
@@ -149,6 +148,10 @@ const router = createBrowserRouter([
                             },
                         ],
                     },
+                    {
+                        path: "*",
+                        Component: NotFoundPage,
+                    },
                 ],
             },
         ],
@@ -156,15 +159,13 @@ const router = createBrowserRouter([
 ]);
 
 createRoot(document.getElementById('root')).render(
-    <StrictMode>
-        <ReduxProvider store={store}>
-            <PersistGate loading={null} persistor={persistor}>
-                <SocketProvider>
-                    <WakeLockProvider>
-                        <RouterProvider router={router} />
-                    </WakeLockProvider>
-                </SocketProvider>
-            </PersistGate>
-        </ReduxProvider>
-    </StrictMode>
+    <ReduxProvider store={store}>
+        <PersistGate loading={null} persistor={persistor}>
+            <SocketProvider>
+                <WakeLockProvider>
+                    <RouterProvider router={router} />
+                </WakeLockProvider>
+            </SocketProvider>
+        </PersistGate>
+    </ReduxProvider>
 );

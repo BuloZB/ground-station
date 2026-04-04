@@ -9,12 +9,16 @@ import { Box, IconButton, Slider, Stack, Tooltip } from '@mui/material';
 import VolumeDown from '@mui/icons-material/VolumeDown';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import { SquelchIconCentered } from '../../common/dataurl-icons.jsx';
+import { useAudio } from '../../dashboard/audio-provider.jsx';
 
 /**
  * Squelch Slider Component
  */
-export const SquelchSlider = ({ vfoIndex, vfoActive, squelch, rfPower, onVFOPropertyChange }) => {
+export const SquelchSlider = ({ vfoIndex, vfoActive, squelch, onVFOPropertyChange }) => {
+    const { getVfoRfPower } = useAudio();
+
     const handleAutoSquelch = () => {
+        const rfPower = getVfoRfPower(vfoIndex);
         if (rfPower !== null) {
             // Set squelch to current noise floor + 5 dB
             const autoSquelch = Math.round(rfPower + 5);
@@ -35,7 +39,7 @@ export const SquelchSlider = ({ vfoIndex, vfoActive, squelch, rfPower, onVFOProp
                 <span>
                     <IconButton
                         onClick={handleAutoSquelch}
-                        disabled={!vfoActive || rfPower === null}
+                        disabled={!vfoActive}
                         sx={{
                             color: 'text.secondary',
                             backgroundColor: 'rgba(33, 150, 243, 0.08)',

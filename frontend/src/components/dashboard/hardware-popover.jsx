@@ -24,7 +24,7 @@ import {
 } from "@mui/material";
 import {useCallback, useEffect, useRef, useState} from "react";
 import {useSocket} from "../common/socket.jsx";
-import {useDispatch, useSelector} from "react-redux";
+import {shallowEqual, useDispatch, useSelector} from "react-redux";
 import Tooltip from "@mui/material/Tooltip";
 import { useTranslation } from 'react-i18next';
 import RadioIcon from '@mui/icons-material/Radio';
@@ -57,8 +57,26 @@ const HardwareSettingsPopover = () => {
     const [activeIcon, setActiveIcon] = useState(null);
     const [connected, setConnected] = useState(false);
 
-    // Get rig and rotator data from the Redux store
-    const {rigData, rotatorData} = useSelector(state => state.targetSatTrack);
+    // Keep selector output primitive/lightweight to reduce unnecessary re-renders.
+    const hardwareState = useSelector((state) => {
+        const rigData = state.targetSatTrack?.rigData || {};
+        const rotatorData = state.targetSatTrack?.rotatorData || {};
+        return {
+            rigConnected: Boolean(rigData.connected),
+            rigTracking: Boolean(rigData.tracking),
+            rigStopped: Boolean(rigData.stopped),
+            rigFrequency: rigData.frequency,
+            rotatorConnected: Boolean(rotatorData.connected),
+            rotatorOutOfBounds: Boolean(rotatorData.outofbounds),
+            rotatorMinElevation: Boolean(rotatorData.minelevation),
+            rotatorSlewing: Boolean(rotatorData.slewing),
+            rotatorTracking: Boolean(rotatorData.tracking),
+            rotatorStopped: Boolean(rotatorData.stopped),
+            rotatorParked: Boolean(rotatorData.parked),
+            rotatorAz: Number.isFinite(rotatorData.az) ? Math.round(rotatorData.az * 10) / 10 : rotatorData.az,
+            rotatorEl: Number.isFinite(rotatorData.el) ? Math.round(rotatorData.el * 10) / 10 : rotatorData.el,
+        };
+    }, shallowEqual);
 
     // Socket connection event handlers
     useEffect(() => {
@@ -99,80 +117,80 @@ const HardwareSettingsPopover = () => {
     // Determine colors based on connection and tracking status
     const getRigColor = () => {
         if (!connected) return 'text.disabled'; // Grey when socket disconnected
-        if (!rigData.connected) return 'status.disconnected'; // Red for disconnected
-        if (rigData.tracking) return 'success.light'; // Green for tracking
-        if (rigData.stopped) return 'warning.dark'; // Orange for stopped
+        if (!hardwareState.rigConnected) return 'status.disconnected'; // Red for disconnected
+        if (hardwareState.rigTracking) return 'success.light'; // Green for tracking
+        if (hardwareState.rigStopped) return 'warning.dark'; // Orange for stopped
         return 'success.dark'; // Green for connected but not tracking
     };
 
     const getRotatorColor = () => {
         if (!connected) return 'text.disabled'; // Grey when socket disconnected
-        if (!rotatorData.connected) return 'status.disconnected'; // Red for disconnected
-        if (rotatorData.outofbounds) return 'secondary.main'; // Purple for out of bounds
-        if (rotatorData.minelevation) return 'error.light'; // Light red for min elevation
-        if (rotatorData.slewing) return 'warning.main'; // Orange for slewing
-        if (rotatorData.tracking) return 'success.light'; // Light green for tracking
-        if (rotatorData.stopped) return 'warning.dark'; // Orange for stopped
+        if (!hardwareState.rotatorConnected) return 'status.disconnected'; // Red for disconnected
+        if (hardwareState.rotatorOutOfBounds) return 'secondary.main'; // Purple for out of bounds
+        if (hardwareState.rotatorMinElevation) return 'error.light'; // Light red for min elevation
+        if (hardwareState.rotatorSlewing) return 'warning.main'; // Orange for slewing
+        if (hardwareState.rotatorTracking) return 'success.light'; // Light green for tracking
+        if (hardwareState.rotatorStopped) return 'warning.dark'; // Orange for stopped
         return 'success.dark'; // Green for connected but not tracking
     };
 
     const getRigTooltip = () => {
         if (!connected) return t('hardware_popover.socket_disconnected');
-        if (!rigData.connected) return t('hardware_popover.rig_disconnected');
-        if (rigData.tracking) return t('hardware_popover.rig_tracking', { frequency: rigData.frequency });
-        if (rigData.stopped) return t('hardware_popover.rig_stopped');
+        if (!hardwareState.rigConnected) return t('hardware_popover.rig_disconnected');
+        if (hardwareState.rigTracking) return t('hardware_popover.rig_tracking', { frequency: hardwareState.rigFrequency });
+        if (hardwareState.rigStopped) return t('hardware_popover.rig_stopped');
         return t('hardware_popover.rig_connected');
     };
 
     const getRotatorTooltip = () => {
         if (!connected) return t('hardware_popover.socket_disconnected');
-        if (!rotatorData.connected) return t('hardware_popover.rotator_disconnected');
-        if (rotatorData.tracking) return t('hardware_popover.rotator_tracking', { az: rotatorData.az, el: rotatorData.el });
-        if (rotatorData.slewing) return t('hardware_popover.rotator_slewing', { az: rotatorData.az, el: rotatorData.el });
-        if (rotatorData.stopped) return t('hardware_popover.rotator_stopped', { az: rotatorData.az, el: rotatorData.el });
-        return t('hardware_popover.rotator_connected', { az: rotatorData.az, el: rotatorData.el });
+        if (!hardwareState.rotatorConnected) return t('hardware_popover.rotator_disconnected');
+        if (hardwareState.rotatorTracking) return t('hardware_popover.rotator_tracking', { az: hardwareState.rotatorAz, el: hardwareState.rotatorEl });
+        if (hardwareState.rotatorSlewing) return t('hardware_popover.rotator_slewing', { az: hardwareState.rotatorAz, el: hardwareState.rotatorEl });
+        if (hardwareState.rotatorStopped) return t('hardware_popover.rotator_stopped', { az: hardwareState.rotatorAz, el: hardwareState.rotatorEl });
+        return t('hardware_popover.rotator_connected', { az: hardwareState.rotatorAz, el: hardwareState.rotatorEl });
     };
 
     // Get overlay icon and color for rotator
     const getRotatorOverlay = () => {
         if (!connected) return null; // No overlay when socket disconnected
-        if (!rotatorData.connected) return {
+        if (!hardwareState.rotatorConnected) return {
             icon: CloseIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'status.disconnected',
             badgeBorderColor: "text.primary"
         };
-        if (rotatorData.parked) return {
+        if (hardwareState.rotatorParked) return {
             icon: LocalParkingIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'warning.main',
             badgeBorderColor: "text.primary"
         };
-        if (rotatorData.outofbounds) return {
+        if (hardwareState.rotatorOutOfBounds) return {
             icon: WarningIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'error.main',
             badgeBorderColor: "text.primary"
         };
-        if (rotatorData.minelevation) return {
+        if (hardwareState.rotatorMinElevation) return {
             icon: ArrowDownwardIcon,
             color: 'error.main',
             badgeBackgroundColor: 'text.primary',
             badgeBorderColor: "error.main"
         };
-        if (rotatorData.slewing) return {
+        if (hardwareState.rotatorSlewing) return {
             icon: PlayArrowIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'success.main',
             badgeBorderColor: "text.primary"
         };
-        if (rotatorData.tracking) return {
+        if (hardwareState.rotatorTracking) return {
             icon: LocationSearchingIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'info.main',
             badgeBorderColor: "info.main"
         };
-        if (rotatorData.stopped) return {
+        if (hardwareState.rotatorStopped) return {
             icon: PauseIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'warning.main',
@@ -186,19 +204,19 @@ const HardwareSettingsPopover = () => {
     // Get overlay icon and color for the rig
     const getRigOverlay = () => {
         if (!connected) return null; // No overlay when socket disconnected
-        if (!rigData.connected) return {
+        if (!hardwareState.rigConnected) return {
             icon: CloseIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'status.disconnected',
             badgeBorderColor: "text.primary"
         };
-        if (rigData.tracking) return {
+        if (hardwareState.rigTracking) return {
             icon: LocationSearchingIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'info.main',
             badgeBorderColor: "info.main"
         };
-        if (rigData.stopped) return {
+        if (hardwareState.rigStopped) return {
             icon: PauseIcon,
             color: 'text.primary',
             badgeBackgroundColor: 'warning.main',
@@ -306,4 +324,4 @@ const HardwareSettingsPopover = () => {
     </>);
 };
 
-export default HardwareSettingsPopover;
+export default React.memo(HardwareSettingsPopover);

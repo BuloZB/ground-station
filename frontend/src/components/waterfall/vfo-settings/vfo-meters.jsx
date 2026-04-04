@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { Box, Typography } from '@mui/material';
+import { useAudio } from '../../dashboard/audio-provider.jsx';
 
 /**
  * RF Power Meter (S-Meter) Component
@@ -214,3 +215,49 @@ export const AudioBufferMeter = ({ vfoActive, bufferLength }) => {
         </Box>
     );
 };
+
+export const VfoLiveMeters = React.memo(function VfoLiveMeters({ vfoIndex, vfoActive }) {
+    const { getAudioBufferLength, getVfoAudioLevel, getVfoRfPower } = useAudio();
+    const [metrics, setMetrics] = React.useState({
+        bufferLength: 0,
+        audioLevel: 0,
+        rfPower: null,
+    });
+
+    React.useEffect(() => {
+        if (!vfoActive) {
+            setMetrics({
+                bufferLength: 0,
+                audioLevel: 0,
+                rfPower: null,
+            });
+            return;
+        }
+
+        const updateMetrics = () => {
+            const nextMetrics = {
+                bufferLength: getAudioBufferLength(vfoIndex),
+                audioLevel: getVfoAudioLevel(vfoIndex),
+                rfPower: getVfoRfPower(vfoIndex),
+            };
+
+            setMetrics(prev => (
+                prev.bufferLength === nextMetrics.bufferLength &&
+                prev.audioLevel === nextMetrics.audioLevel &&
+                prev.rfPower === nextMetrics.rfPower
+            ) ? prev : nextMetrics);
+        };
+
+        updateMetrics();
+        const interval = setInterval(updateMetrics, 500);
+        return () => clearInterval(interval);
+    }, [vfoActive, vfoIndex, getAudioBufferLength, getVfoAudioLevel, getVfoRfPower]);
+
+    return (
+        <>
+            <RfPowerMeter vfoActive={vfoActive} rfPower={metrics.rfPower} />
+            <AudioLevelMeter vfoActive={vfoActive} audioLevel={metrics.audioLevel} />
+            <AudioBufferMeter vfoActive={vfoActive} bufferLength={metrics.bufferLength} />
+        </>
+    );
+});

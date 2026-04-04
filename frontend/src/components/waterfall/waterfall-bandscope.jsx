@@ -32,6 +32,7 @@ import VFOMarkersContainer from './vfo-marker/vfo-container.jsx';
 import FrequencyBandOverlay from './bandplan-overlay.jsx';
 import {useDopplerNeighbors} from '../../hooks/useDopplerNeighbors.jsx';
 
+const PLAYBACK_COUNTDOWN_UPDATE_MS = 250;
 
 const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                                               bandscopeCanvasRef,
@@ -94,20 +95,28 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
 
         const updateCountdown = () => {
             const remaining = playbackRemainingSecondsRef.current;
-            if (remaining !== null && remaining >= 0) {
-                setPlaybackCountdown(remaining);
-            } else {
-                setPlaybackCountdown(0);
-            }
+            const nextSeconds = (remaining !== null && remaining >= 0) ? Math.ceil(remaining) : 0;
+            setPlaybackCountdown(prev => (prev === nextSeconds ? prev : nextSeconds));
         };
 
-        // Initial update
         updateCountdown();
 
-        // Update every 100ms for smooth countdown
-        const intervalId = setInterval(updateCountdown, 100);
+        let rafId = 0;
+        let lastTs = 0;
+        const tick = (ts) => {
+            if (document.hidden) {
+                rafId = requestAnimationFrame(tick);
+                return;
+            }
+            if (ts - lastTs >= PLAYBACK_COUNTDOWN_UPDATE_MS) {
+                lastTs = ts;
+                updateCountdown();
+            }
+            rafId = requestAnimationFrame(tick);
+        };
+        rafId = requestAnimationFrame(tick);
 
-        return () => clearInterval(intervalId);
+        return () => cancelAnimationFrame(rafId);
     }, [isStreaming, playbackRemainingSecondsRef]);
 
     // Function to recalculate position when the container resizes

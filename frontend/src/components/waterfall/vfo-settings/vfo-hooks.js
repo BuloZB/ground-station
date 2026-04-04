@@ -13,7 +13,7 @@ import { useAudio } from '../../dashboard/audio-provider.jsx';
  * @returns {object} Audio state and handlers
  */
 export const useVfoAudioState = () => {
-    const { setVfoMute, getAudioBufferLength, getVfoAudioLevel, getVfoRfPower } = useAudio();
+    const { setVfoMute } = useAudio();
 
     // Get persisted mute state from Redux
     const vfoMutedRedux = useSelector(state => state.vfo.vfoMuted || {
@@ -23,81 +23,18 @@ export const useVfoAudioState = () => {
         4: false
     });
 
-    // Track mute state for each VFO (0-3, but UI uses 1-4)
-    // Initialize from Redux to preserve state across navigation
-    const [vfoMuted, setVfoMuted] = React.useState(vfoMutedRedux);
-
-    // Track audio buffer length per VFO
-    const [vfoBufferLengths, setVfoBufferLengths] = React.useState({
-        1: 0,
-        2: 0,
-        3: 0,
-        4: 0
-    });
-
-    // Track audio levels per VFO
-    const [vfoAudioLevels, setVfoAudioLevels] = React.useState({
-        1: 0,
-        2: 0,
-        3: 0,
-        4: 0
-    });
-
-    // Track RF power per VFO (in dB)
-    const [vfoRfPower, setVfoRfPower] = React.useState({
-        1: null,
-        2: null,
-        3: null,
-        4: null
-    });
-
-    // Sync local mute state with Redux when it changes
-    React.useEffect(() => {
-        setVfoMuted(vfoMutedRedux);
-    }, [vfoMutedRedux]);
-
-    // Update buffer lengths, audio levels, and RF power every 500ms
-    React.useEffect(() => {
-        const interval = setInterval(() => {
-            const newBufferLengths = {};
-            const newAudioLevels = {};
-            const newRfPower = {};
-            for (let i = 1; i <= 4; i++) {
-                newBufferLengths[i] = getAudioBufferLength(i);
-                newAudioLevels[i] = getVfoAudioLevel(i);
-                newRfPower[i] = getVfoRfPower(i);
-            }
-            setVfoBufferLengths(newBufferLengths);
-            setVfoAudioLevels(newAudioLevels);
-            setVfoRfPower(newRfPower);
-        }, 500);
-        return () => clearInterval(interval);
-    }, [getAudioBufferLength, getVfoAudioLevel, getVfoRfPower]);
-
     // Handle VFO mute toggle
     const handleVfoMuteToggle = (vfoIndex) => {
-        console.log('Mute button clicked for VFO', vfoIndex, 'Current state:', vfoMuted[vfoIndex]);
-        const newMutedState = !vfoMuted[vfoIndex];
-        console.log('Setting VFO', vfoIndex, 'to muted:', newMutedState);
-        setVfoMuted(prev => ({
-            ...prev,
-            [vfoIndex]: newMutedState
-        }));
+        const newMutedState = !vfoMutedRedux[vfoIndex];
         // Call audio provider to mute/unmute
         // Backend sends vfo_number as 1-4, which matches our vfoIndex
-        console.log('Calling setVfoMute with VFO number:', vfoIndex, 'muted:', newMutedState);
         if (setVfoMute) {
             setVfoMute(vfoIndex, newMutedState);
-        } else {
-            console.error('setVfoMute is not available from audio context');
         }
     };
 
     return {
-        vfoMuted,
-        vfoBufferLengths,
-        vfoAudioLevels,
-        vfoRfPower,
+        vfoMuted: vfoMutedRedux,
         handleVfoMuteToggle
     };
 };

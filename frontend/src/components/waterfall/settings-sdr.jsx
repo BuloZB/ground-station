@@ -54,7 +54,7 @@ const SdrAccordion = ({
                           onRtlAgcChange,
                           onGainElementChange,
                           isRecording,
-                      }) => {
+}) => {
     const { t } = useTranslation('waterfall');
     const selectedCapabilities = sdrCapabilities?.[selectedSDRId] || null;
     const biasTSupported = hasBiasT || selectedCapabilities?.bias_t?.supported;
@@ -575,4 +575,44 @@ const SdrAccordion = ({
     );
 };
 
-export default SdrAccordion;
+function areSdrAccordionPropsEqual(prevProps, nextProps) {
+    return (
+        prevProps.expanded === nextProps.expanded &&
+        prevProps.onAccordionChange === nextProps.onAccordionChange &&
+        prevProps.gettingSDRParameters === nextProps.gettingSDRParameters &&
+        prevProps.isStreaming === nextProps.isStreaming &&
+        prevProps.sdrs === nextProps.sdrs &&
+        prevProps.selectedSDRId === nextProps.selectedSDRId &&
+        prevProps.onSDRChange === nextProps.onSDRChange &&
+        prevProps.gainValues === nextProps.gainValues &&
+        prevProps.localGain === nextProps.localGain &&
+        prevProps.onGainChange === nextProps.onGainChange &&
+        prevProps.sampleRateValues === nextProps.sampleRateValues &&
+        prevProps.localSampleRate === nextProps.localSampleRate &&
+        prevProps.onSampleRateChange === nextProps.onSampleRateChange &&
+        prevProps.antennasList === nextProps.antennasList &&
+        prevProps.selectedAntenna === nextProps.selectedAntenna &&
+        prevProps.onAntennaChange === nextProps.onAntennaChange &&
+        prevProps.sdrCapabilities === nextProps.sdrCapabilities &&
+        prevProps.sdrSettings === nextProps.sdrSettings &&
+        prevProps.hasBiasT === nextProps.hasBiasT &&
+        prevProps.biasT === nextProps.biasT &&
+        prevProps.onBiasTChange === nextProps.onBiasTChange &&
+        prevProps.onBitpackChange === nextProps.onBitpackChange &&
+        prevProps.onClockSourceChange === nextProps.onClockSourceChange &&
+        prevProps.onTimeSourceChange === nextProps.onTimeSourceChange &&
+        prevProps.hasTunerAgc === nextProps.hasTunerAgc &&
+        prevProps.tunerAgc === nextProps.tunerAgc &&
+        prevProps.onTunerAgcChange === nextProps.onTunerAgcChange &&
+        prevProps.hasSoapyAgc === nextProps.hasSoapyAgc &&
+        prevProps.soapyAgc === nextProps.soapyAgc &&
+        prevProps.onSoapyAgcChange === nextProps.onSoapyAgcChange &&
+        prevProps.hasRtlAgc === nextProps.hasRtlAgc &&
+        prevProps.rtlAgc === nextProps.rtlAgc &&
+        prevProps.onRtlAgcChange === nextProps.onRtlAgcChange &&
+        prevProps.onGainElementChange === nextProps.onGainElementChange &&
+        prevProps.isRecording === nextProps.isRecording
+    );
+}
+
+export default React.memo(SdrAccordion, areSdrAccordionPropsEqual);

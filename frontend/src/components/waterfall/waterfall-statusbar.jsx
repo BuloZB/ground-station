@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { Box, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 
+const TRANSFORM_UPDATE_MS = 250;
+
 const WaterfallStatusBar = ({isStreaming, eventMetrics, centerFrequency, sampleRate, gain}) => {
     const { t } = useTranslation('waterfall');
     const [transformData, setTransformData] = useState(null);
@@ -18,18 +20,42 @@ const WaterfallStatusBar = ({isStreaming, eventMetrics, centerFrequency, sampleR
         }
 
         const updateTransform = () => {
-            if (window.getWaterfallTransform) {
-                setTransformData(window.getWaterfallTransform());
-            }
+            if (!window.getWaterfallTransform) return;
+            const nextTransform = window.getWaterfallTransform();
+            setTransformData(prevTransform => {
+                if (!nextTransform) return prevTransform;
+                if (
+                    prevTransform &&
+                    prevTransform.scale === nextTransform.scale &&
+                    prevTransform.startFreq === nextTransform.startFreq &&
+                    prevTransform.endFreq === nextTransform.endFreq &&
+                    prevTransform.visibleBandwidth === nextTransform.visibleBandwidth
+                ) {
+                    return prevTransform;
+                }
+                return nextTransform;
+            });
         };
 
-        // Initial update
         updateTransform();
 
-        // Update every 100ms for smooth display
-        const intervalId = setInterval(updateTransform, 100);
+        let rafId = 0;
+        let lastTs = 0;
 
-        return () => clearInterval(intervalId);
+        const tick = (ts) => {
+            if (document.hidden) {
+                rafId = requestAnimationFrame(tick);
+                return;
+            }
+            if (ts - lastTs >= TRANSFORM_UPDATE_MS) {
+                lastTs = ts;
+                updateTransform();
+            }
+            rafId = requestAnimationFrame(tick);
+        };
+        rafId = requestAnimationFrame(tick);
+
+        return () => cancelAnimationFrame(rafId);
     }, [isStreaming]);
 
     return (
