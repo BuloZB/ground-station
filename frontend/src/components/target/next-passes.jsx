@@ -89,13 +89,35 @@ const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
             backgroundColor: alpha(theme.palette.success.main, 0.1),
             borderLeftColor: alpha(theme.palette.success.main, 0.65),
         }),
+        '&:hover': {
+            backgroundColor: alpha(theme.palette.success.main, 0.27),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.success.main, 0.14),
+            }),
+        },
+    },
+    '& .passes-row-upcoming-soon': {
+        backgroundColor: alpha(theme.palette.warning.main, 0.14),
+        borderLeftColor: alpha(theme.palette.warning.main, 0.9),
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.warning.main, 0.08),
+            borderLeftColor: alpha(theme.palette.warning.main, 0.6),
+        }),
     },
     '& .passes-row-passed': {
-        backgroundColor: alpha(theme.palette.info.main, 0.22),
-        borderLeftColor: alpha(theme.palette.info.main, 0.85),
+        '& .MuiDataGrid-cell': {
+            color: theme.palette.text.secondary,
+        },
+        '& .passes-time-absolute': {
+            opacity: 0.8,
+        },
+    },
+    '& .passes-row-dead': {
+        backgroundColor: alpha(theme.palette.error.main, 0.24),
+        borderLeftColor: alpha(theme.palette.error.main, 0.9),
         ...theme.applyStyles('light', {
-            backgroundColor: alpha(theme.palette.info.main, 0.12),
-            borderLeftColor: alpha(theme.palette.info.main, 0.55),
+            backgroundColor: alpha(theme.palette.error.main, 0.1),
+            borderLeftColor: alpha(theme.palette.error.main, 0.65),
         }),
     },
     '& .passes-cell-passing': {
@@ -111,14 +133,28 @@ const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
         },
     },
     '& .passes-cell-passed': {
-        ...getPassBackgroundColor(theme.palette.info.main, theme, 0.7),
+        backgroundColor: alpha(theme.palette.info.main, 0.28),
+        borderLeft: `2px solid ${alpha(theme.palette.info.main, 0.85)}`,
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.info.main, 0.14),
+            borderLeft: `2px solid ${alpha(theme.palette.info.main, 0.55)}`,
+        }),
         '&:hover': {
-            ...getPassBackgroundColor(theme.palette.info.main, theme, 0.6),
+            backgroundColor: alpha(theme.palette.info.main, 0.34),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.info.main, 0.2),
+            }),
         },
         '&.Mui-selected': {
-            ...getPassBackgroundColor(theme.palette.info.main, theme, 0.5),
+            backgroundColor: alpha(theme.palette.info.main, 0.4),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.info.main, 0.24),
+            }),
             '&:hover': {
-                ...getPassBackgroundColor(theme.palette.info.main, theme, 0.4),
+                backgroundColor: alpha(theme.palette.info.main, 0.46),
+                ...theme.applyStyles('light', {
+                    backgroundColor: alpha(theme.palette.info.main, 0.28),
+                }),
             },
         },
         textDecoration: 'line-through',
@@ -144,7 +180,7 @@ const TimeFormatter = React.memo(function TimeFormatter({ value, nowMs }) {
             <Typography component="span" variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
                 {relativeTime}
             </Typography>
-            <Typography component="span" variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>
+            <Typography component="span" className="passes-time-absolute" variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>
                 · {getTimeFromISO(value, timezone, locale)}
             </Typography>
         </Box>
@@ -188,19 +224,20 @@ const DurationFormatter = React.memo(function DurationFormatter({params, event_s
 });
 
 const PassStatusCell = React.memo(function PassStatusCell({status}) {
+    const { t } = useTranslation('overview');
     const statusConfig = {
         live: {
-            label: 'Live',
+            label: t('passes_table.status_visible'),
             color: 'success',
             icon: <RadioButtonCheckedIcon sx={{ fontSize: '0.85rem' }} />,
         },
         upcoming: {
-            label: 'Upcoming',
+            label: t('passes_table.status_upcoming'),
             color: 'warning',
             icon: <AccessTimeFilledIcon sx={{ fontSize: '0.85rem' }} />,
         },
         passed: {
-            label: 'Passed',
+            label: t('passes_table.status_passed'),
             color: 'info',
             icon: <DoneAllIcon sx={{ fontSize: '0.85rem' }} />,
         },
@@ -237,6 +274,8 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
     const dataGridLocale = currentLanguage === 'el' ? elGR : enUS;
     const [page, setPage] = useState(0);
     const [nowMs, setNowMs] = useState(() => Date.now());
+    const nowMsRef = useRef(nowMs);
+    nowMsRef.current = nowMs;
 
     useEffect(() => {
         const intervalId = setInterval(() => {
@@ -247,8 +286,6 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
     }, []);
 
 
-    const now = useMemo(() => new Date(nowMs), [nowMs]);
-
     const columns = [
         {
             field: 'status',
@@ -257,7 +294,7 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
             align: 'center',
             headerAlign: 'center',
             flex: 1,
-            valueGetter: (_value, row) => getPassStatus(row, now),
+            valueGetter: (_value, row) => getPassStatus(row, new Date(nowMsRef.current)),
             sortComparator: (v1, v2) => getPassStatusPriority(v1) - getPassStatusPriority(v2),
             renderCell: (params) => <PassStatusCell status={params.value} />
         },
@@ -392,6 +429,21 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
         };
     }, [columnVisibility, isCompactView]);
 
+    const getPassesRowStyles = useCallback((param) => {
+        if (param.row) {
+            const now = new Date(nowMsRef.current);
+            const status = getPassStatus(param.row, now);
+            if (status === 'dead') return 'passes-row-dead pointer-cursor';
+            if (status === 'passed') return 'passes-row-passed pointer-cursor';
+            if (status === 'live') return 'passes-row-live pointer-cursor';
+            if (status === 'upcoming') {
+                return 'passes-row-upcoming-soon pointer-cursor';
+            }
+            return "pointer-cursor";
+        }
+        return "pointer-cursor";
+    }, []);
+
     return (
         <StyledDataGrid
             apiRef={apiRef}
@@ -417,15 +469,7 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
                     color: 'text.secondary',
                 },
             }}
-            getRowClassName={(param) => {
-                if (param.row) {
-                    const status = getPassStatus(param.row, now);
-                    if (status === 'passed') return "passes-row-passed passes-cell-passed pointer-cursor";
-                    if (status === 'live') return "passes-row-live passes-cell-passing pointer-cursor";
-                    return "pointer-cursor";
-                }
-                return "pointer-cursor";
-            }}
+            getRowClassName={getPassesRowStyles}
             density={"compact"}
             rows={satellitePasses}
             pageSizeOptions={[5, 10, 15, 20]}
