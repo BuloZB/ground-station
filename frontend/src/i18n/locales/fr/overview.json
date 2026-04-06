@@ -2,6 +2,7 @@
   "title": "Vue d'ensemble",
   "satellites_table": {
     "title": "Détails du groupe de satellites",
+    "group_title": "Groupe de satellites",
     "satellites_count": "{{count}} satellites",
     "satellite_name": "Nom du satellite",
     "alternative_name": "Nom alternatif",
@@ -38,6 +39,10 @@
     "distance_peak": "Distance au maximum",
     "geo_stat": "GEO Stat",
     "geo_sync": "GEO Sync",
+    "status_visible": "Visible",
+    "status_upcoming": "À venir",
+    "status_passed": "Terminé",
+    "status_dead": "Inactif",
     "no_value": "aucune valeur",
     "no_data": "Aucune donnée",
     "no_passes": "Aucun passage détecté pour les prochaines {{hours}} heures"

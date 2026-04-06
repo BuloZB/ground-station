@@ -36,6 +36,7 @@ import { getColorForPower } from './color-maps.js';
  * @param {Object} params.theme - Theme colors
  * @param {CanvasRenderingContext2D} params.dBAxisCtx - dB axis canvas context
  * @param {OffscreenCanvas} params.dBAxisCanvas - dB axis canvas
+ * @param {number} [params.zoomScale=1] - Current horizontal zoom scale
  */
 export function drawBandscope({
     bandscopeCtx,
@@ -46,7 +47,8 @@ export function drawBandscope({
     colorMap,
     theme,
     dBAxisCtx,
-    dBAxisCanvas
+    dBAxisCanvas,
+    zoomScale = 1
 }) {
     if (!bandscopeCanvas || fftData.length === 0) {
         return;
@@ -108,7 +110,8 @@ export function drawBandscope({
         width,
         height,
         dbRange: shiftedDbRange,
-        colorMap
+        colorMap,
+        zoomScale
     });
 }
 
@@ -229,6 +232,7 @@ function downsampleFftData(fftData, targetPoints) {
  * @param {number} params.height - Canvas height
  * @param {Array<number>} params.dbRange - [minDb, maxDb]
  * @param {string} params.colorMap - Color map name
+ * @param {number} [params.zoomScale=1] - Current horizontal zoom scale
  */
 export function drawFftLine({
     ctx,
@@ -236,14 +240,36 @@ export function drawFftLine({
     width,
     height,
     dbRange,
-    colorMap
+    colorMap,
+    zoomScale = 1
 }) {
     const [minDb, maxDb] = dbRange;
     const graphWidth = width;
 
     // Adaptive target points: use width for small FFTs, cap at reasonable limit for large FFTs
     // This prevents excessive point generation while maintaining visual quality
-    const targetPoints = Math.min(graphWidth, Math.max(2048, fftData.length / 16));
+    const basePoints = Math.min(graphWidth, Math.max(1024, fftData.length / 24));
+
+    // Progressive detail tiers by zoom to improve high-zoom readability
+    // while keeping CPU predictable and allocations bounded.
+    let zoomTierMultiplier = 0.75;
+    if (zoomScale >= 12) {
+        zoomTierMultiplier = 8;
+    } else if (zoomScale >= 10) {
+        zoomTierMultiplier = 6;
+    } else if (zoomScale >= 6) {
+        zoomTierMultiplier = 3;
+    } else if (zoomScale >= 3) {
+        zoomTierMultiplier = 2;
+    } else if (zoomScale >= 1.5) {
+        zoomTierMultiplier = 1.25;
+    }
+
+    const hardPointCap = 4096;
+    const targetPoints = Math.max(
+        128,
+        Math.min(fftData.length, hardPointCap, Math.floor(basePoints * zoomTierMultiplier))
+    );
 
     // Downsample the FFT data efficiently
     const downsampledPoints = downsampleFftData(fftData, targetPoints);

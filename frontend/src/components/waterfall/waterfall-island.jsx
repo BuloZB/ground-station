@@ -477,6 +477,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
                 smoothedFftData: domSmoothedFftRef.current,
                 dbRange,
                 colorMap,
+                zoomScale: waterFallScaleX,
                 theme: {
                     palette: {
                         background: {
@@ -513,7 +514,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
                 bandscopeTimerRef.current = null;
             }
         };
-    }, [waterfallRendererMode, dbRange, colorMap, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
+    }, [waterfallRendererMode, dbRange, colorMap, waterFallScaleX, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
 
     useEffect(() => {
         if (waterfallRendererMode !== 'dom-tiles' || !domTileRendererRef.current) {
@@ -703,6 +704,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
             colorMap,
             dbRange,
             fftSize,
+            zoomScale: waterFallScaleX,
             theme: {
                 palette: {
                     background: {
@@ -727,7 +729,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
                 }
             }
         });
-    }, [waterfallRendererMode, colorMap, dbRange, fftSize, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
+    }, [waterfallRendererMode, colorMap, dbRange, fftSize, waterFallScaleX, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
 
     useEffect(() => {
         if (waterfallRendererMode !== 'worker') return;

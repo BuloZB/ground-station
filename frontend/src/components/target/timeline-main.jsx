@@ -13,7 +13,7 @@ import SunCalc from 'suncalc';
 // Import from extracted modules
 import { Y_AXIS_WIDTH, X_AXIS_HEIGHT, Y_AXIS_TOP_MARGIN, ZOOM_FACTOR, elevationToYPercent } from './timeline-constants.jsx';
 import { TimelineContainer, TimelineContent, TimelineCanvas, TimelineAxis, ElevationAxis, ElevationLabel, TimeLabel } from './timeline-styles.jsx';
-import { PassCurve, CurrentTimeMarker, PassTooltipContent } from './timeline-components.jsx';
+import { PassCurve, CurrentTimeMarker } from './timeline-components.jsx';
 import { useTimelineEvents } from './timeline-events.jsx';
 
 const SatellitePassTimelineComponent = ({
@@ -1017,7 +1017,22 @@ const SatellitePassTimelineComponent = ({
                     boxShadow: theme.shadows[2],
                   }}
                 >
-                  {formatHoverTime(hoverTime)}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <span>{formatHoverTime(hoverTime)}</span>
+                  </Box>
+                  {hoverPosition.passName && (
+                    <Typography
+                      component="div"
+                      sx={{
+                        fontSize: '0.62rem',
+                        lineHeight: 1.1,
+                        opacity: 0.8,
+                        mt: 0.35,
+                      }}
+                    >
+                      {hoverPosition.passName}
+                    </Typography>
+                  )}
                 </Box>
                 {/* Elevation marker on curve */}
                 {showHoverElevation && hoverPosition.elevation !== null && elevationYPercent !== null && (

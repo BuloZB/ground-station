@@ -56,26 +56,12 @@ const SynchronizeTLEsCard = function () {
     return (
         <Card sx={(theme) => ({
             position: 'relative',
-            marginTop: 2,
             marginBottom: 0,
             background: `linear-gradient(135deg, ${theme.palette.background.default} 0%, ${theme.palette.background.paper} 100%)`,
-            borderRadius: 3,
+            borderRadius: 1,
             border: `1px solid ${theme.palette.divider}`,
-            boxShadow: '0 10px 20px rgba(0,0,0,0.3)',
             overflow: 'hidden',
         })}>
-            {/* Background Effects */}
-            <Box sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                opacity: 0.07,
-                zIndex: 0,
-                background: 'url("data:image/svg+xml,%3Csvg width=\'100%25\' height=\'100%25\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cdefs%3E%3Cpattern id=\'smallGrid\' width=\'8\' height=\'8\' patternUnits=\'userSpaceOnUse\'%3E%3Cpath d=\'M 8 0 L 0 0 0 8\' fill=\'none\' stroke=\'%233d5866\' stroke-width=\'0.5\'/%3E%3C/pattern%3E%3Cpattern id=\'grid\' width=\'80\' height=\'80\' patternUnits=\'userSpaceOnUse\'%3E%3Crect width=\'80\' height=\'80\' fill=\'url(%23smallGrid)\'/%3E%3Cpath d=\'M 80 0 L 0 0 0 80\' fill=\'none\' stroke=\'%232d4856\' stroke-width=\'1\'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width=\'100%25\' height=\'100%25\' fill=\'url(%23grid)\' /%3E%3C/svg%3E")',
-            }}/>
-
             <Box sx={(theme) => ({
                 position: 'absolute',
                 top: -60,

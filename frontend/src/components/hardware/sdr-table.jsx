@@ -36,6 +36,7 @@ import {
     TextField,
     Typography
 } from "@mui/material";
+import { alpha } from '@mui/material/styles';
 import {useEffect, useMemo, useRef, useState} from "react";
 import { useTranslation } from 'react-i18next';
 import DialogTitle from "@mui/material/DialogTitle";
@@ -945,6 +946,21 @@ export default function SDRsPage() {
                                 {
                                     outline: 'none',
                                 },
+                            '& .MuiDataGrid-columnHeaders': {
+                                backgroundColor: (theme) => alpha(
+                                    theme.palette.primary.main,
+                                    theme.palette.mode === 'dark' ? 0.18 : 0.10
+                                ),
+                                borderBottom: (theme) => `2px solid ${alpha(theme.palette.primary.main, 0.45)}`,
+                            },
+                            '& .MuiDataGrid-columnHeader': {
+                                backgroundColor: 'transparent',
+                            },
+                            '& .MuiDataGrid-columnHeaderTitle': {
+                                fontSize: '0.8125rem',
+                                fontWeight: 700,
+                                letterSpacing: '0.02em',
+                            },
                             '& .MuiDataGrid-overlay': {
                                 fontSize: '0.875rem',
                                 fontStyle: 'italic',

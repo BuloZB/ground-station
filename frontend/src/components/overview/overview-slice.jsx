@@ -225,14 +225,17 @@ const overviewSlice = createSlice({
             alternative_name: false,
             norad_id: true,
             elevation: true,
+            visibility: true,
             status: true,
             transmitters: true,
             countries: false,
             decayed: false,
             updated: true,
             launched: false,
+            active_tx_count: false,
         },
         passesTableColumnVisibility: {
+            status: true,
             name: true,
             alternative_name: false,
             name_other: false,
@@ -253,8 +256,8 @@ const overviewSlice = createSlice({
         showGeostationarySatellites: true, // Default on - show geostationary satellites
         passesTablePageSize: 5, // Default page size for passes table
         satellitesTablePageSize: 50, // Default page size for satellites table
-        passesTableSortModel: [{field: 'event_start', sort: 'asc'}], // Default sort for passes table
-        satellitesTableSortModel: [{field: 'elevation', sort: 'desc'}], // Default sort for satellites table
+        passesTableSortModel: [{field: 'status', sort: 'asc'}, {field: 'event_start', sort: 'asc'}], // Default sort for passes table
+        satellitesTableSortModel: [{field: 'visibility', sort: 'desc'}, {field: 'elevation', sort: 'desc'}, {field: 'status', sort: 'asc'}, {field: 'name', sort: 'asc'}], // Default sort for satellites table
     },
     reducers: {
         setShowGeostationarySatellites(state, action) {
@@ -337,10 +340,27 @@ const overviewSlice = createSlice({
             state.formGroupSelectError = action.payload;
         },
         setSelectedSatGroupId(state, action) {
+            if (state.selectedSatGroupId !== action.payload) {
+                // Clear group-scoped transient data immediately to avoid showing stale satellites/passes
+                state.selectedSatellites = [];
+                state.selectedSatellitePositions = {};
+                state.selectedSatelliteId = "";
+                state.passes = [];
+                state.passesAreCached = false;
+                state.passesRangeStart = null;
+                state.passesRangeEnd = null;
+                state.passesCachedGroupId = null;
+            }
             state.selectedSatGroupId = action.payload;
         },
         setPasses(state, action) {
             state.passes = action.payload;
+            if (!action.payload || action.payload.length === 0) {
+                state.passesAreCached = false;
+                state.passesRangeStart = null;
+                state.passesRangeEnd = null;
+                state.passesCachedGroupId = null;
+            }
         },
         setPassesLoading(state, action) {
             state.loading = action.payload;

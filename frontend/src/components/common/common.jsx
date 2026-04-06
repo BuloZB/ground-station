@@ -18,7 +18,7 @@
  */
 
 
-import {styled} from "@mui/material/styles";
+import {alpha, styled} from "@mui/material/styles";
 import Paper from "@mui/material/Paper";
 import {Polyline, Tooltip as LeafletTooltip} from "react-leaflet";
 import React, {useEffect, useRef, useState} from "react";
@@ -164,6 +164,16 @@ export const TitleBar = styled(Paper)(({ theme }) => ({
     boxShadow: theme.palette.mode === 'dark'
         ? '0 1px 2px rgba(0, 0, 0, 0.2)'
         : '0 1px 2px rgba(0, 0, 0, 0.08)',
+    '&.react-grid-draggable': {
+        cursor: 'grab',
+        userSelect: 'none',
+        borderBottom: `1px solid ${alpha(theme.palette.primary.main, 0.5)}`,
+        backgroundImage: `repeating-linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0, ${alpha(theme.palette.primary.main, 0.1)} 4px, transparent 4px, transparent 8px)`,
+    },
+    '&.react-grid-draggable:active': {
+        cursor: 'grabbing',
+        backgroundImage: `repeating-linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.16)} 0, ${alpha(theme.palette.primary.main, 0.16)} 4px, transparent 4px, transparent 8px)`,
+    },
 }));
 
 export const ThemedLeafletTooltip = styled(LeafletTooltip)(({ theme }) => ({

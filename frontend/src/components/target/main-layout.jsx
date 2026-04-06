@@ -214,7 +214,7 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     const [currentSatellitesCoverage, setCurrentSatellitesCoverage] = useState([]);
     const coverageRef = useRef(null);
 
-    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), [gridEditable]);
+    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), []);
 
     // Handler for refreshing timeline passes
     const handleRefreshTimelinePasses = () => {
@@ -392,11 +392,11 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     // globalize the callback
     handleSetGridEditableTarget = useCallback((value) => {
         dispatch(setGridEditable(value));
-    }, [gridEditable]);
+    }, [dispatch]);
 
     const handleSetMapZoomLevel = useCallback((zoomLevel) => {
         dispatch(setMapZoomLevel(zoomLevel));
-    }, [mapZoomLevel]);
+    }, [dispatch]);
 
     // we load any stored layouts from localStorage or fallback to default
     const [layouts, setLayouts] = useState(() => {

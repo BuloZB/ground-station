@@ -182,12 +182,12 @@ export default function SourcesTable() {
 
     return (
         <Box sx={{width: '100%', marginTop: 0}}>
-            <Alert severity="info">
+            <SynchronizeTLEsCard/>
+            <Alert severity="info" sx={{ mt: 2 }}>
                 <AlertTitle>{t('tle_sources.title')}</AlertTitle>
                 {t('tle_sources.subtitle')}
             </Alert>
-            <SynchronizeTLEsCard/>
-            <Box sx={{marginTop: 4}}>
+            <Box>
                 <DataGrid
                     loading={loading}
                     rows={tleSources}

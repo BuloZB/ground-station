@@ -18,6 +18,7 @@
  */
 
 
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './i18n/config.js'
 import {createBrowserRouter, RouterProvider} from "react-router";
@@ -50,6 +51,7 @@ import SatelliteInfoPage from "./components/satellites/satellite-info-page.jsx";
 import FilebrowserMain from "./components/filebrowser/filebrowser-main.jsx";
 import ScheduledObservationsLayout from "./components/scheduler/main-layout.jsx";
 
+const enableStrictMode = import.meta.env.VITE_REACT_STRICT_MODE !== 'false';
 
 const router = createBrowserRouter([
     {
@@ -158,7 +160,7 @@ const router = createBrowserRouter([
     },
 ]);
 
-createRoot(document.getElementById('root')).render(
+const app = (
     <ReduxProvider store={store}>
         <PersistGate loading={null} persistor={persistor}>
             <SocketProvider>
@@ -168,4 +170,8 @@ createRoot(document.getElementById('root')).render(
             </SocketProvider>
         </PersistGate>
     </ReduxProvider>
+);
+
+createRoot(document.getElementById('root')).render(
+    enableStrictMode ? <StrictMode>{app}</StrictMode> : app
 );

@@ -49,8 +49,6 @@ import SatelliteDetailsTable from "./satellites-table.jsx";
 import SatelliteGroupSelectorBar from "./satellite-group-selector-bar.jsx";
 import SatellitePassTimeline from "../target/timeline-main.jsx";
 
-const storageMapZoomValueKey = "overview-map-zoom-level";
-
 // Wrapper component to adapt overview passes to Timeline component
 const OverviewTimelineWrapper = React.memo(() => {
     const dispatch = useDispatch();
@@ -129,55 +127,20 @@ const ThemedDiv = styled('div')(({theme}) => ({
     backgroundColor: theme.palette.background.paper,
 }));
 
-function getMapZoomFromStorage() {
-    const savedZoomLevel = localStorage.getItem(storageMapZoomValueKey);
-    return savedZoomLevel ? parseFloat(savedZoomLevel) : 1.4;
-}
-
 const GlobalSatelliteTrackLayout = React.memo(function GlobalSatelliteTrackLayout() {
     const {socket} = useSocket();
     const dispatch = useDispatch();
     const {t} = useTranslation('overview');
-    const {
-        showPastOrbitPath,
-        showFutureOrbitPath,
-        showSatelliteCoverage,
-        showSunIcon,
-        showMoonIcon,
-        showTerminatorLine,
-        showTooltip,
-        gridEditable,
-        selectedSatellites,
-        pastOrbitLineColor,
-        futureOrbitLineColor,
-        satelliteCoverageColor,
-        orbitProjectionDuration,
-        tileLayerID,
-        mapZoomLevel,
-        satelliteGroupId,
-        openMapSettingsDialog,
-        nextPassesHours,
-        showGrid,
-        selectedSatelliteId,
-        selectedSatGroupId,
-    } = useSelector(state => state.overviewSatTrack);
+    const gridEditable = useSelector((state) => state.overviewSatTrack.gridEditable);
+    const selectedSatGroupId = useSelector((state) => state.overviewSatTrack.selectedSatGroupId);
     const {
         trackingState,
-        satelliteId: trackingSatelliteId,
         selectedRadioRig,
         selectedRotator,
         selectedTransmitter
     } = useSelector(state => state.targetSatTrack);
-    const [currentPastSatellitesPaths, setCurrentPastSatellitesPaths] = useState([]);
-    const [currentFutureSatellitesPaths, setCurrentFutureSatellitesPaths] = useState([]);
-    const [currentSatellitesPosition, setCurrentSatellitesPosition] = useState([]);
-    const [currentSatellitesCoverage, setCurrentSatellitesCoverage] = useState([]);
-    const [terminatorLine, setTerminatorLine] = useState([]);
-    const [daySidePolygon, setDaySidePolygon] = useState([]);
-    const [sunPos, setSunPos] = useState(null);
-    const [moonPos, setMoonPos] = useState(null);
 
-    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), [gridEditable]);
+    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), []);
 
     // Default layout if none in localStorage
     const defaultLayouts = {
@@ -376,11 +339,7 @@ const GlobalSatelliteTrackLayout = React.memo(function GlobalSatelliteTrackLayou
     // globalize the callback
     handleSetGridEditableOverview = useCallback((value) => {
         dispatch(setGridEditable(value));
-    }, [gridEditable]);
-
-    const handleSetMapZoomLevel = useCallback((zoomLevel) => {
-        dispatch(setMapZoomLevel(zoomLevel));
-    }, [mapZoomLevel]);
+    }, [dispatch]);
 
     // we load any stored layouts from localStorage or fallback to default
     const [layouts, setLayouts] = useState(() => {

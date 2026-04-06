@@ -8,122 +8,93 @@ import { Y_AXIS_WIDTH, X_AXIS_HEIGHT, Y_AXIS_TOP_MARGIN, elevationToYPercent } f
  */
 export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVerticalOffset = 150, geoIndex = null, totalGeoSats = null, highlightActivePasses = false }) => {
   const theme = useTheme();
-
-  // Color based on peak altitude
-  const getColor = () => {
-    if (pass.isCurrent) {
-      return theme.palette.success.main;
-    }
-    if (pass.peak_altitude < 10) return theme.palette.error.main; // Red for below 10°
-    if (pass.peak_altitude <= 45) return theme.palette.grey[500]; // Grey/white for 10-45°
-    return theme.palette.success.main; // Green for above 45°
+  const stateTokens = theme.palette.timelinePass || {
+    estimatedStroke: theme.palette.mode === 'dark' ? '#9aa3b2' : '#7b8794',
+    estimatedFill: theme.palette.mode === 'dark' ? 'rgba(154,163,178,0.10)' : 'rgba(123,135,148,0.07)',
+    lowStroke: theme.palette.error.main,
+    mediumStroke: theme.palette.grey[500],
+    highStroke: theme.palette.success.main,
+    activeStroke: theme.palette.success.main,
   };
 
-  // Split elevation curve into segments whenever elevation goes below 0
-  const curveSegments = [];
-  const pathDataSegments = [];
-
-  // Check if we have actual elevation curve data
   const hasElevationCurve = pass.elevation_curve && pass.elevation_curve.length > 0;
+  const totalDuration = endTime.getTime() - startTime.getTime();
+  const chartStartMs = startTime.getTime();
+  const chartEndMs = endTime.getTime();
 
+  const passColor = (() => {
+    if (pass.isCurrent) return stateTokens.activeStroke;
+    if (pass.peak_altitude < 10) return stateTokens.lowStroke;
+    if (pass.peak_altitude <= 45) return stateTokens.mediumStroke;
+    return stateTokens.highStroke;
+  })();
+
+  // Split computed curve into positive-elevation segments.
+  const computedPathDataSegments = [];
   if (hasElevationCurve) {
-    const totalDuration = endTime.getTime() - startTime.getTime();
-
-    // First, filter points to only those within the time window
-    let pointsInWindow = [];
     let beforePoint = null;
     let afterPoint = null;
+    const pointsInWindow = [];
 
     pass.elevation_curve.forEach((point) => {
       const pointTime = new Date(point.time).getTime();
-
-      if (pointTime < startTime.getTime()) {
-        // Keep updating beforePoint - we want the closest one to window start
+      if (pointTime < chartStartMs) {
         beforePoint = point;
-      } else if (pointTime > endTime.getTime()) {
-        // Keep only the first point after window end
-        if (!afterPoint) {
-          afterPoint = point;
-        }
+      } else if (pointTime > chartEndMs) {
+        if (!afterPoint) afterPoint = point;
       } else {
-        // Point is inside the window
         pointsInWindow.push(point);
       }
     });
 
-    // Build the full points list
-    let allPoints = [];
-    if (beforePoint) allPoints.push(beforePoint);
-    allPoints = allPoints.concat(pointsInWindow);
-    if (afterPoint) allPoints.push(afterPoint);
+    const allPoints = [
+      ...(beforePoint ? [beforePoint] : []),
+      ...pointsInWindow,
+      ...(afterPoint ? [afterPoint] : []),
+    ];
 
-    // Now split into segments whenever elevation < 0
+    const curveSegments = [];
     let currentSegment = [];
-
-    allPoints.forEach((point, i) => {
+    allPoints.forEach((point) => {
       if (point.elevation >= 0) {
-        // Add point to current segment
         currentSegment.push(point);
-      } else {
-        // Elevation is negative - end current segment if it has points
-        if (currentSegment.length > 0) {
-          curveSegments.push(currentSegment);
-          currentSegment = [];
-        }
+      } else if (currentSegment.length > 0) {
+        curveSegments.push(currentSegment);
+        currentSegment = [];
       }
     });
+    if (currentSegment.length > 0) curveSegments.push(currentSegment);
 
-    // Add final segment if it has points
-    if (currentSegment.length > 0) {
-      curveSegments.push(currentSegment);
-    }
-
-    // Convert each segment's points to path data strings
-    curveSegments.forEach((segment, idx) => {
-      const segmentPath = [];
-      const elevations = segment.map(p => p.elevation);
-
-      segment.forEach((point) => {
+    curveSegments.forEach((segment) => {
+      const segmentPath = segment.map((point) => {
         const pointTime = new Date(point.time).getTime();
-
-        // Clamp to window bounds
-        const clampedPointTime = Math.max(startTime.getTime(), Math.min(pointTime, endTime.getTime()));
-
-        // Use UNIFIED COORDINATE SYSTEM
-        // X: Time to percentage (0% = start, 100% = end)
-        const x = ((clampedPointTime - startTime.getTime()) / totalDuration) * 100;
-
-        // Y: Elevation to percentage (0% = 90° top, 100% = 0° bottom)
+        const clampedPointTime = Math.max(chartStartMs, Math.min(pointTime, chartEndMs));
+        const x = ((clampedPointTime - chartStartMs) / totalDuration) * 100;
         const y = elevationToYPercent(point.elevation);
-
-        segmentPath.push(`${x},${y}`);
+        return `${x},${y}`;
       });
-
-      // Only add segments with at least 2 points
-      if (segmentPath.length >= 2) {
-        pathDataSegments.push(segmentPath);
-      }
+      if (segmentPath.length >= 2) computedPathDataSegments.push(segmentPath);
     });
-  } else {
-    // Fallback: Show vertical line at peak_altitude when elevation curve is loading/missing
-    // Calculate the midpoint of the pass duration
-    const passStartTime = new Date(pass.event_start).getTime();
-    const passEndTime = new Date(pass.event_end).getTime();
-    const passMidpoint = (passStartTime + passEndTime) / 2;
-
-    // Calculate position within the timeline window
-    const totalDuration = endTime.getTime() - startTime.getTime();
-    const xPercent = ((passMidpoint - startTime.getTime()) / totalDuration) * 100;
-
-    // Create vertical line from 0° to peak_altitude
-    const yBottom = elevationToYPercent(0);
-    const yTop = elevationToYPercent(pass.peak_altitude);
-
-    // Store as a single vertical line segment
-    pathDataSegments.push([`${xPercent},${yBottom}`, `${xPercent},${yTop}`]);
   }
 
-  if (pathDataSegments.length === 0) {
+  // Always build an estimated placeholder shape from pass bounds + peak.
+  const passStartTime = new Date(pass.event_start).getTime();
+  const passEndTime = new Date(pass.event_end).getTime();
+  const clampedStart = Math.max(passStartTime, chartStartMs);
+  const clampedEnd = Math.min(passEndTime, chartEndMs);
+  const estimatedPathData = clampedEnd > clampedStart
+    ? (() => {
+      const startX = ((clampedStart - chartStartMs) / totalDuration) * 100;
+      const endX = ((clampedEnd - chartStartMs) / totalDuration) * 100;
+      const midpointX = (startX + endX) / 2;
+      const peakY = elevationToYPercent(pass.peak_altitude || 0);
+      const linePath = `M ${startX} 100 Q ${midpointX} ${peakY} ${endX} 100`;
+      const fillPath = `${linePath} L ${startX} 100 Z`;
+      return { linePath, fillPath };
+    })()
+    : null;
+
+  if (!estimatedPathData && computedPathDataSegments.length === 0) {
     return null;
   }
 
@@ -134,7 +105,7 @@ export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVe
   if (hasElevationCurve) {
     pass.elevation_curve.forEach((point) => {
       const pointTime = new Date(point.time).getTime();
-      if (pointTime >= startTime.getTime() && pointTime <= endTime.getTime()) {
+      if (pointTime >= chartStartMs && pointTime <= chartEndMs) {
         if (point.elevation > peakElevation) {
           peakElevation = point.elevation;
           peakPoint = point;
@@ -163,17 +134,13 @@ export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVe
     peakX = 50;
     peakY = elevationToYPercent(peakElevation);
   } else if (peakPoint) {
-    const totalDuration = endTime.getTime() - startTime.getTime();
     const pointTime = new Date(peakPoint.time).getTime();
-    peakX = ((pointTime - startTime.getTime()) / totalDuration) * 100;
+    peakX = ((pointTime - chartStartMs) / totalDuration) * 100;
     peakY = elevationToYPercent(peakPoint.elevation);
   } else {
-    // Fallback: use middle of pass with peak_altitude (for vertical line fallback)
-    const passStartTime = new Date(pass.event_start).getTime();
-    const passEndTime = new Date(pass.event_end).getTime();
+    // Fallback: use middle of pass with peak_altitude
     const passMidpoint = (passStartTime + passEndTime) / 2;
-    const totalDuration = endTime.getTime() - startTime.getTime();
-    peakX = ((passMidpoint - startTime.getTime()) / totalDuration) * 100;
+    peakX = ((passMidpoint - chartStartMs) / totalDuration) * 100;
     peakY = elevationToYPercent(pass.peak_altitude || 0);
   }
 
@@ -191,7 +158,33 @@ export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVe
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
       >
-        {pathDataSegments.map((pathData, segmentIndex) => {
+        {estimatedPathData && (
+          <g
+            style={{
+              opacity: hasElevationCurve ? 0 : 1,
+              transition: 'opacity 260ms ease-out',
+            }}
+          >
+            <path
+              d={estimatedPathData.fillPath}
+              fill={stateTokens.estimatedFill}
+              stroke="none"
+              style={{ pointerEvents: 'none' }}
+            />
+            <path
+              d={estimatedPathData.linePath}
+              stroke={stateTokens.estimatedStroke}
+              strokeWidth="0.7"
+              strokeDasharray="2.2,2.2"
+              fill="none"
+              opacity={highlightActivePasses ? (pass.isCurrent ? 0.95 : 0.75) : 0.85}
+              vectorEffect="non-scaling-stroke"
+              style={{ pointerEvents: 'none' }}
+            />
+          </g>
+        )}
+
+        {computedPathDataSegments.map((pathData, segmentIndex) => {
           // Create SVG path from points
           const pathString = pathData.map((point, i) => {
             const [x, y] = point.split(',');
@@ -207,20 +200,26 @@ export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVe
           const fillPath = `${pathString} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
 
           return (
-            <g key={segmentIndex}>
+            <g
+              key={segmentIndex}
+              style={{
+                opacity: hasElevationCurve ? 1 : 0,
+                transition: 'opacity 260ms ease-in',
+              }}
+            >
               {/* Fill area */}
               <path
                 d={fillPath}
-                fill={getColor()}
-                fillOpacity={highlightActivePasses ? (pass.isCurrent ? 0.15 : 0.08) : 0.15}
+                fill={passColor}
+                fillOpacity={hasElevationCurve ? (highlightActivePasses ? (pass.isCurrent ? 0.16 : 0.09) : 0.14) : 0}
                 stroke="none"
                 style={{ pointerEvents: 'none' }}
               />
               {/* Stroke line */}
               <path
                 d={pathString}
-                stroke={getColor()}
-                strokeWidth="0.5"
+                stroke={passColor}
+                strokeWidth={pass.isCurrent ? "0.7" : "0.55"}
                 strokeDasharray={highlightActivePasses ? (pass.isCurrent ? "0" : "2,2") : "0"}
                 fill="none"
                 opacity={highlightActivePasses ? (pass.isCurrent ? 1 : 0.8) : (pass.isCurrent ? 1 : 0.8)}
@@ -234,6 +233,9 @@ export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVe
 
       {/* Label at peak - type and size based on labelType and elevation */}
       {labelType && peakX !== null && peakY !== null && peakElevation >= 0 && (() => {
+        // Defer dense labels until computed curve is available.
+        if (!hasElevationCurve && labelType === 'name') return null;
+
         // Determine if we should show the label based on elevation threshold
         if (labelType === 'name' && peakElevation < 25) return null; // Don't show name labels below 25°
         if (labelType === 'peak' && peakElevation < 10) return null; // Don't show peak labels below 10°
@@ -243,7 +245,7 @@ export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVe
         if (labelType === 'name') {
           labelContent = pass.name;
         } else if (labelType === 'peak') {
-          labelContent = `${peakElevation.toFixed(0)}°`;
+          labelContent = `${hasElevationCurve ? '' : '~'}${peakElevation.toFixed(0)}°`;
         }
 
         if (!labelContent) return null;
@@ -263,16 +265,17 @@ export const PassCurve = ({ pass, startTime, endTime, labelType = false, labelVe
               transform: `translate(-50%, -${labelVerticalOffset}%)`,
               fontSize: fontSize,
               fontWeight: 'bold',
-              color: getColor(),
+              color: hasElevationCurve ? passColor : stateTokens.estimatedStroke,
               backgroundColor: theme.palette.background.paper,
               padding: '2px 6px',
               borderRadius: '3px',
-              border: pass.isCurrent ? `1px solid ${getColor()}` : 'none',
+              border: pass.isCurrent ? `1px solid ${hasElevationCurve ? passColor : stateTokens.estimatedStroke}` : 'none',
               whiteSpace: 'nowrap',
               pointerEvents: 'none',
               zIndex: 25,
-              opacity: highlightActivePasses ? (pass.isCurrent ? 0.9 : 0.5) : 0.9,
+              opacity: hasElevationCurve ? (highlightActivePasses ? (pass.isCurrent ? 0.9 : 0.5) : 0.9) : 0.7,
               boxShadow: theme.shadows[1],
+              transition: 'opacity 260ms ease-out, color 260ms ease-out, border-color 260ms ease-out',
             }}
           >
             {labelContent}

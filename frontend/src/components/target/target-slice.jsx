@@ -374,6 +374,7 @@ const targetSatTrackSlice = createSlice({
         openMapSettingsDialog: false,
         openPassesTableSettingsDialog: false,
         passesTableColumnVisibility: {
+            status: true,
             event_start: true,
             event_end: true,
             duration: true,
@@ -386,6 +387,7 @@ const targetSatTrackSlice = createSlice({
             is_geosynchronous: false,
         },
         passesTablePageSize: 15,
+        passesTableSortModel: [{ field: 'status', sort: 'asc' }, { field: 'event_start', sort: 'asc' }],
         nextPassesHours: 24.0,
         cachedPasses: {},
         selectedTransmitter: "none",
@@ -663,6 +665,9 @@ const targetSatTrackSlice = createSlice({
         },
         setPassesTablePageSize(state, action) {
             state.passesTablePageSize = action.payload;
+        },
+        setPassesTableSortModel(state, action) {
+            state.passesTableSortModel = action.payload;
         },
         setNextPassesHours(state, action) {
             state.nextPassesHours = action.payload;
@@ -947,6 +952,7 @@ export const {
     setOpenPassesTableSettingsDialog,
     setPassesTableColumnVisibility,
     setPassesTablePageSize,
+    setPassesTableSortModel,
     setNextPassesHours,
     setSelectedTransmitter,
     setAvailableTransmitters,

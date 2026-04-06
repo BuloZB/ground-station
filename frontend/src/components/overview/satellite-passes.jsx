@@ -18,7 +18,7 @@
  */
 
 
-import React, {useEffect, useMemo, useRef, useState} from "react";
+import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {useSocket} from "../common/socket.jsx";
 import { toast } from '../../utils/toast-with-timestamp.jsx';
 import {calculateElevationCurvesForPasses} from '../../utils/elevation-curve-calculator.js';
@@ -35,6 +35,10 @@ import {DataGrid, gridClasses} from "@mui/x-data-grid";
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
+import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
+import AccessTimeFilledIcon from '@mui/icons-material/AccessTimeFilled';
+import DoneAllIcon from '@mui/icons-material/DoneAll';
+import BlockIcon from '@mui/icons-material/Block';
 import {useDispatch, useSelector} from "react-redux";
 import {
     fetchNextPassesForGroup,
@@ -50,7 +54,7 @@ import {
 } from './overview-slice.jsx';
 import {Typography, Box, IconButton, Tooltip, Button, useMediaQuery, useTheme} from '@mui/material';
 import {useGridApiRef, GridPagination} from '@mui/x-data-grid';
-import {darken, lighten, styled} from '@mui/material/styles';
+import {alpha, darken, lighten, styled} from '@mui/material/styles';
 import {Chip} from "@mui/material";
 import {useStore} from 'react-redux';
 import {
@@ -70,6 +74,173 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import PassesTableSettingsDialog from './passes-table-settings-dialog.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 
+
+const getPassBackgroundColor = (color, theme, coefficient) => ({
+    backgroundColor: darken(color, coefficient),
+    ...theme.applyStyles('light', {
+        backgroundColor: lighten(color, coefficient),
+    }),
+});
+
+const getPassStatus = (row, now = new Date()) => {
+    if (row?.status === 'dead') return 'dead';
+    const eventStart = new Date(row?.event_start);
+    const eventEnd = new Date(row?.event_end);
+    if (eventStart <= now && eventEnd >= now) return 'live';
+    if (eventEnd < now) return 'passed';
+    return 'upcoming';
+};
+
+const getPassStatusPriority = (status) => {
+    switch (status) {
+        case 'live':
+            return 0;
+        case 'upcoming':
+            return 1;
+        case 'passed':
+            return 2;
+        case 'dead':
+            return 3;
+        default:
+            return 4;
+    }
+};
+
+const isPassTracked = (row, trackedSatelliteName, trackedSatelliteNoradId) => {
+    if (!row) return false;
+
+    if (trackedSatelliteNoradId != null && trackedSatelliteNoradId !== '') {
+        return String(row.norad_id) === String(trackedSatelliteNoradId);
+    }
+
+    if (!trackedSatelliteName) return false;
+    return row.name === trackedSatelliteName;
+};
+
+const StyledDataGrid = styled(DataGrid)(({theme}) => ({
+    '& .MuiDataGrid-row': {
+        borderLeft: '3px solid transparent',
+    },
+    '& .passes-row-tracked': {
+        borderLeftColor: alpha(theme.palette.info.main, 0.95),
+    },
+    '& .passes-row-live': {
+        backgroundColor: alpha(theme.palette.success.main, 0.2),
+        borderLeftColor: alpha(theme.palette.success.main, 0.95),
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.success.main, 0.1),
+            borderLeftColor: alpha(theme.palette.success.main, 0.65),
+        }),
+        '&:hover': {
+            backgroundColor: alpha(theme.palette.success.main, 0.27),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.success.main, 0.14),
+            }),
+        },
+    },
+    '& .passes-row-upcoming-soon': {
+        backgroundColor: alpha(theme.palette.warning.main, 0.14),
+        borderLeftColor: alpha(theme.palette.warning.main, 0.9),
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.warning.main, 0.08),
+            borderLeftColor: alpha(theme.palette.warning.main, 0.6),
+        }),
+    },
+    '& .passes-row-passed': {
+        '& .MuiDataGrid-cell': {
+            color: theme.palette.text.secondary,
+        },
+        '& .passes-time-absolute': {
+            opacity: 0.8,
+        },
+    },
+    '& .passes-row-dead': {
+        backgroundColor: alpha(theme.palette.error.main, 0.24),
+        borderLeftColor: alpha(theme.palette.error.main, 0.9),
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.error.main, 0.1),
+            borderLeftColor: alpha(theme.palette.error.main, 0.65),
+        }),
+    },
+    '& .passes-cell-passing': {
+        ...getPassBackgroundColor(theme.palette.success.main, theme, 0.7),
+        '&:hover': {
+            ...getPassBackgroundColor(theme.palette.success.main, theme, 0.6),
+        },
+        '&.Mui-selected': {
+            ...getPassBackgroundColor(theme.palette.success.main, theme, 0.5),
+            '&:hover': {
+                ...getPassBackgroundColor(theme.palette.success.main, theme, 0.4),
+            },
+        },
+    },
+    '& .passes-cell-passed': {
+        backgroundColor: alpha(theme.palette.info.main, 0.28),
+        borderLeft: `2px solid ${alpha(theme.palette.info.main, 0.85)}`,
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.info.main, 0.14),
+            borderLeft: `2px solid ${alpha(theme.palette.info.main, 0.55)}`,
+        }),
+        '&:hover': {
+            backgroundColor: alpha(theme.palette.info.main, 0.34),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.info.main, 0.2),
+            }),
+        },
+        '&.Mui-selected': {
+            backgroundColor: alpha(theme.palette.info.main, 0.4),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.info.main, 0.24),
+            }),
+            '&:hover': {
+                backgroundColor: alpha(theme.palette.info.main, 0.46),
+                ...theme.applyStyles('light', {
+                    backgroundColor: alpha(theme.palette.info.main, 0.28),
+                }),
+            },
+        },
+        textDecoration: 'line-through',
+    },
+    '& .passes-cell-dead': {
+        ...getPassBackgroundColor(theme.palette.error.main, theme, 0.7),
+        '&:hover': {
+            ...getPassBackgroundColor(theme.palette.error.main, theme, 0.6),
+        },
+        '&.Mui-selected': {
+            ...getPassBackgroundColor(theme.palette.error.main, theme, 0.5),
+            '&:hover': {
+                ...getPassBackgroundColor(theme.palette.error.main, theme, 0.4),
+            },
+        },
+        textDecoration: 'line-through',
+    },
+    '& .passes-cell-warning': {
+        color: theme.palette.error.main,
+        textDecoration: 'line-through',
+    },
+    '& .passes-cell-success': {
+        color: theme.palette.success.main,
+        fontWeight: 'bold',
+        textDecoration: 'underline',
+    },
+    '& .passes-cell-active': {
+        ...getPassBackgroundColor(theme.palette.secondary.dark, theme, 0.7),
+        fontWeight: 'bold',
+        '&:hover': {
+            ...getPassBackgroundColor(theme.palette.secondary.main, theme, 0.6),
+        },
+        '&.Mui-selected': {
+            ...getPassBackgroundColor(theme.palette.secondary.main, theme, 0.5),
+            '&:hover': {
+                ...getPassBackgroundColor(theme.palette.secondary.main, theme, 0.4),
+            },
+        },
+    },
+    '& .passes-cell-status': {
+        alignItems: 'flex-start',
+        paddingTop: theme.spacing(0.4),
+    }
+}));
 
 const CustomPagination = () => {
     const apiRef = useGridApiContext();
@@ -174,39 +345,30 @@ const CustomPagination = () => {
     );
 };
 
-const TimeFormatter = React.memo(function TimeFormatter({params, value}) {
-    const [, setForceUpdate] = useState(0);
+const TimeFormatter = React.memo(function TimeFormatter({params, value, nowMs}) {
     const { timezone, locale } = useUserTimeSettings();
-
-    // Force component to update regularly
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setForceUpdate(prev => prev + 1);
-        }, 1000);
-        return () => clearInterval(interval);
-    }, []);
+    const relativeTime = useMemo(() => humanizeFutureDateInMinutes(value), [value, nowMs]);
 
     if (params.row.is_geostationary || params.row.is_geosynchronous) {
         return "∞";
     }
 
-    return `${getTimeFromISO(value, timezone, locale)} (${humanizeFutureDateInMinutes(value)})`;
+    return (
+        <Box sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <Typography component="span" variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                {relativeTime}
+            </Typography>
+            <Typography component="span" className="passes-time-absolute" variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>
+                · {getTimeFromISO(value, timezone, locale)}
+            </Typography>
+        </Box>
+    );
 });
 
 
-const DurationFormatter = React.memo(function DurationFormatter({params, value, event_start, event_end}) {
-    const [, setForceUpdate] = useState(0);
+const DurationFormatter = React.memo(function DurationFormatter({params, event_start, event_end, nowMs}) {
     const { t } = useTranslation('overview');
-
-    // Force component to update regularly
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setForceUpdate(prev => prev + 1);
-        }, 1000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const now = new Date();
+    const now = new Date(nowMs);
     const startDate = new Date(event_start);
     const endDate = new Date(event_end);
 
@@ -228,7 +390,7 @@ const DurationFormatter = React.memo(function DurationFormatter({params, value, 
         const seconds = diffInSeconds % 60;
         return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
 
-    } else if (startDate < now < endDate) {
+    } else if (startDate < now && now < endDate) {
         // Passing now
         const diffInSeconds = Math.floor((endDate - now) / 1000);
         const minutes = Math.floor(diffInSeconds / 60);
@@ -240,139 +402,247 @@ const DurationFormatter = React.memo(function DurationFormatter({params, value, 
     }
 });
 
-const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passes, passesLoading, onRowClick, passesAreCached = false, orbitProjectionDuration = 240, pageSize = 10, onPageSizeChange, sortModel, onSortModelChange, columnVisibility, onColumnVisibilityChange}) {
+const PassStatusCell = React.memo(function PassStatusCell({status, isTracked = false}) {
+    const { t } = useTranslation('overview');
+    const statusConfig = {
+        live: {
+            label: t('passes_table.status_visible'),
+            color: 'success',
+            icon: <RadioButtonCheckedIcon sx={{ fontSize: '0.85rem' }} />,
+        },
+        upcoming: {
+            label: t('passes_table.status_upcoming'),
+            color: 'warning',
+            icon: <AccessTimeFilledIcon sx={{ fontSize: '0.85rem' }} />,
+        },
+        passed: {
+            label: t('passes_table.status_passed'),
+            color: 'info',
+            icon: <DoneAllIcon sx={{ fontSize: '0.85rem' }} />,
+        },
+        dead: {
+            label: t('passes_table.status_dead'),
+            color: 'error',
+            icon: <BlockIcon sx={{ fontSize: '0.85rem' }} />,
+        },
+    };
+    const config = statusConfig[status] || statusConfig.upcoming;
+    const markerOpacity = (status === 'passed' || status === 'dead') ? 0.45 : 1;
+
+    return (
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.6, width: '100%' }}>
+            <Chip
+                icon={config.icon}
+                size="small"
+                label={config.label}
+                color={config.color}
+                variant={status === 'upcoming' ? 'outlined' : 'filled'}
+                sx={{ fontWeight: 700, minWidth: 85 }}
+            />
+            <Box sx={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>
+                {isTracked && (
+                    <Tooltip title={t('passes_table.tracked_tooltip', { defaultValue: 'Current target satellite' })}>
+                        <GpsFixedIcon
+                            aria-label={t('passes_table.status_tracked', { defaultValue: 'Tracked' })}
+                            sx={{
+                                fontSize: '1.08rem',
+                                color: 'info.light',
+                                filter: 'brightness(1.15)',
+                                opacity: markerOpacity,
+                            }}
+                        />
+                    </Tooltip>
+                )}
+            </Box>
+        </Box>
+    );
+});
+
+const PassBandsCell = React.memo(function PassBandsCell({transmitters, noDataText}) {
+    if (!transmitters) {
+        return noDataText;
+    }
+
+    const bandDetails = transmitters.reduce((acc, transmitter) => {
+        const upBand = transmitter['uplink_low'] != null
+            ? getFrequencyBand(transmitter['uplink_low'])
+            : null;
+        const downBand = transmitter['downlink_low'] != null
+            ? getFrequencyBand(transmitter['downlink_low'])
+            : null;
+
+        const uniqueBands = new Set([upBand, downBand].filter(Boolean));
+        uniqueBands.forEach((band) => {
+            if (!acc[band]) {
+                acc[band] = { count: 0, uplink: false, downlink: false };
+            }
+            acc[band].count += 1;
+        });
+
+        if (upBand) {
+            if (!acc[upBand]) acc[upBand] = { count: 0, uplink: false, downlink: false };
+            acc[upBand].uplink = true;
+        }
+
+        if (downBand) {
+            if (!acc[downBand]) acc[downBand] = { count: 0, uplink: false, downlink: false };
+            acc[downBand].downlink = true;
+        }
+
+        return acc;
+    }, {});
+
+    const bands = Object.keys(bandDetails);
+
+    return (
+        <div style={{display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center'}}>
+            {bands.map((band, index) => (
+                <React.Fragment key={index}>
+                    {bandDetails[band].count} ✕ <Chip
+                    label={
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.35 }}>
+                            <Box component="span">{band}</Box>
+                            {bandDetails[band].uplink && <ArrowUpwardRoundedIcon sx={{ fontSize: '0.85rem' }} />}
+                            {bandDetails[band].downlink && <ArrowDownwardRoundedIcon sx={{ fontSize: '0.85rem' }} />}
+                        </Box>
+                    }
+                    size="small"
+                    sx={{
+                        mt: '8px',
+                        height: '18px',
+                        fontSize: '0.65rem',
+                        fontWeight: 'bold',
+                        backgroundColor: getBandColor(band),
+                        color: 'common.white',
+                        '& .MuiChip-label': {
+                            px: 0.75
+                        },
+                        '&:hover': {
+                            filter: 'brightness(90%)',
+                        }
+                    }}
+                />
+                </React.Fragment>
+            ))}
+        </div>
+    );
+});
+
+const PassProgressCell = React.memo(function PassProgressCell({row, nowMs}) {
+    return <ProgressFormatter row={row} nowMs={nowMs} />;
+}, (prevProps, nextProps) => (
+    prevProps.nowMs === nextProps.nowMs &&
+    prevProps.row?.id === nextProps.row?.id &&
+    prevProps.row?.event_start === nextProps.row?.event_start &&
+    prevProps.row?.event_end === nextProps.row?.event_end &&
+    prevProps.row?.peak_time === nextProps.row?.peak_time &&
+    prevProps.row?.is_geostationary === nextProps.row?.is_geostationary &&
+    prevProps.row?.is_geosynchronous === nextProps.row?.is_geosynchronous
+));
+
+const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
+    passes,
+    passesLoading,
+    quickFilterPreset,
+    trackedSatelliteName,
+    trackedSatelliteNoradId,
+    onRowClick,
+    onRowDoubleClick,
+    passesAreCached = false,
+    orbitProjectionDuration = 240,
+    pageSize = 10,
+    onPageSizeChange,
+    sortModel,
+    onSortModelChange,
+    columnVisibility,
+    onColumnVisibilityChange
+}) {
     const apiRef = useGridApiRef();
     const store = useStore();
     const { t, i18n } = useTranslation('overview');
+    const theme = useTheme();
+    const isCompactView = useMediaQuery(theme.breakpoints.down('md'));
     const currentLanguage = i18n.language;
     const dataGridLocale = currentLanguage === 'el' ? elGR : enUS;
     const [page, setPage] = useState(0);
+    const [nowMs, setNowMs] = useState(() => Date.now());
+    const [relativeNowMs, setRelativeNowMs] = useState(() => Date.now());
+    const nowMsRef = useRef(nowMs);
+    nowMsRef.current = nowMs;
+    const relativeNowMsRef = useRef(relativeNowMs);
+    relativeNowMsRef.current = relativeNowMs;
 
     // Convert minutes to hours for display
     const projectionHours = Math.round(orbitProjectionDuration / 60);
-
-    // This method allows us to reference values in redux without a re-render, crucial in the next passes table
-    const targetSatTrackRef = useRef(() => {
-        const state = store.getState();
-        return state.targetSatTrack;
-    });
 
     const selectedSatellitePositionsRef = useRef(() => {
         const state = store.getState();
         return state.overviewSatTrack.selectedSatellitePositions;
     });
 
-    const getBackgroundColor = (color, theme, coefficient) => ({
-        backgroundColor: darken(color, coefficient),
-        ...theme.applyStyles('light', {
-            backgroundColor: lighten(color, coefficient),
-        }),
-    });
-
-    const StyledDataGrid = styled(DataGrid)(({theme}) => ({
-        '& .passes-cell-passing': {
-            ...getBackgroundColor(theme.palette.success.main, theme, 0.7),
-            '&:hover': {
-                ...getBackgroundColor(theme.palette.success.main, theme, 0.6),
-            },
-            '&.Mui-selected': {
-                ...getBackgroundColor(theme.palette.success.main, theme, 0.5),
-                '&:hover': {
-                    ...getBackgroundColor(theme.palette.success.main, theme, 0.4),
-                },
-            },
-        },
-        '& .passes-cell-passed': {
-            ...getBackgroundColor(theme.palette.info.main, theme, 0.7),
-            '&:hover': {
-                ...getBackgroundColor(theme.palette.info.main, theme, 0.6),
-            },
-            '&.Mui-selected': {
-                ...getBackgroundColor(theme.palette.info.main, theme, 0.5),
-                '&:hover': {
-                    ...getBackgroundColor(theme.palette.info.main, theme, 0.4),
-                },
-            },
-            textDecoration: 'line-through',
-        },
-        '& .passes-cell-dead': {
-            ...getBackgroundColor(theme.palette.error.main, theme, 0.7),
-            '&:hover': {
-                ...getBackgroundColor(theme.palette.error.main, theme, 0.6),
-            },
-            '&.Mui-selected': {
-                ...getBackgroundColor(theme.palette.error.main, theme, 0.5),
-                '&:hover': {
-                    ...getBackgroundColor(theme.palette.error.main, theme, 0.4),
-                },
-            },
-            textDecoration: 'line-through',
-        },
-        '& .passes-cell-warning': {
-            color: theme.palette.error.main,
-            textDecoration: 'line-through',
-        },
-        '& .passes-cell-success': {
-            color: theme.palette.success.main,
-            fontWeight: 'bold',
-            textDecoration: 'underline',
-        },
-        '& .passes-cell-active': {
-            ...getBackgroundColor(theme.palette.secondary.dark, theme, 0.7),
-            fontWeight: 'bold',
-            '&:hover': {
-                ...getBackgroundColor(theme.palette.secondary.main, theme, 0.6),
-            },
-            '&.Mui-selected': {
-                ...getBackgroundColor(theme.palette.secondary.main, theme, 0.5),
-                '&:hover': {
-                    ...getBackgroundColor(theme.palette.secondary.main, theme, 0.4),
-                },
-            },
-        }
-    }));
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            setNowMs(Date.now());
+        }, 1000);
+        return () => clearInterval(intervalId);
+    }, []);
 
     useEffect(() => {
         const intervalId = setInterval(() => {
-            const rowIds = apiRef.current.getAllRowIds();
-            rowIds.forEach((rowId) => {
-
-                // Access the row model
-                const rowNode = apiRef.current.getRowNode(rowId);
-                if (!rowNode) {
-                    return;
-                }
-
-                // Update only the row model in the grid's internal state
-                apiRef.current.updateRows([{
-                    id: rowId,
-                    _rowClassName: ''
-                }]);
-            });
-        }, 1000);
-
-        return () => {
-            clearInterval(intervalId);
-        };
+            setRelativeNowMs(Date.now());
+        }, 5000);
+        return () => clearInterval(intervalId);
     }, []);
 
-    const columns = [
+    const localeText = useMemo(() => ({
+        ...dataGridLocale.components.MuiDataGrid.defaultProps.localeText,
+        noRowsLabel: t('passes_table.no_passes', { hours: projectionHours })
+    }), [dataGridLocale.components.MuiDataGrid.defaultProps.localeText, projectionHours, t]);
+
+    const filteredPasses = useMemo(() => {
+        const now = new Date(nowMs);
+        if (quickFilterPreset === 'tracked') {
+            return passes.filter((pass) => isPassTracked(pass, trackedSatelliteName, trackedSatelliteNoradId));
+        }
+        if (quickFilterPreset === 'live') {
+            return passes.filter((pass) => getPassStatus(pass, now) === 'live');
+        }
+        if (quickFilterPreset === 'next30') {
+            return passes.filter((pass) => {
+                const status = getPassStatus(pass, now);
+                if (status === 'live') return true;
+                if (status !== 'upcoming') return false;
+                const start = new Date(pass.event_start);
+                return (start - now) <= 30 * 60 * 1000;
+            });
+        }
+        return passes;
+    }, [passes, quickFilterPreset, nowMs, trackedSatelliteName, trackedSatelliteNoradId]);
+
+    const columns = useMemo(() => [
+        {
+            field: 'status',
+            minWidth: 145,
+            headerName: 'Status',
+            flex: 1,
+            align: 'center',
+            headerAlign: 'center',
+            cellClassName: 'passes-cell-status',
+            valueGetter: (_value, row) => getPassStatus(row, new Date(nowMsRef.current)),
+            sortComparator: (v1, v2) => getPassStatusPriority(v1) - getPassStatusPriority(v2),
+            renderCell: (params) => (
+                <PassStatusCell
+                    status={params.value}
+                    isTracked={isPassTracked(params.row, trackedSatelliteName, trackedSatelliteNoradId)}
+                />
+            )
+        },
         {
             field: 'name',
             minWidth: 120,
             headerName: t('passes_table.name'),
             flex: 2,
-            renderCell: (params) => {
-                const targetSatTrack = targetSatTrackRef.current();
-                const isTracked = targetSatTrack.satelliteData['details']['name'] === params.value;
-
-                return <>
-                    {isTracked && (
-                        <GpsFixedIcon sx={{ mr: 0.5, fontSize: '1.3rem', color: 'info.main', verticalAlign: 'middle' }} />
-                    )}
-                    {params.value}
-                </>;
-            }
+            renderCell: (params) => params.value
         },
         {
             field: 'alternative_name',
@@ -421,7 +691,7 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
             flex: 1,
             sortable: false,
             renderCell: (params) => {
-                const now = new Date();
+                const now = new Date(nowMsRef.current);
                 const isActive = new Date(params.row.event_start) < now && new Date(params.row.event_end) > now;
 
                 if (!isActive) {
@@ -449,7 +719,7 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
             align: 'center',
             headerAlign: 'center',
             flex: 1,
-            renderCell: (params) => <ProgressFormatter params={params} />
+            renderCell: (params) => <PassProgressCell row={params.row} nowMs={nowMsRef.current} />
         },
         {
             field: 'duration',
@@ -458,10 +728,11 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
             align: 'center',
             headerAlign: 'center',
             flex: 1,
+            sortable: false,
             renderCell: (params) => (
                 <div>
-                    <DurationFormatter params={params} value={params.value} event_start={params.row.event_start}
-                                       event_end={params.row.event_end}/>
+                    <DurationFormatter params={params} event_start={params.row.event_start}
+                                       event_end={params.row.event_end} nowMs={nowMsRef.current}/>
                 </div>
             )
         },
@@ -472,78 +743,7 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
             headerAlign: 'center',
             headerName: t('passes_table.bands'),
             flex: 2,
-            renderCell: (params) => {
-                const transmitters = params.value;
-                if (!transmitters) {
-                    return t('passes_table.no_data');
-                }
-
-                // Aggregate count and direction markers per band.
-                const bandDetails = transmitters.reduce((acc, transmitter) => {
-                    const upBand = transmitter['uplink_low'] != null
-                        ? getFrequencyBand(transmitter['uplink_low'])
-                        : null;
-                    const downBand = transmitter['downlink_low'] != null
-                        ? getFrequencyBand(transmitter['downlink_low'])
-                        : null;
-
-                    // Count each transmitter once per band (avoid double count if up/down same band).
-                    const uniqueBands = new Set([upBand, downBand].filter(Boolean));
-                    uniqueBands.forEach((band) => {
-                        if (!acc[band]) {
-                            acc[band] = { count: 0, uplink: false, downlink: false };
-                        }
-                        acc[band].count += 1;
-                    });
-
-                    if (upBand) {
-                        if (!acc[upBand]) acc[upBand] = { count: 0, uplink: false, downlink: false };
-                        acc[upBand].uplink = true;
-                    }
-
-                    if (downBand) {
-                        if (!acc[downBand]) acc[downBand] = { count: 0, uplink: false, downlink: false };
-                        acc[downBand].downlink = true;
-                    }
-
-                    return acc;
-                }, {});
-
-                const bands = Object.keys(bandDetails);
-
-                return (
-                    <div style={{display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center'}}>
-                        {bands.map((band, index) => (
-                            <React.Fragment key={index}>
-                                {bandDetails[band].count} ✕ <Chip
-                                label={
-                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.35 }}>
-                                        <Box component="span">{band}</Box>
-                                        {bandDetails[band].uplink && <ArrowUpwardRoundedIcon sx={{ fontSize: '0.85rem' }} />}
-                                        {bandDetails[band].downlink && <ArrowDownwardRoundedIcon sx={{ fontSize: '0.85rem' }} />}
-                                    </Box>
-                                }
-                                size="small"
-                                sx={{
-                                    mt: '8px',
-                                    height: '18px',
-                                    fontSize: '0.65rem',
-                                    fontWeight: 'bold',
-                                    backgroundColor: getBandColor(band),
-                                    color: 'common.white',
-                                    '& .MuiChip-label': {
-                                        px: 0.75
-                                    },
-                                    '&:hover': {
-                                        filter: 'brightness(90%)',
-                                    }
-                                }}
-                            />
-                            </React.Fragment>
-                        ))}
-                    </div>
-                );
-            }
+            renderCell: (params) => <PassBandsCell transmitters={params.value} noDataText={t('passes_table.no_data')} />
 
         },
         {
@@ -551,14 +751,22 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
             minWidth: 170,
             headerName: t('passes_table.start'),
             flex: 2,
-            renderCell: (params) => <TimeFormatter params={params} value={params.value}/>
+            renderCell: (params) => {
+                const status = getPassStatus(params.row, new Date(nowMsRef.current));
+                const timeTickMs = status === 'live' ? nowMsRef.current : relativeNowMsRef.current;
+                return <TimeFormatter params={params} value={params.value} nowMs={timeTickMs}/>;
+            }
         },
         {
             field: 'event_end',
             minWidth: 170,
             headerName: t('passes_table.end'),
             flex: 2,
-            renderCell: (params) => <TimeFormatter params={params} value={params.value}/>
+            renderCell: (params) => {
+                const status = getPassStatus(params.row, new Date(nowMsRef.current));
+                const timeTickMs = status === 'live' ? nowMsRef.current : relativeNowMsRef.current;
+                return <TimeFormatter params={params} value={params.value} nowMs={timeTickMs}/>;
+            }
         },
         {
             field: 'distance_at_start',
@@ -617,40 +825,58 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
             },
             hide: true,
         },
-    ];
+    ], [t, selectedSatellitePositionsRef, trackedSatelliteName, trackedSatelliteNoradId]);
 
-    const getPassesRowStyles = (param) => {
-        if (param.row) {
-            const targetSatTrack = targetSatTrackRef.current();
-            const isTargetSat = targetSatTrack.satelliteData['details']['norad_id'] === param.row['norad_id'];
-            const now = new Date();
-            const eventStart = new Date(param.row['event_start']);
-            const eventEnd = new Date(param.row['event_end']);
-            
-            // Check for dead status first
-            if (param.row.status === 'dead') {
-                return "passes-cell-dead pointer-cursor";
-            }
-            
-            if (isTargetSat) {
-                if (eventStart < now && eventEnd < now) {
-                    return "passes-cell-passed pointer-cursor";
-                } else if (eventStart < now && eventEnd > now) {
-                    return "passes-cell-active passes-cell-passing pointer-cursor";
-                } else {
-                    return "pointer-cursor";
-                }
-            } else {
-                if (eventStart < now && eventEnd < now) {
-                    return "passes-cell-passed pointer-cursor";
-                } else if (eventStart < now && eventEnd > now) {
-                    return "passes-cell-passing pointer-cursor";
-                } else {
-                    return "pointer-cursor";
-                }
-            }
+    const effectiveColumnVisibility = useMemo(() => {
+        const base = {
+            status: true,
+            ...columnVisibility,
+        };
+        if (!isCompactView) {
+            return base;
         }
-    }
+        return {
+            ...base,
+            alternative_name: false,
+            name_other: false,
+            elevation: false,
+            duration: false,
+            transmitters: false,
+            event_end: false,
+            distance_at_start: false,
+            distance_at_end: false,
+            distance_at_peak: false,
+            is_geostationary: false,
+            is_geosynchronous: false,
+        };
+    }, [columnVisibility, isCompactView]);
+
+    const getPassesRowStyles = useCallback((param) => {
+        if (param.row) {
+            const now = new Date(nowMsRef.current);
+            const eventStart = new Date(param.row.event_start);
+            const status = getPassStatus(param.row, now);
+            const classes = ['pointer-cursor'];
+            if (isPassTracked(param.row, trackedSatelliteName, trackedSatelliteNoradId)) {
+                classes.push('passes-row-tracked');
+            }
+            if (status === 'dead') classes.push('passes-row-dead');
+            else if (status === 'passed') classes.push('passes-row-passed');
+            else if (status === 'live') classes.push('passes-row-live');
+            else if ((eventStart - now) <= 30 * 60 * 1000) classes.push('passes-row-upcoming-soon');
+            return classes.join(' ');
+        }
+        return "pointer-cursor";
+    }, [trackedSatelliteName, trackedSatelliteNoradId]);
+
+    const getRowId = useCallback((params) => params.id, []);
+
+    const handlePaginationModelChange = useCallback((model) => {
+        setPage(model.page);
+        if (onPageSizeChange && model.pageSize !== pageSize) {
+            onPageSizeChange(model.pageSize);
+        }
+    }, [onPageSizeChange, pageSize]);
 
     return (
         <StyledDataGrid
@@ -660,13 +886,9 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
             loading={passesLoading}
             getRowClassName={getPassesRowStyles}
             onRowClick={onRowClick}
-            getRowId={(params) => {
-                return params.id;
-            }}
-            localeText={{
-                ...dataGridLocale.components.MuiDataGrid.defaultProps.localeText,
-                noRowsLabel: t('passes_table.no_passes', { hours: projectionHours })
-            }}
+            onRowDoubleClick={onRowDoubleClick}
+            getRowId={getRowId}
+            localeText={localeText}
             sx={{
                 border: 0,
                 marginTop: 0,
@@ -688,22 +910,18 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
                 },
             }}
             density={"compact"}
-            rows={passes}
+            rows={filteredPasses}
             paginationModel={{
                 pageSize: pageSize,
                 page: page,
             }}
-            onPaginationModelChange={(model) => {
-                setPage(model.page);
-                if (onPageSizeChange && model.pageSize !== pageSize) {
-                    onPageSizeChange(model.pageSize);
-                }
-            }}
+            onPaginationModelChange={handlePaginationModelChange}
             sortModel={sortModel}
             onSortModelChange={onSortModelChange}
-            columnVisibilityModel={columnVisibility}
+            columnVisibilityModel={effectiveColumnVisibility}
             onColumnVisibilityModelChange={onColumnVisibilityChange}
             columns={columns}
+            pinnedColumns={isCompactView ? { left: ['name'], right: [] } : { left: ['name', 'status'], right: ['progress'] }}
             slots={{
                 pagination: CustomPagination,
             }}
@@ -713,6 +931,9 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({passe
     // Custom comparison function - return true if props haven't changed in ways that matter
     return (
         prevProps.passes === nextProps.passes &&
+        prevProps.quickFilterPreset === nextProps.quickFilterPreset &&
+        prevProps.trackedSatelliteName === nextProps.trackedSatelliteName &&
+        prevProps.trackedSatelliteNoradId === nextProps.trackedSatelliteNoradId &&
         prevProps.passesLoading === nextProps.passesLoading &&
         prevProps.orbitProjectionDuration === nextProps.orbitProjectionDuration &&
         prevProps.pageSize === nextProps.pageSize &&
@@ -729,12 +950,14 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
     const containerRef = useRef(null);
     const hasFetchedRef = useRef(false);
     const lastFetchParamsRef = useRef(null);
+    const lastSatelliteFetchGroupRef = useRef(null);
     const [containerHeight, setContainerHeight] = useState(0);
     const {
         selectedSatGroupId,
         passes,
         passesAreCached,
         passesLoading,
+        loadingSatellites,
         passesRangeStart,
         passesRangeEnd,
         passesCachedGroupId,
@@ -747,6 +970,7 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
         openPassesTableSettingsDialog,
         selectedSatellites
     } = useSelector(state => state.overviewSatTrack);
+    const targetSatTrack = useSelector(state => state.targetSatTrack);
     const { location } = useSelector(state => state.location);
 
     const minHeight = 200;
@@ -754,6 +978,9 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
     const [columnUpdateKey, setColumnUpdateKey] = useState(0);
     const hasLoadedFromStorageRef = useRef(false);
     const isLoadingRef = useRef(false);
+    const [quickFilterPreset, setQuickFilterPreset] = useState('all');
+    const trackedSatelliteName = targetSatTrack?.satelliteData?.details?.name || null;
+    const trackedSatelliteNoradId = targetSatTrack?.satelliteData?.details?.norad_id ?? targetSatTrack?.trackingState?.norad_id ?? null;
 
     // Load column visibility from localStorage on mount
     useEffect(() => {
@@ -869,10 +1096,44 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
     // Fetch satellites if we have a selected group but no satellites loaded yet
     // This handles the case where page loads with a group already selected (from localStorage)
     useEffect(() => {
-        if (selectedSatGroupId && (!selectedSatellites || selectedSatellites.length === 0) && !passesLoading) {
+        if (!selectedSatGroupId) {
+            lastSatelliteFetchGroupRef.current = null;
+            return;
+        }
+
+        const selectedSatellitesCount = selectedSatellites?.length ?? 0;
+
+        // If satellites are already available for this group, no fallback fetch is needed here.
+        if (selectedSatellitesCount > 0) {
+            lastSatelliteFetchGroupRef.current = selectedSatGroupId;
+            return;
+        }
+
+        if (passesLoading || loadingSatellites) {
+            return;
+        }
+
+        // Prevent repeated fetches when a group currently resolves to an empty satellite set.
+        if (lastSatelliteFetchGroupRef.current === selectedSatGroupId) {
+            return;
+        }
+
+        lastSatelliteFetchGroupRef.current = selectedSatGroupId;
+        if (selectedSatGroupId) {
             dispatch(fetchSatellitesByGroupId({ socket, satGroupId: selectedSatGroupId }));
         }
-    }, [selectedSatGroupId, selectedSatellites, dispatch, socket, passesLoading]);
+    }, [selectedSatGroupId, selectedSatellites, dispatch, socket, passesLoading, loadingSatellites]);
+
+    // If the selected group currently has no satellites, clear stale pass timeline/table data.
+    useEffect(() => {
+        if (!selectedSatGroupId || loadingSatellites) {
+            return;
+        }
+
+        if ((selectedSatellites?.length ?? 0) === 0) {
+            dispatch(setPasses([]));
+        }
+    }, [selectedSatGroupId, selectedSatellites, loadingSatellites, dispatch]);
 
     // Calculate elevation curves when passes are received
     useEffect(() => {
@@ -962,7 +1223,11 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
     const handleOnRowClick = (params) => {
         const noradId = params.row.id.split("_")[1];
         dispatch(setSelectedSatelliteId(parseInt(noradId)));
-    }
+    };
+
+    const handleOnRowDoubleClick = (params) => {
+        handleOnRowClick(params);
+    };
 
     const handlePageSizeChange = (newPageSize) => {
         dispatch(setPassesTablePageSize(newPageSize));
@@ -984,6 +1249,48 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
         dispatch(setOpenPassesTableSettingsDialog(false));
     };
 
+    const applyDefaultSort = useCallback(() => {
+        dispatch(setPassesTableSortModel([
+            { field: 'status', sort: 'asc' },
+            { field: 'event_start', sort: 'asc' },
+        ]));
+    }, [dispatch]);
+
+    const handleQuickPreset = useCallback((preset) => {
+        setQuickFilterPreset(preset);
+        if (preset === 'highEl') {
+            dispatch(setPassesTableSortModel([
+                { field: 'peak_altitude', sort: 'desc' },
+                { field: 'event_start', sort: 'asc' },
+            ]));
+            return;
+        }
+        applyDefaultSort();
+    }, [dispatch, applyDefaultSort]);
+
+    useEffect(() => {
+        const handleKeyboardShortcuts = (event) => {
+            if (!event.altKey) return;
+            if (event.key === '1') {
+                handleQuickPreset('all');
+            } else if (event.key === '2') {
+                handleQuickPreset('live');
+            } else if (event.key === '3') {
+                handleQuickPreset('next30');
+            } else if (event.key === '4') {
+                handleQuickPreset('highEl');
+            } else if (event.key === '5') {
+                handleQuickPreset('tracked');
+            } else {
+                return;
+            }
+            event.preventDefault();
+        };
+
+        window.addEventListener('keydown', handleKeyboardShortcuts);
+        return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
+    }, [handleQuickPreset]);
+
     return (
         <>
             <TitleBar
@@ -992,10 +1299,15 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
                     bgcolor: 'background.titleBar',
                     borderBottom: '1px solid',
                     borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)'
+                    backdropFilter: 'blur(10px)',
+                    height: 30,
+                    minHeight: 30,
+                    py: 0,
+                    display: 'flex',
+                    alignItems: 'center',
                 }}
             >
-                <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%'}}>
+                <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', height: '100%'}}>
                     <Box sx={{display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1}}>
                         <Typography variant="subtitle2" sx={{
                             fontWeight: 'bold',
@@ -1016,7 +1328,22 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
                             ({passes.length} {passes.length === 1 ? 'pass' : 'passes'}{passesAreCached ? `, ${t('passes_table.cached')}` : ''})
                         </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                        <Button size="small" variant={quickFilterPreset === 'all' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('all')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                            All
+                        </Button>
+                        <Button size="small" variant={quickFilterPreset === 'live' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('live')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                            Live
+                        </Button>
+                        <Button size="small" variant={quickFilterPreset === 'next30' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('next30')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                            Next 30m
+                        </Button>
+                        <Button size="small" variant={quickFilterPreset === 'highEl' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('highEl')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                            High El
+                        </Button>
+                        <Button size="small" variant={quickFilterPreset === 'tracked' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('tracked')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                            Tracked
+                        </Button>
                         <Tooltip title={t('passes_table_settings.title')}>
                             <span>
                                 <IconButton
@@ -1054,7 +1381,11 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
                     <MemoizedStyledDataGrid
                         passes={passes}
                         passesLoading={passesLoading}
+                        quickFilterPreset={quickFilterPreset}
+                        trackedSatelliteName={trackedSatelliteName}
+                        trackedSatelliteNoradId={trackedSatelliteNoradId}
                         onRowClick={handleOnRowClick}
+                        onRowDoubleClick={handleOnRowDoubleClick}
                         orbitProjectionDuration={orbitProjectionDuration}
                         pageSize={passesTablePageSize}
                         onPageSizeChange={handlePageSizeChange}

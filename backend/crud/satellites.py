@@ -71,13 +71,22 @@ async def fetch_satellites_for_group_id(session: AsyncSession, group_id: Union[s
             logger.warning(f"Group with ID {group_id} not found or has no data")
             return {"success": True, "data": [], "error": None}
 
-        satellite_ids = group["data"]["satellite_ids"]
+        satellite_ids = group["data"].get("satellite_ids") or []
 
         # Fetch satellites
         stmt = select(Satellites).filter(Satellites.norad_id.in_(satellite_ids))
         result = await session.execute(stmt)
         satellites = result.scalars().all()
         satellites = serialize_object(satellites)
+
+        # Auto-heal stale group references (satellites removed from DB but still present in group JSON)
+        existing_satellite_ids = {satellite["norad_id"] for satellite in satellites}
+        cleaned_satellite_ids = [sid for sid in satellite_ids if sid in existing_satellite_ids]
+        if len(cleaned_satellite_ids) != len(satellite_ids):
+            group_row = await session.get(Groups, group_id)
+            if group_row:
+                group_row.satellite_ids = cleaned_satellite_ids
+                await session.commit()
 
         # Fetch transmitters for each satellite and add group_id
         for satellite in satellites:
@@ -271,18 +280,31 @@ async def edit_satellite(session: AsyncSession, satellite_id: uuid.UUID, **kwarg
         return {"success": False, "error": str(e)}
 
 
-async def delete_satellite(session: AsyncSession, satellite_id: Union[uuid.UUID, str]) -> dict:
+async def delete_satellite(session: AsyncSession, satellite_id: Union[int, str]) -> dict:
     """
-    Delete a satellite record by its UUID.
+    Delete a satellite record by its NORAD ID.
     First deletes all associated transmitters due to foreign key constraint.
+    Also removes the NORAD ID from any satellite group memberships.
     """
     try:
         if isinstance(satellite_id, str):
-            satellite_id = uuid.UUID(satellite_id)
+            satellite_id = int(satellite_id.strip())
+        elif not isinstance(satellite_id, int):
+            raise ValueError(
+                f"satellite_id must be an int or numeric string, got {type(satellite_id)}"
+            )
 
         # First, delete all transmitters associated with this satellite
         transmitters_stmt = delete(Transmitters).where(Transmitters.norad_cat_id == satellite_id)
         await session.execute(transmitters_stmt)
+
+        # Remove satellite membership from all groups that reference this NORAD ID
+        groups_stmt = select(Groups)
+        groups_result = await session.execute(groups_stmt)
+        groups = groups_result.scalars().all()
+        for group in groups:
+            if group.satellite_ids and satellite_id in group.satellite_ids:
+                group.satellite_ids = [sid for sid in group.satellite_ids if sid != satellite_id]
 
         # Then delete the satellite
         satellite_stmt = (

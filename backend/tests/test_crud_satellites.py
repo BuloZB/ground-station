@@ -21,7 +21,7 @@ import uuid
 
 import pytest
 
-from crud.groups import add_satellite_group
+from crud.groups import add_satellite_group, fetch_satellite_group
 from crud.satellites import (
     add_satellite,
     delete_satellite,
@@ -343,6 +343,33 @@ class TestSatellitesCRUD:
         fetch_result = await fetch_satellites(db_session, norad_id=12345)
         assert len(fetch_result["data"]) == 0
 
+    async def test_delete_satellite_removes_group_membership(self, db_session):
+        """Deleting a satellite should also remove stale group references."""
+        await add_satellite(
+            db_session,
+            {
+                "name": "Group Member Satellite",
+                "sat_id": "GROUP-001",
+                "norad_id": 54321,
+                "status": "alive",
+                "is_frequency_violator": False,
+                "tle1": TLE1_TEMPLATE.format(norad=54321),
+                "tle2": TLE2_TEMPLATE.format(norad=54321),
+            },
+        )
+        group_result = await add_satellite_group(
+            db_session, {"name": "Artemis Test", "type": "user", "satellite_ids": [54321]}
+        )
+        group_id = group_result["data"]["id"]
+
+        result = await delete_satellite(db_session, satellite_id=54321)
+
+        assert result["success"] is True
+
+        group_after_delete = await fetch_satellite_group(db_session, group_id)
+        assert group_after_delete["success"] is True
+        assert group_after_delete["data"]["satellite_ids"] == []
+
     async def test_delete_satellite_not_found(self, db_session):
         """Test deleting non-existent satellite."""
         result = await delete_satellite(db_session, satellite_id=99999)
@@ -419,6 +446,36 @@ class TestSatellitesCRUD:
 
         assert result["success"] is True
         assert len(result["data"]) == 2
+
+    async def test_fetch_satellites_for_group_id_prunes_missing_members(self, db_session):
+        """Fetching group satellites should remove stale NORAD IDs from group membership."""
+        await add_satellite(
+            db_session,
+            {
+                "name": "Sat 1",
+                "sat_id": "SAT-001",
+                "norad_id": 11111,
+                "status": "alive",
+                "is_frequency_violator": False,
+                "tle1": TLE1_TEMPLATE.format(norad=11111),
+                "tle2": TLE2_TEMPLATE.format(norad=11111),
+            },
+        )
+
+        group_result = await add_satellite_group(
+            db_session, {"name": "Stale Group", "type": "user", "satellite_ids": [11111, 99999]}
+        )
+        group_id = group_result["data"]["id"]
+
+        result = await fetch_satellites_for_group_id(db_session, group_id)
+
+        assert result["success"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["norad_id"] == 11111
+
+        group_after_fetch = await fetch_satellite_group(db_session, group_id)
+        assert group_after_fetch["success"] is True
+        assert group_after_fetch["data"]["satellite_ids"] == [11111]
 
     async def test_add_satellite_with_all_fields(self, db_session):
         """Test adding satellite with all optional fields."""

@@ -8,16 +8,6 @@ const SyncTerminal = ({ syncState }) => {
     return (
         <>
             <Box sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                backgroundImage: 'repeating-linear-gradient(0deg, rgba(0,30,60,0.15), rgba(0,30,60,0.15) 1px, transparent 1px, transparent 2px)',
-                opacity: 0.5,
-                pointerEvents: 'none',
-            }}/>
-            <Box sx={{
                 height: '60px',
             }}>
                 <Typography

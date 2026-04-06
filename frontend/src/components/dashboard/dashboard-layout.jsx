@@ -157,7 +157,6 @@ function DashboardEditor() {
     };
 
     const handleCancelClick = () => {
-        // Revert changes and exit edit mode
         dispatch(setIsEditing(false));
         dispatch(setOverviewGridEditable(false));
         dispatch(setTargetGridEditable(false));

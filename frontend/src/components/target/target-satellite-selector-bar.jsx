@@ -277,8 +277,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                     <Tooltip title={`Elevation: ${satelliteData.position.el?.toFixed(2)}°`}>
                         <Chip
                             icon={
-                                selectedSatellitePositions?.[satelliteId]?.trend === 'rising' ? <TrendingUpIcon /> :
-                                selectedSatellitePositions?.[satelliteId]?.trend === 'falling' ? <TrendingDownIcon /> :
+                                selectedSatellitePositions?.[satelliteId]?.trend === 'rising_slow' || selectedSatellitePositions?.[satelliteId]?.trend === 'rising_fast' ? <TrendingUpIcon /> :
+                                selectedSatellitePositions?.[satelliteId]?.trend === 'falling_slow' || selectedSatellitePositions?.[satelliteId]?.trend === 'falling_fast' ? <TrendingDownIcon /> :
                                 selectedSatellitePositions?.[satelliteId]?.trend === 'peak' ? <HorizontalRuleIcon /> :
                                 null
                             }
@@ -294,8 +294,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                                 fontFamily: 'monospace',
                                 '& .MuiChip-icon': {
                                     color: satelliteData.position.el < 0 ? 'text.secondary' :
-                                           selectedSatellitePositions?.[satelliteId]?.trend === 'rising' ? 'info.light' :
-                                           selectedSatellitePositions?.[satelliteId]?.trend === 'falling' ? 'error.light' :
+                                           selectedSatellitePositions?.[satelliteId]?.trend === 'rising_slow' || selectedSatellitePositions?.[satelliteId]?.trend === 'rising_fast' ? 'info.light' :
+                                           selectedSatellitePositions?.[satelliteId]?.trend === 'falling_slow' || selectedSatellitePositions?.[satelliteId]?.trend === 'falling_fast' ? 'error.light' :
                                            selectedSatellitePositions?.[satelliteId]?.trend === 'peak' ? 'warning.light' :
                                            'white',
                                 }

@@ -68,8 +68,8 @@ const SatelliteGroupSelectorBar = React.memo(function SatelliteGroupSelectorBar(
         const updateStats = () => {
             const positions = selectedSatellitePositionsRef.current();
             const visibleSatellites = Object.values(positions || {}).filter(pos => pos.el > 0);
-            const risingCount = visibleSatellites.filter(pos => pos.trend === 'rising').length;
-            const fallingCount = visibleSatellites.filter(pos => pos.trend === 'falling').length;
+            const risingCount = visibleSatellites.filter(pos => pos.trend === 'rising_slow' || pos.trend === 'rising_fast').length;
+            const fallingCount = visibleSatellites.filter(pos => pos.trend === 'falling_slow' || pos.trend === 'falling_fast').length;
             const peakCount = visibleSatellites.filter(pos => pos.trend === 'peak').length;
 
             setVisibleSatStats({

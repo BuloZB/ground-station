@@ -2,6 +2,7 @@
   "title": "Πανοραμική Οψη",
   "satellites_table": {
     "title": "Λεπτομέρειες Ομάδας Δορυφόρων",
+    "group_title": "Ομάδα Δορυφόρων",
     "satellites_count": "{{count}} δορυφόροι",
     "satellite_name": "Ονομα Δορυφόρου",
     "alternative_name": "Εναλλακτικό Ονομα",
@@ -38,6 +39,10 @@
     "distance_peak": "Απόσταση στην κορυφή",
     "geo_stat": "Γεωστατικός",
     "geo_sync": "Γεωσύγχρονος",
+    "status_visible": "Ορατός",
+    "status_upcoming": "Επερχόμενη",
+    "status_passed": "Ολοκληρώθηκε",
+    "status_dead": "Ανενεργός",
     "no_value": "χωρίς τιμή",
     "no_data": "Χωρίς δεδομένα",
     "no_passes": "Δεν εντοπίστηκαν διελεύσεις για τις επόμενες {{hours}} ώρες"

@@ -62,6 +62,7 @@ const TargetPassesTableSettingsDialog = ({ open, onClose }) => {
     };
 
     const columns = [
+        { name: 'status', label: 'Status', category: 'basic', alwaysVisible: true },
         { name: 'event_start', label: t('next_passes.start'), category: 'time', alwaysVisible: true },
         { name: 'event_end', label: t('next_passes.end'), category: 'time', alwaysVisible: true },
         { name: 'duration', label: t('next_passes.duration'), category: 'basic', alwaysVisible: true },

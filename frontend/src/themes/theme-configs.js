@@ -25,7 +25,7 @@
 export const themeConfigs = {
     dark: {
         mode: 'dark',
-        primary: { main: '#9a9fa6' },
+        primary: { main: '#8fa8c4' },
         secondary: { main: '#d6926b' },
         success: { main: '#59d98b' },
         warning: { main: '#ffcc66' },

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:profile": "VITE_REACT_STRICT_MODE=false vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

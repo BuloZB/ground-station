@@ -62,6 +62,7 @@ const PassesTableSettingsDialog = ({ open, onClose }) => {
     };
 
     const columns = [
+        { name: 'status', label: 'Status', category: 'basic', alwaysVisible: true },
         { name: 'name', label: t('passes_table.name'), category: 'basic', alwaysVisible: true },
         { name: 'alternative_name', label: t('passes_table.alternative_name'), category: 'names' },
         { name: 'name_other', label: t('passes_table.name_other'), category: 'names' },

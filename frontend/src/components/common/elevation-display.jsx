@@ -19,14 +19,16 @@
 
 import React from "react";
 import { Box, Tooltip } from "@mui/material";
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import KeyboardDoubleArrowUpIcon from '@mui/icons-material/KeyboardDoubleArrowUp';
+import KeyboardDoubleArrowDownIcon from '@mui/icons-material/KeyboardDoubleArrowDown';
 import HorizontalRuleIcon from '@mui/icons-material/HorizontalRule';
 
 /**
  * Reusable component to display satellite elevation with trend indicator
  * @param {number} elevation - Current elevation in degrees
- * @param {string} trend - Trend: 'rising', 'falling', 'peak', 'stable'
+ * @param {string} trend - Trend: 'rising_slow', 'rising_fast', 'falling_slow', 'falling_fast', 'peak', 'stable'
  * @param {number} timeToMaxEl - Time to maximum elevation in seconds (optional)
  * @param {number} elRate - Rate of elevation change in degrees per update (optional)
  * @param {boolean} showNegative - Whether to show negative elevations (default: false, for tables. Set true for info card)
@@ -65,11 +67,17 @@ const ElevationDisplay = React.memo(function ElevationDisplay({
     let TrendIcon = null;
     let trendColor = 'text.secondary';
 
-    if (trend === 'rising') {
-        TrendIcon = TrendingUpIcon;
+    if (trend === 'rising_fast') {
+        TrendIcon = KeyboardDoubleArrowUpIcon;
         trendColor = 'info.main';
-    } else if (trend === 'falling') {
-        TrendIcon = TrendingDownIcon;
+    } else if (trend === 'rising_slow') {
+        TrendIcon = ArrowUpwardIcon;
+        trendColor = 'info.main';
+    } else if (trend === 'falling_fast') {
+        TrendIcon = KeyboardDoubleArrowDownIcon;
+        trendColor = 'error.main';
+    } else if (trend === 'falling_slow') {
+        TrendIcon = ArrowDownwardIcon;
         trendColor = 'error.main';
     } else if (trend === 'peak') {
         TrendIcon = HorizontalRuleIcon;
@@ -90,7 +98,14 @@ const ElevationDisplay = React.memo(function ElevationDisplay({
     // Build tooltip content
     const tooltipContent = [];
     if (trend && trend !== 'stable') {
-        tooltipContent.push(`Trend: ${trend}`);
+        const trendLabel = {
+            rising_fast: 'rising (fast)',
+            rising_slow: 'rising (slow)',
+            falling_fast: 'falling (fast)',
+            falling_slow: 'falling (slow)',
+            peak: 'peak',
+        }[trend] || trend;
+        tooltipContent.push(`Trend: ${trendLabel}`);
     }
     if (elRate !== null && elRate !== undefined) {
         tooltipContent.push(`Rate: ${elRate.toFixed(2)}°/update`);

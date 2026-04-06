@@ -18,7 +18,7 @@
  */
 
 
-import React, {useEffect, useRef, useState} from "react";
+import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {useSocket} from "../common/socket.jsx";
 import {
     getClassNamesBasedOnGridEditing,
@@ -28,53 +28,168 @@ import {
 } from "../common/common.jsx";
 import {DataGrid, gridClasses, useGridApiRef} from "@mui/x-data-grid";
 import { useDispatch, useSelector } from 'react-redux';
-import {darken, lighten, styled} from "@mui/material/styles";
-import {Box, Typography, IconButton, Tooltip} from '@mui/material';
+import {alpha, darken, lighten, styled} from "@mui/material/styles";
+import {Box, Typography, IconButton, Tooltip, Button, Chip, useMediaQuery, useTheme} from '@mui/material';
 import ProgressFormatter from "../overview/progressbar-widget.jsx";
 import { useTranslation } from 'react-i18next';
 import { enUS, elGR } from '@mui/x-data-grid/locales';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SettingsIcon from '@mui/icons-material/Settings';
+import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
+import AccessTimeFilledIcon from '@mui/icons-material/AccessTimeFilled';
+import DoneAllIcon from '@mui/icons-material/DoneAll';
 import {
     fetchNextPasses,
     updateSatellitePassesWithElevationCurves,
     setPassesTableColumnVisibility,
     setPassesTablePageSize,
+    setPassesTableSortModel,
     setOpenPassesTableSettingsDialog
 } from './target-slice.jsx';
 import {calculateElevationCurvesForPasses} from '../../utils/elevation-curve-calculator.js';
 import TargetPassesTableSettingsDialog from './target-passes-table-settings-dialog.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 
+const getPassStatus = (row, now = new Date()) => {
+    const startDate = new Date(row?.event_start);
+    const endDate = new Date(row?.event_end);
+    if (startDate <= now && endDate >= now) return 'live';
+    if (endDate < now) return 'passed';
+    return 'upcoming';
+};
 
-const TimeFormatter = React.memo(function TimeFormatter({ value }) {
-    const [, setForceUpdate] = useState(0);
+const getPassStatusPriority = (status) => {
+    switch (status) {
+        case 'live':
+            return 0;
+        case 'upcoming':
+            return 1;
+        case 'passed':
+            return 2;
+        default:
+            return 3;
+    }
+};
+
+const getPassBackgroundColor = (color, theme, coefficient) => ({
+    backgroundColor: darken(color, coefficient),
+    ...theme.applyStyles('light', {
+        backgroundColor: lighten(color, coefficient),
+    }),
+});
+
+const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
+    '& .MuiDataGrid-row': {
+        borderLeft: '3px solid transparent',
+    },
+    '& .passes-row-live': {
+        backgroundColor: alpha(theme.palette.success.main, 0.2),
+        borderLeftColor: alpha(theme.palette.success.main, 0.95),
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.success.main, 0.1),
+            borderLeftColor: alpha(theme.palette.success.main, 0.65),
+        }),
+        '&:hover': {
+            backgroundColor: alpha(theme.palette.success.main, 0.27),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.success.main, 0.14),
+            }),
+        },
+    },
+    '& .passes-row-upcoming': {
+        backgroundColor: alpha(theme.palette.warning.main, 0.14),
+        borderLeftColor: alpha(theme.palette.warning.main, 0.9),
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.warning.main, 0.08),
+            borderLeftColor: alpha(theme.palette.warning.main, 0.6),
+        }),
+    },
+    '& .passes-row-passed': {
+        '& .MuiDataGrid-cell': {
+            color: theme.palette.text.secondary,
+        },
+        '& .passes-time-absolute': {
+            opacity: 0.8,
+        },
+    },
+    '& .passes-row-dead': {
+        backgroundColor: alpha(theme.palette.error.main, 0.24),
+        borderLeftColor: alpha(theme.palette.error.main, 0.9),
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.error.main, 0.1),
+            borderLeftColor: alpha(theme.palette.error.main, 0.65),
+        }),
+    },
+    '& .passes-cell-passing': {
+        ...getPassBackgroundColor(theme.palette.success.main, theme, 0.7),
+        '&:hover': {
+            ...getPassBackgroundColor(theme.palette.success.main, theme, 0.6),
+        },
+        '&.Mui-selected': {
+            ...getPassBackgroundColor(theme.palette.success.main, theme, 0.5),
+            '&:hover': {
+                ...getPassBackgroundColor(theme.palette.success.main, theme, 0.4),
+            },
+        },
+    },
+    '& .passes-cell-passed': {
+        backgroundColor: alpha(theme.palette.info.main, 0.28),
+        borderLeft: `2px solid ${alpha(theme.palette.info.main, 0.85)}`,
+        ...theme.applyStyles('light', {
+            backgroundColor: alpha(theme.palette.info.main, 0.14),
+            borderLeft: `2px solid ${alpha(theme.palette.info.main, 0.55)}`,
+        }),
+        '&:hover': {
+            backgroundColor: alpha(theme.palette.info.main, 0.34),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.info.main, 0.2),
+            }),
+        },
+        '&.Mui-selected': {
+            backgroundColor: alpha(theme.palette.info.main, 0.4),
+            ...theme.applyStyles('light', {
+                backgroundColor: alpha(theme.palette.info.main, 0.24),
+            }),
+            '&:hover': {
+                backgroundColor: alpha(theme.palette.info.main, 0.46),
+                ...theme.applyStyles('light', {
+                    backgroundColor: alpha(theme.palette.info.main, 0.28),
+                }),
+            },
+        },
+        textDecoration: 'line-through',
+    },
+    '& .passes-cell-warning': {
+        color: theme.palette.error.main,
+        textDecoration: 'line-through',
+    },
+    '& .passes-cell-success': {
+        color: theme.palette.success.main,
+        fontWeight: 'bold',
+        textDecoration: 'underline',
+    }
+}));
+
+
+const TimeFormatter = React.memo(function TimeFormatter({ value, nowMs }) {
     const { timezone, locale } = useUserTimeSettings();
+    const relativeTime = useMemo(() => humanizeFutureDateInMinutes(value), [value, nowMs]);
 
-    // Force component to update regularly
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setForceUpdate(prev => prev + 1);
-        }, 1000); // Every minute
-        return () => clearInterval(interval);
-    }, []);
-
-    return `${getTimeFromISO(value, timezone, locale)} (${humanizeFutureDateInMinutes(value)})`;
+    return (
+        <Box sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <Typography component="span" variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                {relativeTime}
+            </Typography>
+            <Typography component="span" className="passes-time-absolute" variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>
+                · {getTimeFromISO(value, timezone, locale)}
+            </Typography>
+        </Box>
+    );
 });
 
 
-const DurationFormatter = React.memo(function DurationFormatter({params, value, event_start, event_end}) {
-    const [, setForceUpdate] = useState(0);
-
-    // Force component to update regularly
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setForceUpdate(prev => prev + 1);
-        }, 1000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const now = new Date();
+const DurationFormatter = React.memo(function DurationFormatter({params, event_start, event_end, nowMs}) {
+    const now = new Date(nowMs);
     const startDate = new Date(event_start);
     const endDate = new Date(event_end);
 
@@ -96,7 +211,7 @@ const DurationFormatter = React.memo(function DurationFormatter({params, value, 
         const seconds = diffInSeconds % 60;
         return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
-    } else if (startDate < now < endDate) {
+    } else if (startDate < now && now < endDate) {
         // Passing now
         const diffInSeconds = Math.floor((endDate - now) / 1000);
         const minutes = Math.floor(diffInSeconds / 60);
@@ -108,6 +223,38 @@ const DurationFormatter = React.memo(function DurationFormatter({params, value, 
     }
 });
 
+const PassStatusCell = React.memo(function PassStatusCell({status}) {
+    const { t } = useTranslation('overview');
+    const statusConfig = {
+        live: {
+            label: t('passes_table.status_visible'),
+            color: 'success',
+            icon: <RadioButtonCheckedIcon sx={{ fontSize: '0.85rem' }} />,
+        },
+        upcoming: {
+            label: t('passes_table.status_upcoming'),
+            color: 'warning',
+            icon: <AccessTimeFilledIcon sx={{ fontSize: '0.85rem' }} />,
+        },
+        passed: {
+            label: t('passes_table.status_passed'),
+            color: 'info',
+            icon: <DoneAllIcon sx={{ fontSize: '0.85rem' }} />,
+        },
+    };
+    const config = statusConfig[status] || statusConfig.upcoming;
+    return (
+        <Chip
+            icon={config.icon}
+            size="small"
+            label={config.label}
+            color={config.color}
+            variant={status === 'upcoming' ? 'outlined' : 'filled'}
+            sx={{ fontWeight: 700, minWidth: 85 }}
+        />
+    );
+});
+
 
 const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
     satellitePasses,
@@ -115,97 +262,55 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
     columnVisibility,
     onColumnVisibilityChange,
     pageSize = 15,
-    onPageSizeChange
+    onPageSizeChange,
+    sortModel,
+    onSortModelChange
 }) {
     const apiRef = useGridApiRef();
     const { t, i18n } = useTranslation('target');
+    const theme = useTheme();
+    const isCompactView = useMediaQuery(theme.breakpoints.down('md'));
     const currentLanguage = i18n.language;
     const dataGridLocale = currentLanguage === 'el' ? elGR : enUS;
     const [page, setPage] = useState(0);
+    const [nowMs, setNowMs] = useState(() => Date.now());
+    const nowMsRef = useRef(nowMs);
+    nowMsRef.current = nowMs;
 
     useEffect(() => {
         const intervalId = setInterval(() => {
-            const rowIds = apiRef.current.getAllRowIds();
-            rowIds.forEach((rowId) => {
-
-                // Access the row model
-                const rowNode = apiRef.current.getRowNode(rowId);
-                if (!rowNode) {
-                    return;
-                }
-
-                // Update only the row model in the grid's internal state
-                apiRef.current.updateRows([{
-                    id: rowId,
-                    _rowClassName: ''
-                }]);
-            });
+            setNowMs(Date.now());
         }, 1000);
 
-        return () => {
-            clearInterval(intervalId);
-        };
+        return () => clearInterval(intervalId);
     }, []);
 
 
-    const getBackgroundColor = (color, theme, coefficient) => ({
-        backgroundColor: darken(color, coefficient),
-        ...theme.applyStyles('light', {
-            backgroundColor: lighten(color, coefficient),
-        }),
-    });
-
-    const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
-        '& .passes-cell-passing': {
-            ...getBackgroundColor(theme.palette.success.main, theme, 0.7),
-            '&:hover': {
-                ...getBackgroundColor(theme.palette.success.main, theme, 0.6),
-            },
-            '&.Mui-selected': {
-                ...getBackgroundColor(theme.palette.success.main, theme, 0.5),
-                '&:hover': {
-                    ...getBackgroundColor(theme.palette.success.main, theme, 0.4),
-                },
-            },
-        },
-        '& .passes-cell-passed': {
-            ...getBackgroundColor(theme.palette.info.main, theme, 0.7),
-            '&:hover': {
-                ...getBackgroundColor(theme.palette.info.main, theme, 0.6),
-            },
-            '&.Mui-selected': {
-                ...getBackgroundColor(theme.palette.info.main, theme, 0.5),
-                '&:hover': {
-                    ...getBackgroundColor(theme.palette.info.main, theme, 0.4),
-                },
-            },
-            textDecoration: 'line-through',
-        },
-        '& .passes-cell-warning': {
-            color: theme.palette.error.main,
-            textDecoration: 'line-through',
-        },
-        '& .passes-cell-success': {
-            color: theme.palette.success.main,
-            fontWeight: 'bold',
-            textDecoration: 'underline',
-        }
-    }));
-
     const columns = [
+        {
+            field: 'status',
+            minWidth: 100,
+            headerName: 'Status',
+            align: 'center',
+            headerAlign: 'center',
+            flex: 1,
+            valueGetter: (_value, row) => getPassStatus(row, new Date(nowMsRef.current)),
+            sortComparator: (v1, v2) => getPassStatusPriority(v1) - getPassStatusPriority(v2),
+            renderCell: (params) => <PassStatusCell status={params.value} />
+        },
         {
             field: 'event_start',
             minWidth: 160,
             headerName: t('next_passes.start'),
             flex: 1,
-            renderCell: (params) => <TimeFormatter value={params.value} />
+            renderCell: (params) => <TimeFormatter value={params.value} nowMs={nowMs} />
         },
         {
             field: 'event_end',
             minWidth: 160,
             headerName: t('next_passes.end'),
             flex: 1,
-            renderCell: (params) => <TimeFormatter value={params.value} />
+            renderCell: (params) => <TimeFormatter value={params.value} nowMs={nowMs} />
         },
         {
             field: 'duration',
@@ -214,9 +319,10 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
             align: 'center',
             headerAlign: 'center',
             flex: 1,
+            sortable: false,
             renderCell: (params) => (
                 <div>
-                    <DurationFormatter params={params} value={params.value} event_start={params.row.event_start} event_end={params.row.event_end}/>
+                    <DurationFormatter params={params} event_start={params.row.event_start} event_end={params.row.event_end} nowMs={nowMs}/>
                 </div>
             ),
         },
@@ -306,6 +412,38 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
         },
     ];
 
+    const effectiveColumnVisibility = useMemo(() => {
+        const base = {
+            status: true,
+            ...columnVisibility,
+        };
+        if (!isCompactView) return base;
+        return {
+            ...base,
+            event_end: false,
+            distance_at_start: false,
+            distance_at_end: false,
+            distance_at_peak: false,
+            is_geostationary: false,
+            is_geosynchronous: false,
+        };
+    }, [columnVisibility, isCompactView]);
+
+    const getPassesRowStyles = useCallback((param) => {
+        if (param.row) {
+            const now = new Date(nowMsRef.current);
+            const status = getPassStatus(param.row, now);
+            if (status === 'dead') return 'passes-row-dead pointer-cursor';
+            if (status === 'passed') return 'passes-row-passed pointer-cursor';
+            if (status === 'live') return 'passes-row-live pointer-cursor';
+            if (status === 'upcoming') {
+                return 'passes-row-upcoming pointer-cursor';
+            }
+            return "pointer-cursor";
+        }
+        return "pointer-cursor";
+    }, []);
+
     return (
         <StyledDataGrid
             apiRef={apiRef}
@@ -331,27 +469,14 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
                     color: 'text.secondary',
                 },
             }}
-            getRowClassName={(param) => {
-                if (param.row) {
-                    if (new Date(param.row['event_start']) < new Date() && new Date(param.row['event_end']) < new Date()) {
-                        return "passes-cell-passed pointer-cursor";
-                    } else if (new Date(param.row['event_start']) < new Date() && new Date(param.row['event_end']) > new Date()) {
-                        return "passes-cell-passing pointer-cursor";
-                    } else {
-                        return "pointer-cursor";
-                    }
-                }
-            }}
+            getRowClassName={getPassesRowStyles}
             density={"compact"}
             rows={satellitePasses}
             pageSizeOptions={[5, 10, 15, 20]}
-            columnVisibilityModel={columnVisibility}
+            columnVisibilityModel={effectiveColumnVisibility}
             onColumnVisibilityModelChange={onColumnVisibilityChange}
-            initialState={{
-                sorting: {
-                    sortModel: [{ field: 'event_start', sort: 'asc' }],
-                },
-            }}
+            sortModel={sortModel}
+            onSortModelChange={onSortModelChange}
             paginationModel={{
                 pageSize: pageSize,
                 page: page,
@@ -363,6 +488,7 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
                 }
             }}
             columns={columns}
+            pinnedColumns={isCompactView ? { left: ['event_start'], right: ['progress'] } : { left: ['status', 'event_start'], right: ['progress'] }}
             disableRowSelectionOnClick
         />
     );
@@ -371,7 +497,8 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
         prevProps.satellitePasses === nextProps.satellitePasses &&
         prevProps.passesLoading === nextProps.passesLoading &&
         prevProps.columnVisibility === nextProps.columnVisibility &&
-        prevProps.pageSize === nextProps.pageSize
+        prevProps.pageSize === nextProps.pageSize &&
+        prevProps.sortModel === nextProps.sortModel
     );
 });
 
@@ -391,6 +518,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
         gridEditable,
         passesTableColumnVisibility,
         passesTablePageSize,
+        passesTableSortModel,
         openPassesTableSettingsDialog
     } = useSelector(state => state.targetSatTrack);
     const { location } = useSelector(state => state.location);
@@ -398,6 +526,8 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
     const maxHeight = 400;
     const hasLoadedFromStorageRef = useRef(false);
     const isLoadingRef = useRef(false);
+    const [quickFilterPreset, setQuickFilterPreset] = useState('all');
+    const [filterNowMs, setFilterNowMs] = useState(() => Date.now());
 
     // Load column visibility from localStorage on mount
     useEffect(() => {
@@ -435,6 +565,13 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
             }
         }
     }, [passesTableColumnVisibility]);
+
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            setFilterNowMs(Date.now());
+        }, 1000);
+        return () => clearInterval(intervalId);
+    }, []);
 
     const handleRefreshPasses = () => {
         if (satelliteId) {
@@ -500,6 +637,10 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
         dispatch(setPassesTablePageSize(newPageSize));
     };
 
+    const handleSortModelChange = useCallback((newSortModel) => {
+        dispatch(setPassesTableSortModel(newSortModel));
+    }, [dispatch]);
+
     const handleOpenSettings = () => {
         dispatch(setOpenPassesTableSettingsDialog(true));
     };
@@ -507,6 +648,55 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
     const handleCloseSettings = () => {
         dispatch(setOpenPassesTableSettingsDialog(false));
     };
+
+    const applyDefaultSort = useCallback(() => {
+        dispatch(setPassesTableSortModel([
+            { field: 'status', sort: 'asc' },
+            { field: 'event_start', sort: 'asc' },
+        ]));
+    }, [dispatch]);
+
+    const filteredPasses = useMemo(() => {
+        const now = new Date(filterNowMs);
+        if (quickFilterPreset === 'live') {
+            return satellitePasses.filter((pass) => getPassStatus(pass, now) === 'live');
+        }
+        if (quickFilterPreset === 'next30') {
+            return satellitePasses.filter((pass) => {
+                const status = getPassStatus(pass, now);
+                if (status === 'live') return true;
+                if (status !== 'upcoming') return false;
+                return (new Date(pass.event_start) - now) <= 30 * 60 * 1000;
+            });
+        }
+        return satellitePasses;
+    }, [satellitePasses, quickFilterPreset, filterNowMs]);
+
+    const handleQuickPreset = useCallback((preset) => {
+        setQuickFilterPreset(preset);
+        if (preset === 'highEl') {
+            dispatch(setPassesTableSortModel([
+                { field: 'peak_altitude', sort: 'desc' },
+                { field: 'event_start', sort: 'asc' },
+            ]));
+            return;
+        }
+        applyDefaultSort();
+    }, [dispatch, applyDefaultSort]);
+
+    useEffect(() => {
+        const handleKeyboardShortcuts = (event) => {
+            if (!event.altKey) return;
+            if (event.key === '1') handleQuickPreset('all');
+            else if (event.key === '2') handleQuickPreset('live');
+            else if (event.key === '3') handleQuickPreset('next30');
+            else if (event.key === '4') handleQuickPreset('highEl');
+            else return;
+            event.preventDefault();
+        };
+        window.addEventListener('keydown', handleKeyboardShortcuts);
+        return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
+    }, [handleQuickPreset]);
 
     return (
         <>
@@ -516,16 +706,49 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
                     bgcolor: 'background.titleBar',
                     borderBottom: '1px solid',
                     borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)'
+                    backdropFilter: 'blur(10px)',
+                    height: 30,
+                    minHeight: 30,
+                    py: 0,
+                    display: 'flex',
+                    alignItems: 'center',
                 }}
             >
-                <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%'}}>
+                <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', height: '100%'}}>
                     <Box sx={{display: 'flex', alignItems: 'center'}}>
                         <Typography variant="subtitle2" sx={{fontWeight: 'bold'}}>
                             {t('next_passes.title', { name: satelliteData['details']['name'], hours: nextPassesHours })}
                         </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                        <Tooltip title="Alt+1">
+                            <span>
+                                <Button size="small" variant={quickFilterPreset === 'all' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('all')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                                    All
+                                </Button>
+                            </span>
+                        </Tooltip>
+                        <Tooltip title="Alt+2">
+                            <span>
+                                <Button size="small" variant={quickFilterPreset === 'live' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('live')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                                    Live
+                                </Button>
+                            </span>
+                        </Tooltip>
+                        <Tooltip title="Alt+3">
+                            <span>
+                                <Button size="small" variant={quickFilterPreset === 'next30' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('next30')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                                    Next 30m
+                                </Button>
+                            </span>
+                        </Tooltip>
+                        <Tooltip title="Alt+4">
+                            <span>
+                                <Button size="small" variant={quickFilterPreset === 'highEl' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('highEl')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
+                                    High El
+                                </Button>
+                            </span>
+                        </Tooltip>
                         <Tooltip title={t('passes_table_settings.title')}>
                             <span>
                                 <IconButton
@@ -561,12 +784,14 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
                     minHeight,
                 }}>
                     <MemoizedStyledDataGrid
-                        satellitePasses={satellitePasses}
+                        satellitePasses={filteredPasses}
                         passesLoading={passesLoading}
                         columnVisibility={passesTableColumnVisibility}
                         onColumnVisibilityChange={handleColumnVisibilityChange}
                         pageSize={passesTablePageSize}
                         onPageSizeChange={handlePageSizeChange}
+                        sortModel={passesTableSortModel}
+                        onSortModelChange={handleSortModelChange}
                     />
                 </div>
             </div>

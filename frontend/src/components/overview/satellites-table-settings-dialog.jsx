@@ -66,6 +66,7 @@ const SatellitesTableSettingsDialog = ({ open, onClose }) => {
         { name: 'alternative_name', label: t('satellites_table.alternative_name'), category: 'names' },
         { name: 'norad_id', label: t('satellites_table.norad'), category: 'basic', alwaysVisible: true },
         { name: 'elevation', label: t('satellites_table.elevation'), category: 'basic', alwaysVisible: true },
+        { name: 'visibility', label: t('satellites_table.visibility', { defaultValue: 'Visibility' }), category: 'basic', alwaysVisible: true },
         { name: 'status', label: t('satellites_table.status'), category: 'basic' },
         { name: 'transmitters', label: t('satellites_table.transmitters'), category: 'basic' },
         { name: 'countries', label: t('satellites_table.countries'), category: 'metadata' },

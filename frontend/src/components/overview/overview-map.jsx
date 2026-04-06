@@ -17,7 +17,7 @@
  *
  */
 
-import React, {useCallback, useEffect, useRef, useState, useMemo} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
     MapContainer,
     TileLayer,
@@ -88,13 +88,12 @@ L.Icon.Default.mergeOptions({
     shadowUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png',
 });
 
-const storageMapZoomValueKey = 'overview-map-zoom-level';
 const satelliteIconDimCircle = L.divIcon({
     className: 'overview-satellite-dim-icon',
-    html: '<div style="width:10px;height:10px;border-radius:50%;background:#38bdf8;border:1px solid #e0f2fe;box-shadow:0 0 0 1px rgba(0,0,0,0.45),0 0 5px rgba(56,189,248,0.45);"></div>',
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
-    popupAnchor: [0, -5],
+    html: '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;"><div style="width:10px;height:10px;border-radius:50%;background:#38bdf8;border:1px solid #e0f2fe;box-shadow:0 0 0 1px rgba(0,0,0,0.45),0 0 5px rgba(56,189,248,0.45);"></div></div>',
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+    popupAnchor: [0, -10],
 });
 
 const CenterHomeButton = React.memo(function CenterHomeButton() {
@@ -143,6 +142,18 @@ const FullscreenMapButton = React.memo(function FullscreenMapButton() {
     );
 });
 
+function areSatellitesEquivalent(prev = [], next = []) {
+    if (prev === next) return true;
+    if (!Array.isArray(prev) || !Array.isArray(next)) return false;
+    if (prev.length !== next.length) return false;
+    for (let i = 0; i < prev.length; i += 1) {
+        if (prev[i]?.norad_id !== next[i]?.norad_id) return false;
+        if (prev[i]?.tle1 !== next[i]?.tle1) return false;
+        if (prev[i]?.tle2 !== next[i]?.tle2) return false;
+    }
+    return true;
+}
+
 const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
     const {socket} = useSocket();
     const dispatch = useDispatch();
@@ -172,27 +183,23 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
         loadingSatellites,
     } = useSelector((state) => state.overviewSatTrack);
 
-    // Memoize selectedSatellites to prevent reference changes when content is the same
-    const rawSelectedSatellites = useSelector((state) => state.overviewSatTrack.selectedSatellites);
-    const selectedSatellites = useMemo(() => rawSelectedSatellites, [JSON.stringify(rawSelectedSatellites.map(s => s.norad_id))]);
+    const selectedSatellites = useSelector(
+        (state) => state.overviewSatTrack.selectedSatellites,
+        areSatellitesEquivalent
+    );
 
-    const {
-        trackingState,
-        satelliteId: trackingSatelliteId,
-        selectedRadioRig,
-        selectedRotator,
-        selectedTransmitter,
-        selectedSatellitePositions,
-    } = useSelector((state) => state.targetSatTrack);
-    const [currentPastSatellitesPaths, setCurrentPastSatellitesPaths] = useState([]);
-    const [currentFutureSatellitesPaths, setCurrentFutureSatellitesPaths] = useState([]);
-    const [currentSatellitesPosition, setCurrentSatellitesPosition] = useState([]);
-    const [currentSatellitesCoverage, setCurrentSatellitesCoverage] = useState([]);
-    const [currentCrosshairs, setCurrentCrosshairs] = useState([]);
-    const [terminatorLine, setTerminatorLine] = useState([]);
-    const [daySidePolygon, setDaySidePolygon] = useState([]);
-    const [sunPos, setSunPos] = useState(null);
-    const [moonPos, setMoonPos] = useState(null);
+    const trackingSatelliteId = useSelector((state) => state.targetSatTrack.satelliteId);
+    const [mapLayers, setMapLayers] = useState({
+        currentPastSatellitesPaths: [],
+        currentFutureSatellitesPaths: [],
+        currentSatellitesPosition: [],
+        currentSatellitesCoverage: [],
+        currentCrosshairs: [],
+        terminatorLine: [],
+        daySidePolygon: [],
+        sunPos: null,
+        moonPos: null,
+    });
     const {location} = useSelector((state) => state.location);
     const updateTimeRef = useRef(null);
     const controlsBoxRef = useRef(null);
@@ -218,7 +225,6 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
             zoomend: () => {
                 const mapZoom = mapEvents.getZoom();
                 handleSetMapZoomLevel(mapZoom);
-                localStorage.setItem(storageMapZoomValueKey, mapZoom);
             },
             click: (e) => {
                 const target = e.originalEvent?.target;
@@ -306,6 +312,8 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                 const history = elevationHistoryRef.current[noradId];
                 let trend = 'stable';
                 let elRate = 0;
+                const lowRateThreshold = 0.04;
+                const highRateThreshold = 0.18;
 
                 if (history.length >= 2) {
                     // Calculate average rate of change
@@ -315,12 +323,16 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                     }
                     elRate = changes.reduce((a, b) => a + b, 0) / changes.length;
 
-                    // Determine trend based on rate (threshold: 0.1 degrees per update)
-                    if (elRate > 0.1) {
-                        trend = 'rising';
-                    } else if (elRate < -0.1) {
-                        trend = 'falling';
-                    } else if (Math.abs(elRate) <= 0.1 && el > 0) {
+                    // Determine trend bands based on elevation-rate thresholds.
+                    if (elRate >= highRateThreshold) {
+                        trend = 'rising_fast';
+                    } else if (elRate >= lowRateThreshold) {
+                        trend = 'rising_slow';
+                    } else if (elRate <= -highRateThreshold) {
+                        trend = 'falling_fast';
+                    } else if (elRate <= -lowRateThreshold) {
+                        trend = 'falling_slow';
+                    } else if (Math.abs(elRate) < lowRateThreshold && el > 0) {
                         // Check if we're at a peak (elevation is positive and rate is near zero)
                         if (history.length >= 3) {
                             const recent = history.slice(-3);
@@ -334,7 +346,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
 
                 // Calculate time to max elevation only for visible satellites
                 let timeToMaxEl = null;
-                if (el > 0 && trend === 'rising') {
+                if (el > 0 && (trend === 'rising_slow' || trend === 'rising_fast')) {
                     timeToMaxEl = calculateTimeToMaxElevation(
                         satellite['tle1'],
                         satellite['tle2'],
@@ -565,25 +577,26 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
             }
         });
 
-        setCurrentPastSatellitesPaths(currentPastPaths);
-        setCurrentFutureSatellitesPaths(currentFuturePaths);
-        setCurrentSatellitesPosition(currentPos);
-        setCurrentSatellitesCoverage(currentCoverage);
-        setCurrentCrosshairs(currentCrosshair);
-
         // Day/night boundary
-        const terminatorLine = createTerminatorLine().reverse();
-        setTerminatorLine(terminatorLine);
-
+        const newTerminatorLine = createTerminatorLine().reverse();
         // Day side polygon
-        const dayPoly = [...terminatorLine];
+        const dayPoly = [...newTerminatorLine];
         dayPoly.push(dayPoly[dayPoly.length - 1]);
-        setDaySidePolygon(dayPoly);
 
         // Sun and moon position
-        const [sunPos, moonPos] = getSunMoonCoords();
-        setSunPos(sunPos);
-        setMoonPos(moonPos);
+        const [newSunPos, newMoonPos] = getSunMoonCoords();
+
+        setMapLayers({
+            currentPastSatellitesPaths: currentPastPaths,
+            currentFutureSatellitesPaths: currentFuturePaths,
+            currentSatellitesPosition: currentPos,
+            currentSatellitesCoverage: currentCoverage,
+            currentCrosshairs: currentCrosshair,
+            terminatorLine: newTerminatorLine,
+            daySidePolygon: dayPoly,
+            sunPos: newSunPos,
+            moonPos: newMoonPos,
+        });
 
         dispatch(setSelectedSatellitePositions(selectedSatPos));
     }
@@ -641,12 +654,8 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
         };
     }, [tileLayerID]);
 
-    // On the component mount, load the map zoom level from localStorage
+    // On component mount, keep map size in sync with layout changes.
     useEffect(() => {
-        const savedZoomLevel = localStorage.getItem(storageMapZoomValueKey);
-        const initialMapZoom = savedZoomLevel ? parseFloat(savedZoomLevel) : 1;
-        dispatch(setMapZoomLevel(initialMapZoom));
-
         const handleLayoutChange = () => {
             if (!MapObject || !MapObject._container || !document.contains(MapObject._container)) {
                 return;
@@ -765,6 +774,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                     <CircularProgress size={60} thickness={4} />
                 </Backdrop>
                 <MapContainer
+                    className="overview-map"
                     fullscreenControl={true}
                     center={[0, 0]}
                     zoom={mapZoomLevel}
@@ -800,15 +810,15 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                     }}
                 />
 
-                {sunPos && showSunIcon ? <Marker position={sunPos} icon={sunIcon} opacity={0.5}/> : null}
+                {mapLayers.sunPos && showSunIcon ? <Marker position={mapLayers.sunPos} icon={sunIcon} opacity={0.5}/> : null}
 
-                {moonPos && showMoonIcon ? (
-                    <Marker position={moonPos} icon={moonIcon} opacity={0.5}/>
+                {mapLayers.moonPos && showMoonIcon ? (
+                    <Marker position={mapLayers.moonPos} icon={moonIcon} opacity={0.5}/>
                 ) : null}
 
-                {daySidePolygon.length > 1 && showTerminatorLine && (
+                {mapLayers.daySidePolygon.length > 1 && showTerminatorLine && (
                     <Polygon
-                        positions={daySidePolygon}
+                        positions={mapLayers.daySidePolygon}
                         pathOptions={{
                             fillColor: 'black',
                             fillOpacity: 0.4,
@@ -820,9 +830,9 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                     />
                 )}
 
-                {terminatorLine.length > 1 && showTerminatorLine && (
+                {mapLayers.terminatorLine.length > 1 && showTerminatorLine && (
                     <Polyline
-                        positions={terminatorLine}
+                        positions={mapLayers.terminatorLine}
                         pathOptions={{
                             color: 'white',
                             weight: 1,
@@ -837,11 +847,11 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                     <Marker position={[location.lat, location.lon]} icon={homeIcon} opacity={0.8}/>
                 )}
 
-                {showPastOrbitPath ? currentPastSatellitesPaths : null}
-                {showFutureOrbitPath ? currentFutureSatellitesPaths : null}
-                {currentSatellitesPosition}
-                {currentSatellitesCoverage}
-                {currentCrosshairs}
+                {showPastOrbitPath ? mapLayers.currentPastSatellitesPaths : null}
+                {showFutureOrbitPath ? mapLayers.currentFutureSatellitesPaths : null}
+                {mapLayers.currentSatellitesPosition}
+                {mapLayers.currentSatellitesCoverage}
+                {mapLayers.currentCrosshairs}
 
                 {/* Wrap MapArrowControls with a container to detect clicks */}
                 <div ref={arrowControlsRef}>

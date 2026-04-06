@@ -71,7 +71,7 @@ const MainLayout = React.memo(function MainLayout() {
         gridEditable,
     } = useSelector(state => state.waterfall);
 
-    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), [gridEditable]);
+    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), []);
 
     // Default layout if none in localStorage
     const defaultLayouts = {
@@ -125,7 +125,7 @@ const MainLayout = React.memo(function MainLayout() {
     // globalize the callback
     handleSetGridEditableWaterfall = useCallback((value) => {
         dispatch(setGridEditable(value));
-    }, [gridEditable]);
+    }, [dispatch]);
 
 
     // we load any stored layouts from localStorage or fallback to default

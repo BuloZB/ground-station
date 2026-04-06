@@ -2,6 +2,7 @@
   "title": "Vogelvlucht",
   "satellites_table": {
     "title": "Satellieten Groep Details",
+    "group_title": "Satellietgroep",
     "satellites_count": "{{count}} satellieten",
     "satellite_name": "Satelliet Naam",
     "alternative_name": "Alternatieve Naam",
@@ -38,6 +39,10 @@
     "distance_peak": "Afstand bij piek",
     "geo_stat": "GEO Stat",
     "geo_sync": "GEO Sync",
+    "status_visible": "Zichtbaar",
+    "status_upcoming": "Aankomend",
+    "status_passed": "Voorbij",
+    "status_dead": "Inactief",
     "no_value": "geen waarde",
     "no_data": "Geen gegevens",
     "no_passes": "Geen overvluchten gedetecteerd voor de komende {{hours}} uur"

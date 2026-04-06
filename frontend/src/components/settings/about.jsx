@@ -26,7 +26,6 @@ import {
     Box,
     Button,
     Card,
-    CardContent,
     Chip,
     Divider,
     Link,
@@ -37,17 +36,6 @@ import {
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
-import SettingsInputAntennaIcon from '@mui/icons-material/SettingsInputAntenna';
-import RadioIcon from '@mui/icons-material/Radio';
-import ImageIcon from '@mui/icons-material/Image';
-import DevicesIcon from '@mui/icons-material/Devices';
-import CodeIcon from '@mui/icons-material/Code';
-import StorageIcon from '@mui/icons-material/Storage';
-import WebIcon from '@mui/icons-material/Web';
-import InfoIcon from '@mui/icons-material/Info';
-import MemoryIcon from '@mui/icons-material/Memory';
-import ComputerIcon from '@mui/icons-material/Computer';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useTranslation } from 'react-i18next';
@@ -59,53 +47,23 @@ const AboutPage = () => {
     const versionInfo = useSelector((state) => state.version?.data);
 
     const featureItems = [
-        {
-            text: 'Real-time Satellite Tracking: Track hundreds of satellites with high-precision orbital models. TLE data is automatically updated from CelesTrak and SatNOGS.',
-            icon: <SatelliteAltIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'Automated Antenna Rotator Control: Interface with popular antenna rotators to automatically track satellites as they pass overhead.',
-            icon: <SettingsInputAntennaIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'SDR Integration: Stream and record live radio signals from a wide range of SDR devices, including RTL-SDR, SoapySDR, and UHD/USRP radios.',
-            icon: <RadioIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'IQ Recording and Playback: Record raw IQ data in SigMF format with complete metadata and replay recordings through a virtual SDR device for analysis.',
-            icon: <StorageIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'Data Decoding: Decode SSTV, FSK, GFSK, GMSK, and BPSK with AX25 USP Geoscan framing.',
-            icon: <ImageIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'AI-Powered Transcription: Real-time speech-to-text for demodulated audio via Gemini Live or Deepgram, with optional translation and output storage.',
-            icon: <MemoryIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'Scheduled Observations: Define observation tasks that automatically listen, decode, transcribe, and record during satellite passes.',
-            icon: <SatelliteAltIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'SatDump Integration: Decode weather satellite images from METEOR-M2 (LRPT and HRPT) via SatDump workflows.',
-            icon: <ImageIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'Performance Monitoring: Visualize signal processing flow, queue health, throughput, and component statistics.',
-            icon: <ComputerIcon fontSize="small" color="primary" />,
-        },
-        {
-            text: 'Responsive Web Interface: Control the full station from desktop, tablet, or phone through a unified web interface.',
-            icon: <DevicesIcon fontSize="small" color="primary" />,
-        },
+        'Real-time Satellite Tracking: Track hundreds of satellites with high-precision orbital models. TLE data is automatically updated from CelesTrak and SatNOGS.',
+        'Automated Antenna Rotator Control: Interface with popular antenna rotators to automatically track satellites as they pass overhead.',
+        'SDR Integration: Stream and record live radio signals from a wide range of SDR devices, including RTL-SDR, SoapySDR, and UHD/USRP radios.',
+        'IQ Recording and Playback: Record raw IQ data in SigMF format with complete metadata and replay recordings through a virtual SDR device for analysis.',
+        'Data Decoding: Decode SSTV, FSK, GFSK, GMSK, and BPSK with AX25 USP Geoscan framing.',
+        'AI-Powered Transcription: Real-time speech-to-text for demodulated audio via Gemini Live or Deepgram, with optional translation and output storage.',
+        'Scheduled Observations: Define observation tasks that automatically listen, decode, transcribe, and record during satellite passes.',
+        'SatDump Integration: Decode weather satellite images from METEOR-M2 (LRPT and HRPT) via SatDump workflows.',
+        'Performance Monitoring: Visualize signal processing flow, queue health, throughput, and component statistics.',
+        'Responsive Web Interface: Control the full station from desktop, tablet, or phone through a unified web interface.',
     ];
 
     const plannedFeatures = [
-        { text: 'Additional Decoders: AFSK packet decoder.', icon: <SatelliteAltIcon fontSize="small" color="secondary" /> },
-        { text: 'Additional Decoders: LoRa decoders.', icon: <RadioIcon fontSize="small" color="secondary" /> },
-        { text: 'Additional Decoders: NOAA APT weather satellite images.', icon: <ImageIcon fontSize="small" color="secondary" /> },
-        { text: 'Additional Decoders: Additional telemetry formats.', icon: <CodeIcon fontSize="small" color="secondary" /> },
+        'Additional Decoders: AFSK packet decoder.',
+        'Additional Decoders: LoRa decoders.',
+        'Additional Decoders: NOAA APT weather satellite images.',
+        'Additional Decoders: Additional telemetry formats.',
     ];
 
     const backendTechnologies = [
@@ -228,14 +186,13 @@ const AboutPage = () => {
                                 {t('about.features_title', { defaultValue: 'Key Features' })}
                             </Typography>
                             <Divider sx={{ my: 1.5 }} />
-                            <Stack spacing={1.2}>
+                            <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
                                 {featureItems.map((feature, index) => (
-                                    <Stack key={index} direction="row" spacing={1.25} alignItems="flex-start">
-                                        <Box sx={{ mt: 0.2 }}>{feature.icon}</Box>
-                                        <Typography variant="body2">{feature.text}</Typography>
-                                    </Stack>
+                                    <Box component="li" key={index} sx={{ mb: 1 }}>
+                                        <Typography variant="body2">{feature}</Typography>
+                                    </Box>
                                 ))}
-                            </Stack>
+                            </Box>
                         </Card>
                     </Grid>
 
@@ -246,14 +203,13 @@ const AboutPage = () => {
                                     {t('about.roadmap_title', { defaultValue: 'Roadmap' })}
                                 </Typography>
                                 <Divider sx={{ my: 1.5 }} />
-                                <Stack spacing={1.2}>
+                                <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
                                     {plannedFeatures.map((feature, index) => (
-                                        <Stack key={index} direction="row" spacing={1.25} alignItems="center">
-                                            {feature.icon}
-                                            <Typography variant="body2">{feature.text}</Typography>
-                                        </Stack>
+                                        <Box component="li" key={index} sx={{ mb: 1 }}>
+                                            <Typography variant="body2">{feature}</Typography>
+                                        </Box>
                                     ))}
-                                </Stack>
+                                </Box>
                             </Card>
 
                             <Card elevation={1} sx={{ p: 2 }}>
@@ -261,14 +217,13 @@ const AboutPage = () => {
                                     {t('about.sdr_support_title', { defaultValue: 'SDR Device Support' })}
                                 </Typography>
                                 <Divider sx={{ my: 1.5 }} />
-                                <Stack spacing={1.2}>
+                                <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
                                     {sdrSupport.map((device, index) => (
-                                        <Stack key={index} direction="row" spacing={1.25} alignItems="center">
-                                            <RadioIcon fontSize="small" color="secondary" />
+                                        <Box component="li" key={index} sx={{ mb: 1 }}>
                                             <Typography variant="body2">{device}</Typography>
-                                        </Stack>
+                                        </Box>
                                     ))}
-                                </Stack>
+                                </Box>
                             </Card>
                         </Stack>
                     </Grid>
@@ -308,8 +263,7 @@ const AboutPage = () => {
                         <Grid container spacing={2} columns={12}>
                             <Grid size={{ xs: 12, md: 6 }}>
                                 <Card variant="outlined" sx={{ p: 1.5, height: '100%' }}>
-                                    <Typography variant="subtitle1" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <StorageIcon fontSize="small" color="primary" />
+                                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                                         {t('about.backend_stack', { defaultValue: 'Backend Stack' })}
                                     </Typography>
                                     <Divider sx={{ my: 1 }} />
@@ -336,8 +290,7 @@ const AboutPage = () => {
 
                             <Grid size={{ xs: 12, md: 6 }}>
                                 <Card variant="outlined" sx={{ p: 1.5, height: '100%' }}>
-                                    <Typography variant="subtitle1" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <WebIcon fontSize="small" color="secondary" />
+                                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                                         {t('about.frontend_stack', { defaultValue: 'Frontend Stack' })}
                                     </Typography>
                                     <Divider sx={{ my: 1 }} />
@@ -366,13 +319,10 @@ const AboutPage = () => {
                 </Accordion>
 
                 <Card elevation={1} sx={{ p: 2, border: `1px solid ${theme.palette.info.main}33` }}>
-                    <Stack direction="row" spacing={1.25} alignItems="flex-start">
-                        <InfoIcon fontSize="small" color="info" sx={{ mt: 0.2 }} />
-                        <Typography variant="body2" color="text.secondary">
-                            <strong>{t('about.note_label', { defaultValue: 'Note' })}:</strong>{' '}
-                            {t('about.note_text', { defaultValue: 'The FM, AM, and SSB demodulator implementations were developed with assistance from Claude AI (Anthropic). These sections are marked in source and licensed under GPL-3.0 like the rest of the project.' })}
-                        </Typography>
-                    </Stack>
+                    <Typography variant="body2" color="text.secondary">
+                        <strong>{t('about.note_label', { defaultValue: 'Note' })}:</strong>{' '}
+                        {t('about.note_text', { defaultValue: 'The FM, AM, and SSB demodulator implementations were developed with assistance from Claude AI (Anthropic). These sections are marked in source and licensed under GPL-3.0 like the rest of the project.' })}
+                    </Typography>
                 </Card>
             </Stack>
         </Paper>

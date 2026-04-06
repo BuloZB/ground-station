@@ -39,6 +39,7 @@ let ringHeadY = 0; // points to the next row to write (newest row will be at rin
 let bandscopeCtx = null;
 let dBAxisCtx = null;
 let waterFallLeftMarginCtx = null;
+let bandscopeZoomScale = 1;
 let targetFPS = 15;
 let fftData = new Array(1024).fill(-120);
 let fftSize = 8192;
@@ -348,6 +349,9 @@ self.onmessage = function(eventMessage) {
             if (eventMessage.data.theme) {
                 theme = eventMessage.data.theme;
             }
+            if (eventMessage.data.zoomScale !== undefined) {
+                bandscopeZoomScale = Math.max(1, Number(eventMessage.data.zoomScale) || 1);
+            }
             // Rebuild palette if needed after config updates
             if (paletteDirty) rebuildPalette();
             break;
@@ -497,7 +501,8 @@ function throttledDrawBandscope() {
             colorMap,
             theme,
             dBAxisCtx,
-            dBAxisCanvas
+            dBAxisCanvas,
+            zoomScale: bandscopeZoomScale
         });
         lastBandscopeDrawTime = now;
     }
