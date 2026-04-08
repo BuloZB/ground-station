@@ -422,12 +422,6 @@ const RotatorControl = React.memo(function RotatorControl() {
                     </Grid>
                 </Grid>
 
-                <Grid size={{ xs: 12, sm: 12, md: 12 }} sx={{ px: '0.5rem', pt: 0.25 }}>
-                    <Typography variant="overline" sx={{ display: 'block', color: 'text.secondary', mb: 0.25 }}>
-                        Live metrics
-                    </Typography>
-                </Grid>
-
                 <Grid size={{ xs: 12, sm: 12, md: 12 }} style={{padding: '0rem 0.5rem 0rem 0.5rem'}}>
 
                     <Grid container direction="row" sx={{
