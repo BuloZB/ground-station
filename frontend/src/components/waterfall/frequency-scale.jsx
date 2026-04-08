@@ -18,17 +18,11 @@
  */
 
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTheme } from '@mui/material';
 import {humanizeFrequency, preciseHumanizeFrequency} from "../common/common.jsx";
 
-const getFrequencyScaleWidth = (element) => {
-    // Get the actual client dimensions of the element
-    return element.current.getBoundingClientRect();
-}
-
-
-const FrequencyScale = ({ centerFrequency, sampleRate, containerWidth, canvasHeight = 20 }) => {
+const FrequencyScale = ({ centerFrequency, sampleRate, containerWidth, transformTick = 0, canvasHeight = 20 }) => {
     const theme = useTheme();
     const canvasRef = useRef(null);
     const frequencyScaleContainerRef = useRef(null);
@@ -39,9 +33,10 @@ const FrequencyScale = ({ centerFrequency, sampleRate, containerWidth, canvasHei
     const startFreq = centerFrequency - sampleRate / 2;
     const endFreq = centerFrequency + sampleRate / 2;
 
-    const updateActualWidth = () => {
+    const updateActualWidth = useCallback(() => {
         // Get the actual client dimensions of the element
-        const rect = getFrequencyScaleWidth(frequencyScaleContainerRef);
+        const rect = frequencyScaleContainerRef.current?.getBoundingClientRect();
+        if (!rect) return;
 
         // Only update if the width has changed significantly (avoid unnecessary redraws)
         if (Math.abs(rect.width - lastMeasuredWidthRef.current) > 1) {
@@ -50,21 +45,11 @@ const FrequencyScale = ({ centerFrequency, sampleRate, containerWidth, canvasHei
                 setActualWidth(rect.width);
             }
         }
-    }
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            updateActualWidth();
-        }, 250);
-
-        return () => {
-            clearInterval(interval);
-        };
     }, []);
 
     useEffect(() => {
         updateActualWidth();
-    }, [containerWidth]);
+    }, [containerWidth, transformTick, updateActualWidth]);
 
     // Draw the frequency scale on the canvas
     useEffect(() => {

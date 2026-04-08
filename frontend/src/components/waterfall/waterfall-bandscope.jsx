@@ -59,6 +59,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
     const lastPinchDistanceRef = useRef(0);
     const pinchCenterXRef = useRef(0);
     const persistTimerRef = useRef(null);
+    const bookmarkMeasureRafRef = useRef(null);
     const dispatch = useDispatch();
 
     // Activate doppler neighbor calculation hook
@@ -87,6 +88,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
 
     // Track playback countdown for display
     const [playbackCountdown, setPlaybackCountdown] = useState(0);
+    const [bookmarkTransformTick, setBookmarkTransformTick] = useState(0);
 
     // Update playback countdown from ref
     useEffect(() => {
@@ -182,12 +184,24 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
 
     }, [handleResize]);
 
+    const notifyBookmarkTransform = useCallback(() => {
+        if (bookmarkMeasureRafRef.current !== null) {
+            return;
+        }
+
+        bookmarkMeasureRafRef.current = requestAnimationFrame(() => {
+            bookmarkMeasureRafRef.current = null;
+            setBookmarkTransformTick((value) => value + 1);
+        });
+    }, []);
+
     // Apply a transform directly to a DOM element
     const applyTransform = useCallback(() => {
         if (containerRef.current) {
             containerRef.current.style.transform = `translateX(${positionXRef.current}px) scaleX(${scaleRef.current})`;
+            notifyBookmarkTransform();
         }
-    }, []);
+    }, [notifyBookmarkTransform]);
 
     // Debounced persist function
     const persistToRedux = useCallback(() => {
@@ -219,6 +233,10 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
             // Clear any pending persist operations
             if (persistTimerRef.current) {
                 clearTimeout(persistTimerRef.current);
+            }
+            if (bookmarkMeasureRafRef.current !== null) {
+                cancelAnimationFrame(bookmarkMeasureRafRef.current);
+                bookmarkMeasureRafRef.current = null;
             }
         }
     }, []);
@@ -565,6 +583,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                         centerFrequency={centerFrequency}
                         sampleRate={sampleRate}
                         containerWidth={waterFallCanvasWidth}
+                        transformTick={bookmarkTransformTick}
                         height={bandScopeHeight + bandscopeTopPadding}
                         topPadding={bandscopeTopPadding}
                         onBookmarkClick={handleBookmarkClick}
@@ -574,6 +593,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                         centerFrequency={centerFrequency}
                         sampleRate={sampleRate}
                         containerWidth={waterFallCanvasWidth}
+                        transformTick={bookmarkTransformTick}
                         height={bandScopeHeight + bandscopeTopPadding}
                         topPadding={bandscopeTopPadding}
                         bands={frequencyBands}
@@ -597,6 +617,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                     centerFrequency={centerFrequency}
                     containerWidth={waterFallCanvasWidth}
                     sampleRate={sampleRate}
+                    transformTick={bookmarkTransformTick}
                 />
 
                 {waterfallRendererMode === 'dom-tiles' ? (

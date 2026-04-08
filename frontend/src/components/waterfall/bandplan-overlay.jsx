@@ -25,6 +25,7 @@ const FrequencyBandOverlay = ({
                                   centerFrequency,
                                   sampleRate,
                                   containerWidth,
+                                  transformTick = 0,
                                   height,
                                   topPadding = 0,
                                   bands = [],
@@ -109,18 +110,10 @@ const FrequencyBandOverlay = ({
         return abbreviated;
     }, []);
 
-    // Poll for container width changes
-    useEffect(() => {
-        const interval = setInterval(() => {
-            updateActualWidth();
-        }, 100);
-        return () => clearInterval(interval);
-    }, [updateActualWidth]);
-
-    // Update width when the container width changes
+    // Update width when layout or transform-driven width changes
     useEffect(() => {
         updateActualWidth();
-    }, [containerWidth, updateActualWidth]);
+    }, [containerWidth, transformTick, updateActualWidth]);
 
     // Draw the frequency bands
     useEffect(() => {

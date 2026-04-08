@@ -31,6 +31,7 @@ const BookmarkCanvas = ({
                             centerFrequency,
                             sampleRate,
                             containerWidth,
+                            transformTick = 0,
                             height,
                             onBookmarkClick = null
                         }) => {
@@ -90,21 +91,10 @@ const BookmarkCanvas = ({
         };
     };
 
-    // Poll for container width changes.
-    useEffect(() => {
-        const interval = setInterval(() => {
-            updateActualWidth();
-        }, 100);
-
-        return () => {
-            clearInterval(interval);
-        };
-    }, [updateActualWidth]);
-
-    // Update width when the container width changes
+    // Update width when layout or transform-driven width changes
     useEffect(() => {
         updateActualWidth();
-    }, [containerWidth, updateActualWidth]);
+    }, [containerWidth, transformTick, updateActualWidth]);
 
     // Helper function to compare bookmarks arrays
     function areBookmarksEqual(bookmarksA, bookmarksB) {
