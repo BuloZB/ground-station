@@ -606,16 +606,6 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                             marginTop: `${bandscopeTopPadding}px`,
                         }}
                     />
-                    <BookmarkCanvas
-                        centerFrequency={centerFrequency}
-                        sampleRate={sampleRate}
-                        containerWidth={waterFallCanvasWidth}
-                        transformTick={bookmarkTransformTick}
-                        interactionActive={isTransformInteracting}
-                        height={bandScopeHeight + bandscopeTopPadding}
-                        topPadding={bandscopeTopPadding}
-                        onBookmarkClick={handleBookmarkClick}
-                    />
                     {/* Add the new FrequencyBandOverlay component */}
                     <FrequencyBandOverlay
                         centerFrequency={centerFrequency}
@@ -629,6 +619,17 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                         bandHeight={20}
                         zoomScale={scaleRef.current}
                         panOffset={positionXRef.current}
+                    />
+                    <BookmarkCanvas
+                        centerFrequency={centerFrequency}
+                        sampleRate={sampleRate}
+                        containerWidth={waterFallCanvasWidth}
+                        transformTick={bookmarkTransformTick}
+                        interactionActive={isTransformInteracting}
+                        height={bandScopeHeight + bandscopeTopPadding}
+                        bandOverlayHeight={20}
+                        topPadding={bandscopeTopPadding}
+                        onBookmarkClick={handleBookmarkClick}
                     />
                     <VFOMarkersContainer
                         centerFrequency={centerFrequency}

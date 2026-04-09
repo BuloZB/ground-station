@@ -35,6 +35,7 @@ const BookmarkCanvas = ({
                             transformTick = 0,
                             interactionActive = false,
                             height,
+                            bandOverlayHeight = 20,
                             onBookmarkClick = null
                         }) => {
     const dispatch = useDispatch();
@@ -236,6 +237,12 @@ const BookmarkCanvas = ({
         const verticalSpacing = textHeight + padding * 2 + labelGap; // Total height of a label plus gap
         const baseY = 16; // Base Y position for the first label
         const bookmarkLabelOffset = 20; // Vertical offset from base position for bookmark labels
+        const maxLabelBottomY = Math.max(0, height - bandOverlayHeight - 4);
+        const clampLabelY = (candidateLabelY) => {
+            const boxHeight = textHeight + padding * 2;
+            const maxAllowedLabelY = maxLabelBottomY - boxHeight;
+            return Math.min(candidateLabelY, maxAllowedLabelY);
+        };
 
         const getLabelAccentColor = (bookmark) => {
             const sourceStyle = getBookmarkSourceStyle(bookmark.metadata?.source, theme);
@@ -339,11 +346,13 @@ const BookmarkCanvas = ({
 
                 // Fill the arrow for neighbor transmitters
                 ctx.fillStyle = bookmark.color || theme.palette.info.main;
-                ctx.globalAlpha = 0.85;
+                ctx.globalAlpha = 0.6;
                 ctx.fill();
                 ctx.strokeStyle = sourceStyle.accent;
                 ctx.lineWidth = sourceStyle.strokeWidth;
+                ctx.globalAlpha = 0.5;
                 ctx.stroke();
+                ctx.globalAlpha = 1.0;
 
                 // Variable to store the label bottom Y position for the dotted line
                 let labelBottomY = 0;
@@ -352,7 +361,7 @@ const BookmarkCanvas = ({
                 if (bookmark.label) {
                     // Calculate label vertical position based on index
                     const labelOffset = (visibleBookmarkIndex % 3) * verticalSpacing;
-                    const labelY = baseY + labelOffset + 35 + bookmarkLabelOffset + verticalSpacing - 5;
+                    const labelY = clampLabelY(baseY + labelOffset + 35 + bookmarkLabelOffset + verticalSpacing - 5);
 
                     // Store the bottom edge of the label box (south edge)
                     labelBottomY = labelY + textHeight + padding * 2;
@@ -426,7 +435,7 @@ const BookmarkCanvas = ({
                     ctx.strokeStyle = sourceStyle.accent;
                     ctx.lineWidth = 0.8;
                     ctx.setLineDash(sourceStyle.lineDash.length ? sourceStyle.lineDash : [1.5, 3]);
-                    ctx.globalAlpha = 0.35;
+                    ctx.globalAlpha = 0.22;
                     ctx.shadowBlur = 1;
                     ctx.shadowColor = theme.palette.background.paper;
                     ctx.moveTo(x, height); // Start from bottom
@@ -508,7 +517,7 @@ const BookmarkCanvas = ({
                     // Calculate label vertical position based on index
                     // Use visibleBookmarkIndex to ensure proper alternating heights (3 rows)
                     const labelOffset = (visibleBookmarkIndex % 3) * verticalSpacing;
-                    const labelY = baseY + labelOffset + 35 + bookmarkLabelOffset + verticalSpacing;
+                    const labelY = clampLabelY(baseY + labelOffset + 35 + bookmarkLabelOffset + verticalSpacing);
 
                     // Store the bottom edge of the label box (south edge)
                     labelBottomY = labelY + textHeight + padding * 2;
@@ -624,7 +633,7 @@ const BookmarkCanvas = ({
 
                     // Calculate label vertical position based on doppler index (alternating heights - 3 rows)
                     const dopplerLabelOffset = (dopplerIndex % 3) * verticalSpacing;
-                    const dopplerLabelY = 50 + bookmarkLabelOffset - padding - textHeight + dopplerLabelOffset + verticalSpacing - 30;
+                    const dopplerLabelY = clampLabelY(50 + bookmarkLabelOffset - padding - textHeight + dopplerLabelOffset + verticalSpacing - 30);
 
                     // Store the bottom edge of the doppler label box (south edge)
                     labelBottomY = dopplerLabelY + textHeight + padding * 2;
