@@ -439,6 +439,8 @@ class RotatorHandler:
                     current_az, current_el, active_target_az, active_target_el
                 )
                 if reached_active_target:
+                    # Reflect actual position status immediately for UI/telemetry.
+                    self.tracker.rotator_data["slewing"] = False
                     state["settle_hits"] += 1
                     if state["settle_hits"] >= self.tracker.rotator_settle_hits_required:
                         self._reset_slew_state()
