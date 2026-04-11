@@ -70,7 +70,6 @@ const PassesTableSettingsDialog = ({ open, onClose }) => {
         { name: 'elevation', label: t('passes_table.current_elevation'), category: 'basic' },
         { name: 'progress', label: t('passes_table.progress'), category: 'basic', alwaysVisible: true },
         { name: 'duration', label: t('passes_table.duration'), category: 'basic' },
-        { name: 'transmitters', label: t('passes_table.bands'), category: 'basic' },
         { name: 'transmitter_links', label: t('passes_table.transmitter_links', { defaultValue: 'Links' }), category: 'basic' },
         { name: 'event_start', label: t('passes_table.start'), category: 'time' },
         { name: 'event_end', label: t('passes_table.end'), category: 'time' },

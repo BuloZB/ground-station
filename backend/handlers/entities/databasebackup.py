@@ -15,6 +15,7 @@
 
 
 import html
+import json
 import re
 from datetime import datetime
 from typing import Any, Dict, List
@@ -63,6 +64,66 @@ def _split_sql_statements(sql_content: str) -> List[str]:
         statements.append(trailing)
 
     return statements
+
+
+def _normalize_optional_json(value):
+    if value in {None, "", "-"}:
+        return None
+
+    parsed = value
+    for _ in range(4):
+        if isinstance(parsed, (dict, list, bool, int, float)) or parsed is None:
+            return parsed
+        if not isinstance(parsed, str):
+            return None
+
+        candidate = parsed.strip()
+        if candidate.lower() in {"", "-", "null", "none"}:
+            return None
+
+        try:
+            parsed = json.loads(candidate)
+            continue
+        except json.JSONDecodeError:
+            if candidate.startswith('"') and candidate.endswith('"'):
+                parsed = candidate[1:-1].replace('\\"', '"')
+                continue
+            if '\\"' in candidate:
+                parsed = candidate.replace('\\"', '"')
+                continue
+            return None
+
+    return None
+
+
+async def _normalize_transmitters_itu_notification(session) -> int:
+    table_exists = await session.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table' AND name='transmitters'")
+    )
+    if table_exists.scalar_one_or_none() is None:
+        return 0
+
+    invalid_rows = await session.execute(
+        text(
+            """
+            SELECT id, itu_notification
+            FROM transmitters
+            WHERE itu_notification IS NOT NULL
+              AND json_valid(CAST(itu_notification AS TEXT)) = 0
+            """
+        )
+    )
+
+    fixed_count = 0
+    for row in invalid_rows.fetchall():
+        normalized = _normalize_optional_json(row.itu_notification)
+        await session.execute(
+            text("UPDATE transmitters SET itu_notification = :val WHERE id = :id"),
+            {"id": row.id, "val": json.dumps(normalized) if normalized is not None else None},
+        )
+        fixed_count += 1
+
+    return fixed_count
 
 
 async def list_tables() -> Dict[str, Any]:
@@ -126,8 +187,6 @@ async def backup_table(table_name: str) -> Dict[str, Any]:
                     elif isinstance(value, str):
                         # Escape single quotes and handle special characters
                         escaped_value = value.replace("'", "''")
-                        # Replace backslashes to prevent escape sequence issues
-                        escaped_value = escaped_value.replace("\\", "\\\\")
                         values.append(f"'{escaped_value}'")
                     elif isinstance(value, (int, float)):
                         values.append(str(value))
@@ -136,7 +195,6 @@ async def backup_table(table_name: str) -> Dict[str, Any]:
                     else:
                         # For other types, convert to string
                         escaped_value = str(value).replace("'", "''")
-                        escaped_value = escaped_value.replace("\\", "\\\\")
                         values.append(f"'{escaped_value}'")
 
                 values_str = ", ".join(values)
@@ -384,6 +442,9 @@ async def full_restore(sql: str, drop_tables: bool = True) -> Dict[str, Any]:
                     await (await session.connection()).exec_driver_sql(stmt)
                     rows_inserted += 1
 
+                # Normalize malformed legacy JSON payloads that can break ORM deserialization.
+                normalized_rows = await _normalize_transmitters_itu_notification(session)
+
                 # Re-enable foreign key constraints
                 await session.execute(text("PRAGMA foreign_keys = ON"))
 
@@ -394,6 +455,7 @@ async def full_restore(sql: str, drop_tables: bool = True) -> Dict[str, Any]:
                     "success": True,
                     "tables_created": tables_created,
                     "rows_inserted": rows_inserted,
+                    "rows_normalized": normalized_rows,
                 }
 
             except Exception as e:

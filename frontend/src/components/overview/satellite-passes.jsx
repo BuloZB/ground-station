@@ -29,7 +29,6 @@ import {
     humanizeFutureDateInMinutes,
     TitleBar,
     getFrequencyBand,
-    getBandColor,
 } from "../common/common.jsx";
 import {DataGrid, gridClasses} from "@mui/x-data-grid";
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
@@ -458,90 +457,6 @@ const PassStatusCell = React.memo(function PassStatusCell({status, isTracked = f
     );
 });
 
-const PassBandsCell = React.memo(function PassBandsCell({transmitters, noDataText}) {
-    if (!Array.isArray(transmitters) || transmitters.length === 0) {
-        return noDataText;
-    }
-
-    const bandDetails = transmitters.reduce((acc, transmitter) => {
-        const upBand = transmitter['uplink_low'] != null
-            ? getFrequencyBand(transmitter['uplink_low'])
-            : null;
-        const downBand = transmitter['downlink_low'] != null
-            ? getFrequencyBand(transmitter['downlink_low'])
-            : null;
-
-        const uniqueBands = new Set([upBand, downBand].filter(Boolean));
-        uniqueBands.forEach((band) => {
-            if (!acc[band]) {
-                acc[band] = { count: 0, uplink: false, downlink: false };
-            }
-            acc[band].count += 1;
-        });
-
-        if (upBand) {
-            if (!acc[upBand]) acc[upBand] = { count: 0, uplink: false, downlink: false };
-            acc[upBand].uplink = true;
-        }
-
-        if (downBand) {
-            if (!acc[downBand]) acc[downBand] = { count: 0, uplink: false, downlink: false };
-            acc[downBand].downlink = true;
-        }
-
-        return acc;
-    }, {});
-
-    const bands = Object.keys(bandDetails).sort((a, b) => a.localeCompare(b));
-
-    return (
-        <Box sx={{display: 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center'}}>
-            <Box
-                sx={{
-                    display: 'flex',
-                    width: '100%',
-                    minWidth: 0,
-                    gap: 0.5,
-                    flexWrap: 'nowrap',
-                    justifyContent: 'flex-start',
-                    overflow: 'hidden',
-                    WebkitMaskImage: 'linear-gradient(to right, black 0%, black 88%, transparent 100%)',
-                    maskImage: 'linear-gradient(to right, black 0%, black 88%, transparent 100%)',
-                }}
-            >
-                {bands.map((band) => (
-                    <Chip
-                        key={`band-${band}`}
-                        label={
-                            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.35 }}>
-                                <Box component="span">{bandDetails[band].count} × {band}</Box>
-                                {bandDetails[band].uplink && <ArrowUpwardRoundedIcon sx={{ fontSize: '0.85rem' }} />}
-                                {bandDetails[band].downlink && <ArrowDownwardRoundedIcon sx={{ fontSize: '0.85rem' }} />}
-                            </Box>
-                        }
-                        size="small"
-                    sx={{
-                        height: '18px',
-                        maxWidth: '100%',
-                        flexShrink: 0,
-                        fontSize: '0.65rem',
-                        fontWeight: 'bold',
-                        backgroundColor: getBandColor(band),
-                            color: 'common.white',
-                            '& .MuiChip-label': {
-                                px: 0.75
-                            },
-                            '&:hover': {
-                                filter: 'brightness(90%)',
-                            }
-                        }}
-                    />
-                ))}
-            </Box>
-        </Box>
-    );
-});
-
 const PassTransmitterLinksCell = React.memo(function PassTransmitterLinksCell({transmitters, noDataText}) {
     if (!Array.isArray(transmitters) || transmitters.length === 0) {
         return noDataText;
@@ -902,16 +817,6 @@ const MemoizedStyledDataGrid = React.memo(function MemoizedStyledDataGrid({
             sortable: false,
             valueGetter: (_value, row) => row.transmitters,
             renderCell: (params) => <PassTransmitterLinksCell transmitters={params.value} noDataText={t('passes_table.no_data')} />
-        },
-        {
-            field: 'transmitters',
-            minWidth: 120,
-            align: 'center',
-            headerAlign: 'center',
-            headerName: t('passes_table.bands'),
-            flex: 2,
-            renderCell: (params) => <PassBandsCell transmitters={params.value} noDataText={t('passes_table.no_data')} />
-
         },
         {
             field: 'event_start',
