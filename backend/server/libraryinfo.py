@@ -22,6 +22,8 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
+import gnuradio
+
 from common.logger import logger
 
 # Cache for library versions to avoid repeated expensive operations
@@ -290,19 +292,12 @@ def get_library_versions(use_cache: bool = True) -> Dict[str, Any]:
         }
     else:
         # Fallback to Python import
-        try:
-            import gnuradio
-
-            system_libraries["gnuradio"] = {
-                "name": "GNU Radio",
-                "version": (
-                    gnuradio.__version__ if hasattr(gnuradio, "__version__") else "installed"
-                ),
-                "category": "sdr",
-                "description": "Software-defined radio framework",
-            }
-        except ImportError:
-            pass
+        system_libraries["gnuradio"] = {
+            "name": "GNU Radio",
+            "version": gnuradio.__version__ if hasattr(gnuradio, "__version__") else "installed",
+            "category": "sdr",
+            "description": "Software-defined radio framework",
+        }
 
     # VOLK (Vector-Optimized Library of Kernels)
     volk_version = get_system_library_version(["volk_profile", "--version"])
@@ -336,19 +331,6 @@ def get_library_versions(use_cache: bool = True) -> Dict[str, Any]:
                         "description": "LimeSDR driver and tools",
                     }
                     break
-
-    # gr-lora_sdr
-    try:
-        import lora_sdr  # noqa: F401
-
-        system_libraries["gr-lora_sdr"] = {
-            "name": "gr-lora_sdr",
-            "version": "installed",
-            "category": "sdr",
-            "description": "GNU Radio LoRa decoder",
-        }
-    except ImportError:
-        pass
 
     # SDRplay API (check for libsdrplay_api.so)
     sdrplay_version = None

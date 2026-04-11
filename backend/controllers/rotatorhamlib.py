@@ -17,7 +17,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Tuple
+from typing import Any, AsyncGenerator, Tuple, cast
 
 from Hamlib import Hamlib
 
@@ -55,6 +55,11 @@ class RotatorController:
         self.connected = False
         self.timeout = timeout
 
+    def _get_rotator(self) -> Any:
+        if self.rotator is None:
+            raise RuntimeError("Rotator is not initialized")
+        return cast(Any, self.rotator)
+
     async def connect(self) -> bool:
 
         if self.connected:
@@ -67,14 +72,15 @@ class RotatorController:
             assert pingcheck, "Rotator did not respond to ping"
 
             self.logger.debug(f"Connecting to rotator at {self.device_path}")
-            self.rotator = Hamlib.Rot(self.model)
-            self.rotator.set_conf("rot_pathname", self.device_path)
+            rotator = Hamlib.Rot(self.model)
+            rotator.set_conf("rot_pathname", self.device_path)
 
             # Set timeout
-            self.rotator.set_conf("timeout", str(int(self.timeout * 1000)))  # Convert to ms
+            rotator.set_conf("timeout", str(int(self.timeout * 1000)))  # Convert to ms
 
             # Initialize the rotator (opens the connection)
-            self.rotator.open()
+            rotator.open()
+            self.rotator = rotator
 
             self.connected = True
             self.logger.info(f"Successfully connected to rotator as {self.device_path}")
@@ -91,7 +97,8 @@ class RotatorController:
             return True
 
         try:
-            result = await asyncio.wait_for(asyncio.to_thread(self.rotator.close), timeout=3.0)
+            rotator = self._get_rotator()
+            result = await asyncio.wait_for(asyncio.to_thread(rotator.close), timeout=3.0)
             self.logger.debug(f"Close command: result={result}")
 
             self.connected = False
@@ -185,7 +192,8 @@ class RotatorController:
         self.check_connection()
 
         try:
-            az, el = await asyncio.to_thread(self.rotator.get_position)
+            rotator = self._get_rotator()
+            az, el = await asyncio.to_thread(rotator.get_position)
             assert az is not None, "Azimuth is None"
             assert el is not None, "Elevation is None"
 
@@ -196,12 +204,22 @@ class RotatorController:
             self.logger.error(f"Error getting position: {e}")
             raise RuntimeError(f"Error getting position: {e}")
 
-    async def park(self, park_az, park_el) -> bool:
+    async def park(self, park_az=None, park_el=None) -> bool:
         self.check_connection()
 
         try:
-            self.logger.info("Parking rotator")
-            status = await asyncio.to_thread(self.rotator.park)
+            rotator = self._get_rotator()
+            if (park_az is None) != (park_el is None):
+                raise ValueError("park_az and park_el must either both be set or both be null")
+
+            if park_az is not None and park_el is not None:
+                self.logger.info(
+                    "Parking rotator using configured target az=%s el=%s", park_az, park_el
+                )
+                status = await asyncio.to_thread(rotator.set_position, park_az, park_el)
+            else:
+                self.logger.info("Parking rotator")
+                status = await asyncio.to_thread(rotator.park)
             self.logger.info(f"Park command: status={status}")
 
             # if status != Hamlib.RIG_OK:
@@ -247,7 +265,7 @@ class RotatorController:
                     except Exception as e:
                         self.logger.error(f"Error during cleanup: {e}")
 
-            except Exception as e:
+            except Exception:
                 # Avoid any exceptions in __del__
                 pass
 
@@ -285,11 +303,13 @@ class RotatorController:
         az_tolerance: float = 2.0,
         el_tolerance: float = 2.0,
     ) -> AsyncGenerator[Tuple[float, float, bool], None]:
+        self.check_connection()
 
         # Start the slew operation
         try:
+            rotator = self._get_rotator()
             self.logger.info(f"Setting rotator position to az={target_az}, el={target_el}")
-            status = await asyncio.to_thread(self.rotator.set_position, target_az, target_el)
+            status = await asyncio.to_thread(rotator.set_position, target_az, target_el)
             self.logger.debug(f"Set position command: status={status}")
 
         except Exception as e:

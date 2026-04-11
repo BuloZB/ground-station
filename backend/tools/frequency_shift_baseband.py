@@ -16,6 +16,7 @@ Example:
 import argparse
 import json
 import os
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -216,8 +217,6 @@ Examples:
         )
     except Exception as e:
         print(f"\nError: {e}")
-        import traceback
-
         traceback.print_exc()
         return 1
 

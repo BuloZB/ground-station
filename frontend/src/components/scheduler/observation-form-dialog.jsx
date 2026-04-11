@@ -233,7 +233,12 @@ const ObservationFormDialog = () => {
             transmitter: { id: '', frequency: 0, mode: '', bandwidth: 0 },
             tasks: initialSession.tasks,
             sessions: [initialSession],
-            rotator: { id: null, tracking_enabled: false },
+            rotator: {
+                id: null,
+                tracking_enabled: false,
+                unpark_before_tracking: false,
+                park_after_observation: false,
+            },
             rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
         };
     });
@@ -410,11 +415,22 @@ const ObservationFormDialog = () => {
                 tasks: session.tasks || [],
             }));
             const primarySession = normalizedSessions[0] || createEmptySession();
+            const normalizedRotator = {
+                id: selectedObservation?.rotator?.id ?? null,
+                tracking_enabled: Boolean(selectedObservation?.rotator?.tracking_enabled),
+                unpark_before_tracking: Boolean(
+                    selectedObservation?.rotator?.unpark_before_tracking
+                ),
+                park_after_observation: Boolean(
+                    selectedObservation?.rotator?.park_after_observation
+                ),
+            };
             setFormData({
                 ...selectedObservation,
                 sessions: normalizedSessions,
                 sdr: primarySession.sdr,
                 tasks: primarySession.tasks,
+                rotator: normalizedRotator,
             });
             setActiveSessionIndex(0);
         } else {
@@ -429,7 +445,12 @@ const ObservationFormDialog = () => {
                 transmitter: { id: '', frequency: 0, mode: '', bandwidth: 0 },
                 tasks: initialSession.tasks,
                 sessions: [initialSession],
-                rotator: { id: null, tracking_enabled: false },
+                rotator: {
+                    id: null,
+                    tracking_enabled: false,
+                    unpark_before_tracking: false,
+                    park_after_observation: false,
+                },
                 rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
             });
             setActiveSessionIndex(0);
@@ -1149,6 +1170,14 @@ const ObservationFormDialog = () => {
                                             rotator: {
                                                 id: value,
                                                 tracking_enabled: value ? true : false,
+                                                unpark_before_tracking:
+                                                    value
+                                                        ? Boolean(prev.rotator?.unpark_before_tracking)
+                                                        : false,
+                                                park_after_observation:
+                                                    value
+                                                        ? Boolean(prev.rotator?.park_after_observation)
+                                                        : false,
                                             },
                                             rig: {
                                                 ...prev.rig,
@@ -1179,6 +1208,42 @@ const ObservationFormDialog = () => {
                                     ))}
                                 </Select>
                             </FormControl>
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={Boolean(formData.rotator?.unpark_before_tracking)}
+                                        onChange={(e) =>
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                rotator: {
+                                                    ...prev.rotator,
+                                                    unpark_before_tracking: e.target.checked,
+                                                },
+                                            }))
+                                        }
+                                        disabled={isFormDisabled || !formData.rotator?.id}
+                                    />
+                                }
+                                label="Unpark before observation start (if currently parked)"
+                            />
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={Boolean(formData.rotator?.park_after_observation)}
+                                        onChange={(e) =>
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                rotator: {
+                                                    ...prev.rotator,
+                                                    park_after_observation: e.target.checked,
+                                                },
+                                            }))
+                                        }
+                                        disabled={isFormDisabled || !formData.rotator?.id}
+                                    />
+                                }
+                                label="Park rotator after observation end"
+                            />
                         </Stack>
                     </Box>
 

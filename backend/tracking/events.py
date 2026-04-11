@@ -98,8 +98,6 @@ def _calculate_elevation_curve(
         end_dt = datetime.fromisoformat(event_end.replace("Z", "+00:00"))
 
         # Extend by requested minutes before (for first pass) and 2 minutes after to ensure curve touches horizon
-        from datetime import timedelta
-
         extended_start_dt = start_dt - timedelta(minutes=max(2, extend_start_minutes))
         extended_end_dt = end_dt + timedelta(minutes=2)
 

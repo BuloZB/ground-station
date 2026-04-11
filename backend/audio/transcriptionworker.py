@@ -594,7 +594,7 @@ class TranscriptionWorker(ABC, threading.Thread):
                 "error_type": error_type,
                 "message": error_message,
                 "details": error_details,
-                "timestamp": __import__("datetime").datetime.now().isoformat(),
+                "timestamp": datetime.now().isoformat(),
             },
             room=self.session_id,
         )

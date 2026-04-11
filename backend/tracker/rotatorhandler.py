@@ -104,6 +104,8 @@ class RotatorHandler:
             maxaz = self.tracker.rotator_details.get("maxaz")
             minel = self.tracker.rotator_details.get("minel")
             maxel = self.tracker.rotator_details.get("maxel")
+            parkaz = self.tracker.rotator_details.get("parkaz")
+            parkel = self.tracker.rotator_details.get("parkel")
             az_tolerance = self.tracker.rotator_details.get("aztolerance")
             el_tolerance = self.tracker.rotator_details.get("eltolerance")
 
@@ -118,6 +120,9 @@ class RotatorHandler:
                 self.tracker.rotator_data["minel"] = minel
                 self.tracker.rotator_data["maxel"] = maxel
                 logger.debug(f"Updated elevation limits to: {self.tracker.elevation_limits}")
+
+            self.tracker.rotator_data["parkaz"] = parkaz
+            self.tracker.rotator_data["parkel"] = parkel
 
             if az_tolerance is not None:
                 self.tracker.az_tolerance = float(az_tolerance)
@@ -283,9 +288,26 @@ class RotatorHandler:
         self.tracker.rotator_data.update({"tracking": False, "slewing": False})
 
         try:
-            park_reply = await self.tracker.rotator_controller.park()
+            if self.tracker.rotator_controller is None:
+                await self.connect_to_rotator()
+            if self.tracker.rotator_controller is None:
+                raise Exception("Rotator is not connected")
+
+            park_az = self.tracker.rotator_details.get("parkaz")
+            park_el = self.tracker.rotator_details.get("parkel")
+            if park_az is None and park_el is None:
+                park_reply = await self.tracker.rotator_controller.park()
+            elif park_az is not None and park_el is not None:
+                park_reply = await self.tracker.rotator_controller.park(
+                    park_az=float(park_az),
+                    park_el=float(park_el),
+                )
+            else:
+                raise Exception("parkaz and parkel must either both be set or both be null")
+
             if park_reply:
                 self.tracker.rotator_data["parked"] = True
+                self.tracker.rotator_data["stopped"] = True
                 self.tracker.queue_out.put(
                     {
                         DictKeys.EVENT: SocketEvents.SATELLITE_TRACKING,
@@ -439,6 +461,8 @@ class RotatorHandler:
                     current_az, current_el, active_target_az, active_target_el
                 )
                 if reached_active_target:
+                    # Reflect actual position status immediately for UI/telemetry.
+                    self.tracker.rotator_data["slewing"] = False
                     state["settle_hits"] += 1
                     if state["settle_hits"] >= self.tracker.rotator_settle_hits_required:
                         self._reset_slew_state()

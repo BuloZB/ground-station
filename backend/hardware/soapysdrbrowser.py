@@ -21,6 +21,7 @@ import socket
 import threading
 from typing import Any, Dict, List, Union
 
+import SoapySDR
 from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
@@ -125,8 +126,6 @@ async def query_sdrs_with_python_module(ip, port, timeout=5):
 def _query_with_soapysdr_module(ip, port):
     """Execute the SoapySDR module query in a separate thread."""
     try:
-        import SoapySDR
-
         # Construct remote device arguments
         args = {"driver": "remote", "remote:host": ip, "remote:port": str(port)}
 
@@ -134,9 +133,6 @@ def _query_with_soapysdr_module(ip, port):
         results = SoapySDR.Device.enumerate(args)
 
         return results
-    except ImportError:
-        logger.error("SoapySDR Python module not installed. Install with 'pip install soapysdr'")
-        return []
     except Exception as e:
         logger.error(f"SoapySDR module error: {str(e)}")
         # Re-raise to be handled by the caller

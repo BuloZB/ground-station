@@ -19,7 +19,7 @@
 
 import React from 'react';
 import { Box, Button, Stack, Slider, Typography, useTheme } from '@mui/material';
-import { useDispatch, useSelector } from 'react-redux';
+import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import { AutoScaleOnceIcon, AutoDBIcon } from '../common/custom-icons.jsx';
 import { setAutoDBRange, setDbRange } from './waterfall-slice.jsx';
 
@@ -34,7 +34,14 @@ const WaterfallRightSidebar = ({ workerRef, dimensions, isFullscreen = false }) 
         showRightSideWaterFallAccessories,
         packetsDrawerOpen,
         packetsDrawerHeight,
-    } = useSelector((state) => state.waterfall);
+    } = useSelector((state) => ({
+        dbRange: state.waterfall.dbRange,
+        isStreaming: state.waterfall.isStreaming,
+        autoDBRange: state.waterfall.autoDBRange,
+        showRightSideWaterFallAccessories: state.waterfall.showRightSideWaterFallAccessories,
+        packetsDrawerOpen: state.waterfall.packetsDrawerOpen,
+        packetsDrawerHeight: state.waterfall.packetsDrawerHeight,
+    }), shallowEqual);
 
     if (!showRightSideWaterFallAccessories) {
         return null;
@@ -163,4 +170,4 @@ const WaterfallRightSidebar = ({ workerRef, dimensions, isFullscreen = false }) 
     );
 };
 
-export default WaterfallRightSidebar;
+export default React.memo(WaterfallRightSidebar);

@@ -45,8 +45,10 @@ from observations.tasks.decoderhandler import DecoderHandler
 from observations.tasks.recorderhandler import RecorderHandler
 from observations.tasks.trackerhandler import TrackerHandler
 from observations.tasks.transcriptionhandler import TranscriptionHandler
+from server import runtimestate
 from session.service import session_service
 from session.tracker import session_tracker
+from tasks.registry import get_task
 from vfos.state import INTERNAL_VFO_NUMBER, VFOManager
 
 KNOWN_SATDUMP_PIPELINES = {
@@ -91,10 +93,8 @@ class ObservationExecutor:
 
     @property
     def vfo_manager(self):
-        """Lazy-load VFOManager to avoid circular import issues."""
+        """Return cached VFOManager instance."""
         if self._vfo_manager is None:
-            from vfos.state import VFOManager
-
             self._vfo_manager = VFOManager()
         return self._vfo_manager
 
@@ -180,7 +180,7 @@ class ObservationExecutor:
                 await remove_scheduled_stop_job(observation_id)
                 return {"success": False, "error": error_msg}
 
-            # 3. If rotator is required, cancel immediately when it's parked
+            # 3. If rotator is required and currently parked, either unpark or cancel
             rotator_config = observation.get("rotator", {})
             if rotator_config.get("tracking_enabled") and rotator_config.get("id"):
                 async with AsyncSessionLocal() as session:
@@ -191,13 +191,24 @@ class ObservationExecutor:
                     tracking_value = (tracking_state_reply.get("data") or {}).get("value", {})
                     rotator_state = str(tracking_value.get("rotator_state", "")).lower()
                     if rotator_state == "parked":
-                        msg = f"Rotator is parked; cancelling observation {observation_id}"
-                        logger.warning(msg)
-                        await log_execution_event(observation_id, msg, "warning")
-                        await update_observation_status(self.sio, observation_id, STATUS_CANCELLED)
-                        await remove_scheduled_stop_job(observation_id)
-                        self._running_observations.discard(observation_id)
-                        return {"success": False, "error": msg}
+                        if not bool(rotator_config.get("unpark_before_tracking", False)):
+                            msg = (
+                                f"Rotator is parked; cancelling observation {observation_id} "
+                                f"(unpark_before_tracking is disabled)"
+                            )
+                            logger.warning(msg)
+                            await log_execution_event(observation_id, msg, "warning")
+                            await update_observation_status(
+                                self.sio, observation_id, STATUS_CANCELLED
+                            )
+                            await remove_scheduled_stop_job(observation_id)
+                            self._running_observations.discard(observation_id)
+                            return {"success": False, "error": msg}
+                        await log_execution_event(
+                            observation_id,
+                            "Rotator is parked; unpark_before_tracking is enabled, will unpark before tracking",
+                            "info",
+                        )
                 else:
                     logger.warning(
                         f"Failed to fetch tracking state; proceeding with observation "
@@ -293,7 +304,7 @@ class ObservationExecutor:
 
         This method:
         1. Stops SDR process (cascades to decoders/recorders)
-        2. Stops tracker
+        2. Applies rotator stop policy (leave connected by default, optional park)
         3. Cleans up internal VFO session
         4. Updates observation status to COMPLETED
 
@@ -602,8 +613,9 @@ class ObservationExecutor:
         logger.info(f"Observation ID: {observation_id}")
 
         try:
-            # 1. Don't stop tracker - leave rotator connected for manual control or next observation
-            await self.tracker_handler.stop_tracker_task(observation_id)
+            # 1. Stop tracker / optionally park rotator based on observation rotator config
+            rotator_config = observation.get("rotator", {}) or {}
+            await self.tracker_handler.stop_tracker_task(observation_id, rotator_config)
 
             # 2. Stop decoders explicitly before cleaning up each session
             for session_index, session in enumerate(sessions, start=1):
@@ -727,13 +739,7 @@ class ObservationExecutor:
                     self._iq_recording_info.pop(observation_id, None)
             return
 
-        try:
-            from server.startup import background_task_manager
-            from tasks.registry import get_task
-        except Exception as e:
-            logger.error(f"Failed to import background task manager for SatDump: {e}")
-            return
-
+        background_task_manager = runtimestate.background_task_manager
         if not background_task_manager:
             logger.error("Background task manager not available for SatDump post-processing")
             return

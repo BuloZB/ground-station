@@ -92,6 +92,8 @@ const defaultRotator = {
     azimuth_mode: '0_360',
     minel: 0,
     maxel: 90,
+    parkaz: null,
+    parkel: null,
     aztolerance: 2.0,
     eltolerance: 2.0,
 };

@@ -101,6 +101,8 @@ class SatelliteTracker:
             "maxaz": None,
             "minel": None,
             "maxel": None,
+            "parkaz": None,
+            "parkel": None,
         }
         self.rig_data = {
             "connected": False,

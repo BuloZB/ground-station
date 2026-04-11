@@ -29,6 +29,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+try:
+    from satellites.satyaml.satyaml import SatYAML
+except Exception:
+    SatYAML = None
+
 from db import AsyncSessionLocal
 from db.models import Satellites, Transmitters
 
@@ -403,8 +408,8 @@ def collect_yaml_files(yaml_dir: Optional[Path], satyaml: Optional[SatYamlProtoc
 
 def load_satyaml() -> Optional[SatYamlProtocol]:
     try:
-        from satellites.satyaml.satyaml import SatYAML
-
+        if SatYAML is None:
+            return None
         satyaml = SatYAML()
         return cast(SatYamlProtocol, satyaml)
     except Exception:

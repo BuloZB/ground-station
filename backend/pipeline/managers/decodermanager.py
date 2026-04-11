@@ -21,6 +21,7 @@ import signal
 import threading
 import time
 
+from common.audio_queue_config import get_audio_queue_config
 from pipeline.config.decoderconfigservice import decoder_config_service
 from pipeline.registries.decoderregistry import decoder_registry
 from pipeline.registries.demodulatorregistry import demodulator_registry
@@ -43,6 +44,7 @@ class DecoderManager:
         self.logger = logging.getLogger("decoder-manager")
         self.processes = processes
         self.demodulator_manager = demodulator_manager
+        self.audio_cfg = get_audio_queue_config()
         # Single-flight guard for starts per (SDR, session, VFO)
         self._start_locks = {}
         # Track start-in-progress and last-start timestamps to coalesce near-simultaneous starts
@@ -395,7 +397,9 @@ class DecoderManager:
                 # Subscribe decoder to audio broadcaster
                 # Use multiprocessing queue for process-based decoders (AFSK, etc.)
                 decoder_audio_queue = audio_broadcaster.subscribe(
-                    f"decoder:{session_id}", maxsize=10, for_process=True
+                    f"decoder:{session_id}",
+                    maxsize=self.audio_cfg.audio_decoder_queue_size,
+                    for_process=True,
                 )
 
                 # Resolve decoder configuration using DecoderConfigService
@@ -575,8 +579,6 @@ class DecoderManager:
                 else:
                     self.logger.debug(f"{decoder_name} process cleaned up successfully")
 
-            import threading
-
             cleanup_thread = threading.Thread(
                 target=_async_decoder_cleanup,
                 name=f"cleanup-{decoder_name}-{session_id}",
@@ -617,8 +619,6 @@ class DecoderManager:
 
                 if should_stop_demod:
                     # Get demodulator type name from the instance class
-                    from pipeline.registries.demodulatorregistry import demodulator_registry
-
                     demod_class_name = type(vfo_demod).__name__
                     demod_type = "UNKNOWN"
                     for demod_name in demodulator_registry.list_demodulators():
@@ -897,9 +897,7 @@ class DecoderManager:
                     return True
                 # backoff then retry
                 try:
-                    import time as _time
-
-                    _time.sleep(backoffs[min(attempt + 1, len(backoffs) - 1)])
+                    time.sleep(backoffs[min(attempt + 1, len(backoffs) - 1)])
                 except Exception:
                     pass
 

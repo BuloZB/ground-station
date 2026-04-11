@@ -17,7 +17,7 @@
  *
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import {
@@ -47,6 +47,7 @@ import {
     CheckCircle as EnableIcon,
     Cancel as DisableIcon,
 } from '@mui/icons-material';
+import { alpha } from '@mui/material/styles';
 import { useSocket } from '../common/socket.jsx';
 import {
     setSelectedMonitoredSatellite,
@@ -56,19 +57,8 @@ import {
     fetchMonitoredSatellites,
 } from './scheduler-slice.jsx';
 import RegenerationPreviewDialog from './regeneration-preview-dialog.jsx';
+import { toRowSelectionModel, toSelectedIds } from '../../utils/datagrid-selection.js';
 import { getFlattenedTasks, getSessionSdrs } from './session-utils.js';
-
-const toSelectedIds = (selectionModel) => {
-    if (Array.isArray(selectionModel)) {
-        return selectionModel;
-    }
-
-    if (selectionModel?.ids instanceof Set) {
-        return Array.from(selectionModel.ids);
-    }
-
-    return [];
-};
 
 const MonitoredSatellitesTable = () => {
     const dispatch = useDispatch();
@@ -85,6 +75,7 @@ const MonitoredSatellitesTable = () => {
 
     const monitoredSatellites = useSelector((state) => state.scheduler?.monitoredSatellites || []);
     const loading = useSelector((state) => state.scheduler?.monitoredSatellitesLoading || false);
+    const rowSelectionModel = useMemo(() => toRowSelectionModel(selectedIds), [selectedIds]);
 
     useEffect(() => {
         if (socket) {
@@ -187,22 +178,6 @@ const MonitoredSatellitesTable = () => {
         }
     };
 
-    const NoRowsOverlay = () => (
-        <Stack
-            spacing={1}
-            alignItems="center"
-            justifyContent="center"
-            sx={{ height: '100%', px: 2, textAlign: 'center' }}
-        >
-            <Typography variant="body2" color="text.secondary">
-                No monitored satellites configured.
-            </Typography>
-            <Button size="small" variant="outlined" onClick={handleAdd}>
-                Add monitored satellite
-            </Button>
-        </Stack>
-    );
-
     const columns = [
         {
             field: 'enabled',
@@ -211,6 +186,7 @@ const MonitoredSatellitesTable = () => {
             renderCell: (params) => (
                 <Switch
                     checked={params.value}
+                    onClick={(e) => e.stopPropagation()}
                     onChange={() => handleToggleEnabled(params.row.id, params.value)}
                     size="small"
                 />
@@ -376,41 +352,51 @@ const MonitoredSatellitesTable = () => {
                 Satellites in this list will automatically generate scheduled observations for all upcoming passes that meet the specified criteria (minimum elevation, lookahead window).
             </Alert>
 
-            <Box sx={{ flexGrow: 1, width: '100%', minHeight: 0, mt: 2 }}>
+            <Box sx={{ flexGrow: 1, width: '100%', minHeight: 0 }}>
                 <DataGrid
                     rows={monitoredSatellites}
                     columns={columns}
                     loading={loading}
                     checkboxSelection
-                    disableRowSelectionOnClick
+                    disableRowSelectionExcludeModel
+                    rowSelectionModel={rowSelectionModel}
                     onRowSelectionModelChange={(newSelection) => {
                         setSelectedIds(toSelectedIds(newSelection));
                     }}
                     initialState={{
                         pagination: {
-                            paginationModel: { pageSize: 10 },
+                            paginationModel: { pageSize: 25 },
                         },
                         sorting: {
                             sortModel: [{ field: 'satellite', sort: 'asc' }],
                         },
                     }}
-                    pageSizeOptions={[5, 10, 25, {value: -1, label: 'All'}]}
-                    slots={{
-                        noRowsOverlay: NoRowsOverlay,
-                    }}
+                    pageSizeOptions={[10, 25, 50, {value: -1, label: 'All'}]}
                     localeText={{
                         noRowsLabel: 'No monitored satellites'
                     }}
                     sx={{
                         border: 0,
-                        backgroundColor: 'background.paper',
-                        [`& .${gridClasses.cell}:focus-visible, & .${gridClasses.cell}:focus-within`]: {
-                            outline: (theme) => `2px solid ${theme.palette.primary.main}`,
-                            outlineOffset: '-2px',
+                        [`& .${gridClasses.cell}:focus, & .${gridClasses.cell}:focus-within`]: {
+                            outline: 'none',
                         },
-                        [`& .${gridClasses.columnHeader}:focus-visible, & .${gridClasses.columnHeader}:focus-within`]: {
-                            outline: (theme) => `2px solid ${theme.palette.primary.main}`,
-                            outlineOffset: '-2px',
+                        [`& .${gridClasses.columnHeader}:focus, & .${gridClasses.columnHeader}:focus-within`]: {
+                            outline: 'none',
+                        },
+                        '& .MuiDataGrid-columnHeaders': {
+                            backgroundColor: (theme) => alpha(
+                                theme.palette.primary.main,
+                                theme.palette.mode === 'dark' ? 0.18 : 0.10
+                            ),
+                            borderBottom: (theme) => `2px solid ${alpha(theme.palette.primary.main, 0.45)}`,
+                        },
+                        '& .MuiDataGrid-columnHeader': {
+                            backgroundColor: 'transparent',
+                        },
+                        '& .MuiDataGrid-columnHeaderTitle': {
+                            fontSize: '0.8125rem',
+                            fontWeight: 700,
+                            letterSpacing: '0.02em',
                         },
                         '& .MuiDataGrid-overlay': {
                             fontSize: '0.875rem',

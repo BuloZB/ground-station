@@ -19,7 +19,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { DataGrid, gridClasses, useGridApiRef } from '@mui/x-data-grid';
+import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import {
     Box,
     Chip,
@@ -46,7 +46,7 @@ import {
     Settings as SettingsIcon,
     Folder as FolderIcon,
 } from '@mui/icons-material';
-import { darken, lighten } from '@mui/material/styles';
+import { alpha } from '@mui/material/styles';
 import { useSocket } from '../common/socket.jsx';
 import {
     fetchScheduledObservations,
@@ -65,6 +65,7 @@ import {
 import { getTimeFromISO, humanizeFutureDateInMinutes } from '../common/common.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDateTime } from '../../utils/date-time.js';
+import { toRowSelectionModel, toSelectedIds } from '../../utils/datagrid-selection.js';
 import Button from '@mui/material/Button';
 import ObservationsTimeline from './observations-timeline-svg.jsx';
 import { getFlattenedTasks, getSessionSdrs } from './session-utils.js';
@@ -86,18 +87,6 @@ const getStatusColor = (status) => {
         default:
             return 'default';
     }
-};
-
-const toSelectedIds = (selectionModel) => {
-    if (Array.isArray(selectionModel)) {
-        return selectionModel;
-    }
-
-    if (selectionModel?.ids instanceof Set) {
-        return Array.from(selectionModel.ids);
-    }
-
-    return [];
 };
 
 // Time formatter component that updates every second
@@ -123,7 +112,6 @@ const TimeFormatter = React.memo(function TimeFormatter({ value }) {
 const ObservationsTable = () => {
     const dispatch = useDispatch();
     const { socket } = useSocket();
-    const apiRef = useGridApiRef();
     const [openDeleteConfirm, setOpenDeleteConfirm] = useState(false);
     const [openStopConfirm, setOpenStopConfirm] = useState(false);
 
@@ -137,10 +125,7 @@ const ObservationsTable = () => {
     const openDataDialog = useSelector((state) => state.scheduler?.openObservationDataDialog || false);
     const selectedObservationForData = useSelector((state) => state.scheduler?.selectedObservationForData || null);
     const { timezone, locale } = useUserTimeSettings();
-    const rowSelectionModel = useMemo(
-        () => ({ type: 'include', ids: new Set(selectedIds) }),
-        [selectedIds]
-    );
+    const rowSelectionModel = useMemo(() => toRowSelectionModel(selectedIds), [selectedIds]);
 
     // Filter observations based on status filters
     const observations = allObservations.filter(obs => statusFilters[obs.status]);
@@ -174,28 +159,6 @@ const ObservationsTable = () => {
             }
         }
     }, [columnVisibility]);
-
-    // Force row className re-evaluation every second to update colors in real-time
-    useEffect(() => {
-        const intervalId = setInterval(() => {
-            const rowIds = apiRef.current.getAllRowIds();
-            rowIds.forEach((rowId) => {
-                const rowNode = apiRef.current.getRowNode(rowId);
-                if (!rowNode) {
-                    return;
-                }
-                // Trigger row update to force getRowClassName re-evaluation
-                apiRef.current.updateRows([{
-                    id: rowId,
-                    _rowClassName: ''
-                }]);
-            });
-        }, 1000);
-
-        return () => {
-            clearInterval(intervalId);
-        };
-    }, []);
 
     const handleDelete = () => {
         if (selectedIds.length > 0 && socket) {
@@ -298,28 +261,6 @@ const ObservationsTable = () => {
         });
     };
 
-    const NoRowsOverlay = () => (
-        <Stack
-            spacing={1}
-            alignItems="center"
-            justifyContent="center"
-            sx={{ height: '100%', px: 2, textAlign: 'center' }}
-        >
-            <Typography variant="body2" color="text.secondary">
-                {allObservations.length === 0
-                    ? 'No scheduled observations yet.'
-                    : 'No observations match the selected status filters.'}
-            </Typography>
-            <Button
-                size="small"
-                variant="outlined"
-                onClick={allObservations.length === 0 ? handleAdd : handleShowAllStatuses}
-            >
-                {allObservations.length === 0 ? 'Create observation' : 'Show all statuses'}
-            </Button>
-        </Stack>
-    );
-
     const columns = [
         {
             field: 'enabled',
@@ -328,6 +269,7 @@ const ObservationsTable = () => {
             renderCell: (params) => (
                 <Switch
                     checked={params.value}
+                    onClick={(e) => e.stopPropagation()}
                     onChange={() => handleToggleEnabled(params.row.id, params.value)}
                     disabled={params.row.status === 'running'}
                     size="small"
@@ -597,38 +539,16 @@ const ObservationsTable = () => {
 
             <Box sx={{ flexGrow: 1, width: '100%', minHeight: 0 }}>
                 <DataGrid
-                    apiRef={apiRef}
                     rows={observations}
                     columns={columns}
                     loading={loading}
                     checkboxSelection
-                    disableRowSelectionOnClick
+                    disableRowSelectionExcludeModel
                     rowSelectionModel={rowSelectionModel}
                     onRowSelectionModelChange={(newSelection) => {
-                        dispatch(setSelectedObservationIds(toSelectedIds(newSelection)));
-                    }}
-                    getRowClassName={(params) => {
-                        // If cancelled, always show as cancelled regardless of time
-                        if (params.row.status === 'cancelled') {
-                            return 'status-cancelled';
-                        }
-
-                        // Check if satellite is currently visible (between AOS and LOS)
-                        const now = new Date();
-                        const aosTime = params.row.pass?.event_start ? new Date(params.row.pass.event_start) : null;
-                        const losTime = params.row.pass?.event_end ? new Date(params.row.pass.event_end) : null;
-
-                        // Satellite is currently visible (above horizon)
-                        if (aosTime && losTime && now >= aosTime && now <= losTime) {
-                            return 'status-running';
-                        }
-
-                        // Pass has completed (satellite has set below horizon)
-                        if (losTime && now > losTime) {
-                            return 'status-past';
-                        }
-
-                        return `status-${params.row.status}`;
+                        dispatch(
+                            setSelectedObservationIds(toSelectedIds(newSelection))
+                        );
                     }}
                     columnVisibilityModel={columnVisibility}
                     initialState={{
@@ -640,46 +560,31 @@ const ObservationsTable = () => {
                         },
                     }}
                     pageSizeOptions={[10, 25, 50, {value: -1, label: 'All'}]}
-                    slots={{
-                        noRowsOverlay: NoRowsOverlay,
-                    }}
                     localeText={{
                         noRowsLabel: 'No scheduled observations'
                     }}
                     sx={{
                         border: 0,
-                        backgroundColor: 'background.paper',
-                        [`& .${gridClasses.cell}:focus-visible, & .${gridClasses.cell}:focus-within`]: {
-                            outline: (theme) => `2px solid ${theme.palette.primary.main}`,
-                            outlineOffset: '-2px',
+                        [`& .${gridClasses.cell}:focus, & .${gridClasses.cell}:focus-within`]: {
+                            outline: 'none',
                         },
-                        [`& .${gridClasses.columnHeader}:focus-visible, & .${gridClasses.columnHeader}:focus-within`]: {
-                            outline: (theme) => `2px solid ${theme.palette.primary.main}`,
-                            outlineOffset: '-2px',
+                        [`& .${gridClasses.columnHeader}:focus, & .${gridClasses.columnHeader}:focus-within`]: {
+                            outline: 'none',
                         },
-                        [`& .${gridClasses.row}.status-running`]: {
-                            backgroundColor: (theme) => theme.palette.mode === 'dark'
-                                ? darken(theme.palette.success.main, 0.7)
-                                : lighten(theme.palette.success.main, 0.8),
+                        '& .MuiDataGrid-columnHeaders': {
+                            backgroundColor: (theme) => alpha(
+                                theme.palette.primary.main,
+                                theme.palette.mode === 'dark' ? 0.18 : 0.10
+                            ),
+                            borderBottom: (theme) => `2px solid ${alpha(theme.palette.primary.main, 0.45)}`,
                         },
-                        [`& .${gridClasses.row}.status-failed`]: {
-                            backgroundColor: (theme) => theme.palette.mode === 'dark'
-                                ? darken(theme.palette.error.main, 0.7)
-                                : lighten(theme.palette.error.main, 0.8),
+                        '& .MuiDataGrid-columnHeader': {
+                            backgroundColor: 'transparent',
                         },
-                        [`& .${gridClasses.row}.status-past`]: {
-                            backgroundColor: (theme) => theme.palette.mode === 'dark'
-                                ? 'rgba(255, 255, 255, 0.05)'
-                                : 'rgba(0, 0, 0, 0.04)',
-                            opacity: 0.6,
-                            textDecoration: 'line-through',
-                        },
-                        [`& .${gridClasses.row}.status-cancelled`]: {
-                            backgroundColor: (theme) => theme.palette.mode === 'dark'
-                                ? 'rgba(255, 255, 255, 0.05)'
-                                : 'rgba(0, 0, 0, 0.04)',
-                            opacity: 0.6,
-                            textDecoration: 'line-through',
+                        '& .MuiDataGrid-columnHeaderTitle': {
+                            fontSize: '0.8125rem',
+                            fontWeight: 700,
+                            letterSpacing: '0.02em',
                         },
                         '& .MuiDataGrid-overlay': {
                             fontSize: '0.875rem',

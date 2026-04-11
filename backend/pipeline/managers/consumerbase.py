@@ -18,6 +18,8 @@ import logging
 import queue as queue_module
 
 from audio.audiobroadcaster import AudioBroadcaster
+from common.audio_queue_config import get_audio_queue_config
+from server import runtimestate
 
 
 class ConsumerManager:
@@ -38,6 +40,7 @@ class ConsumerManager:
         """
         self.logger = logging.getLogger("consumer-manager")
         self.processes = processes
+        self.audio_cfg = get_audio_queue_config()
 
     def _start_iq_consumer(
         self,
@@ -184,7 +187,9 @@ class ConsumerManager:
             audio_broadcaster_instance = None
             if storage_key == "demodulators":
                 # Create input queue for the audio broadcaster
-                broadcaster_input_queue: queue_module.Queue = queue_module.Queue(maxsize=10)
+                broadcaster_input_queue: queue_module.Queue = queue_module.Queue(
+                    maxsize=self.audio_cfg.per_vfo_audio_broadcast_input_size
+                )
 
                 # Create and start the audio broadcaster
                 audio_broadcaster_instance = AudioBroadcaster(
@@ -195,9 +200,7 @@ class ConsumerManager:
                 # Subscribe the global audio_queue (used by WebAudioStreamer) to this broadcaster
                 # This allows the browser to hear the audio from this VFO
                 try:
-                    from server import startup
-
-                    global_audio_queue = getattr(startup, "audio_queue", None)
+                    global_audio_queue = runtimestate.audio_queue
                     if global_audio_queue:
                         # Subscribe the existing global audio_queue to this broadcaster
                         web_audio_key = f"web_audio:{session_id}:vfo{vfo_number}"

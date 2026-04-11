@@ -16,6 +16,7 @@
 
 import html
 import re
+from datetime import datetime
 from typing import Any, Dict, List
 
 from sqlalchemy import text
@@ -108,7 +109,7 @@ async def backup_table(table_name: str) -> Dict[str, Any]:
             # Generate SQL INSERT statements
             sql_statements = []
             sql_statements.append(f"-- Backup of table {table_name}")
-            sql_statements.append(f"-- Generated at: {__import__('datetime').datetime.now()}")
+            sql_statements.append(f"-- Generated at: {datetime.now()}")
             sql_statements.append(f"-- Total rows: {len(rows)}\n")
 
             for row in rows:
@@ -188,7 +189,7 @@ async def restore_table(table_name: str, sql: str, delete_first: bool = True) ->
                 # Execute INSERT statements
                 rows_inserted = 0
                 for line in sql_lines:
-                    await session.execute(text(line))
+                    await (await session.connection()).exec_driver_sql(line)
                     rows_inserted += 1
 
                 await session.commit()
@@ -206,7 +207,7 @@ async def full_backup() -> Dict[str, Any]:
     try:
         sql_statements = []
         sql_statements.append("-- Full Database Backup")
-        sql_statements.append(f"-- Generated at: {__import__('datetime').datetime.now()}")
+        sql_statements.append(f"-- Generated at: {datetime.now()}")
         sql_statements.append("")
 
         # Get CREATE TABLE statements
@@ -357,7 +358,7 @@ async def full_restore(sql: str, drop_tables: bool = True) -> Dict[str, Any]:
                 # Execute CREATE TABLE statements (excluding alembic_version)
                 tables_created = 0
                 for stmt in create_statements:
-                    await session.execute(text(stmt))
+                    await (await session.connection()).exec_driver_sql(stmt)
                     tables_created += 1
 
                 # Commit after creating tables
@@ -366,7 +367,7 @@ async def full_restore(sql: str, drop_tables: bool = True) -> Dict[str, Any]:
                 # Execute INSERT statements (excluding alembic_version)
                 rows_inserted = 0
                 for stmt in insert_statements:
-                    await session.execute(text(stmt))
+                    await (await session.connection()).exec_driver_sql(stmt)
                     rows_inserted += 1
 
                 # Commit data inserts before handling alembic_version
@@ -374,13 +375,13 @@ async def full_restore(sql: str, drop_tables: bool = True) -> Dict[str, Any]:
 
                 # Now handle alembic_version table LAST to ensure it's created only if everything else succeeded
                 if alembic_create:
-                    await session.execute(text(alembic_create))
+                    await (await session.connection()).exec_driver_sql(alembic_create)
                     tables_created += 1
                     await session.commit()
 
                 # Insert alembic_version data LAST
                 for stmt in alembic_inserts:
-                    await session.execute(text(stmt))
+                    await (await session.connection()).exec_driver_sql(stmt)
                     rows_inserted += 1
 
                 # Re-enable foreign key constraints

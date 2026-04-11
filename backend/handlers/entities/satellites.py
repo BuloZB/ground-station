@@ -19,6 +19,8 @@ from typing import Any, Dict, Optional, Union
 
 import crud
 from db import AsyncSessionLocal
+from server import runtimestate
+from tasks.registry import get_task
 from tracker.data import compiled_satellite_data
 from tracker.runner import get_tracker_manager
 
@@ -245,9 +247,7 @@ async def sync_satellite_data(
         Dictionary with success status and task_id
     """
     try:
-        from server.startup import background_task_manager
-        from tasks.registry import get_task
-
+        background_task_manager = runtimestate.background_task_manager
         if not background_task_manager:
             logger.error("Background task manager not initialized")
             return {"success": False, "error": "Background task manager not initialized"}

@@ -19,7 +19,7 @@
 
 
 import React, {useState, useEffect, useRef, useCallback, useMemo} from 'react';
-import {Responsive, WidthProvider} from 'react-grid-layout/legacy';
+import {Responsive, useContainerWidth} from 'react-grid-layout';
 import 'leaflet-fullscreen/dist/Leaflet.fullscreen.js';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -30,7 +30,6 @@ import {
 import {
     setGridEditable
 } from './waterfall-slice.jsx';
-import {useSocket} from "../common/socket.jsx";
 import {useDispatch, useSelector} from "react-redux";
 import MainWaterfallDisplay from "./waterfall-island.jsx";
 import WaterfallSettings from "./settings-column.jsx";
@@ -38,10 +37,13 @@ import TranscriptionSubtitles from "./transcription-subtitles.jsx";
 
 
 // A global callback for dashboard editing here
-export let handleSetGridEditableWaterfall = function () {
+const setGridEditableWaterfallEvent = 'waterfall-set-grid-editable';
+export const handleSetGridEditableWaterfall = function (value) {
+    window.dispatchEvent(new CustomEvent(setGridEditableWaterfallEvent, {detail: value}));
 };
 
 export const gridLayoutStoreName = 'waterfall-view-layouts';
+const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
 
 // load / save layouts from localStorage
 function loadLayoutsFromLocalStorage() {
@@ -57,6 +59,24 @@ function saveLayoutsToLocalStorage(layouts) {
     localStorage.setItem(gridLayoutStoreName, JSON.stringify(layouts));
 }
 
+function normalizeLayoutsResizeHandles(layouts) {
+    if (!layouts || typeof layouts !== 'object') {
+        return layouts;
+    }
+
+    return Object.fromEntries(
+        Object.entries(layouts).map(([breakpoint, items]) => [
+            breakpoint,
+            Array.isArray(items)
+                ? items.map((item) => ({
+                    ...item,
+                    resizeHandles: [...SHARED_RESIZE_HANDLES],
+                }))
+                : items,
+        ]),
+    );
+}
+
 const MainLayout = React.memo(function MainLayout() {
     const waterfallComponentSettingsRef = useRef(null);
 
@@ -65,13 +85,12 @@ const MainLayout = React.memo(function MainLayout() {
     const playbackRemainingSecondsRef = useRef(null);
     const playbackTotalSecondsRef = useRef(null);
 
-    const {socket} = useSocket();
     const dispatch = useDispatch();
     const {
         gridEditable,
     } = useSelector(state => state.waterfall);
 
-    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), []);
+    const {width, containerRef, mounted} = useContainerWidth({measureBeforeMount: true});
 
     // Default layout if none in localStorage
     const defaultLayouts = {
@@ -122,25 +141,31 @@ const MainLayout = React.memo(function MainLayout() {
         }, {"w": 2, "h": 9, "x": 0, "y": 35, "i": "rig-control", "moved": false, "static": false}]
     };
 
-    // globalize the callback
-    handleSetGridEditableWaterfall = useCallback((value) => {
-        dispatch(setGridEditable(value));
+    useEffect(() => {
+        const onSetGridEditable = (event) => {
+            dispatch(setGridEditable(event.detail));
+        };
+
+        window.addEventListener(setGridEditableWaterfallEvent, onSetGridEditable);
+        return () => {
+            window.removeEventListener(setGridEditableWaterfallEvent, onSetGridEditable);
+        };
     }, [dispatch]);
 
 
     // we load any stored layouts from localStorage or fallback to default
     const [layouts, setLayouts] = useState(() => {
         const loaded = loadLayoutsFromLocalStorage();
-        return loaded ?? defaultLayouts;
+        return normalizeLayoutsResizeHandles(loaded ?? defaultLayouts);
     });
 
     function handleLayoutsChange(currentLayout, allLayouts) {
-        setLayouts(allLayouts);
-        saveLayoutsToLocalStorage(allLayouts);
+        const normalizedLayouts = normalizeLayoutsResizeHandles(allLayouts);
+        setLayouts(normalizedLayouts);
+        saveLayoutsToLocalStorage(normalizedLayouts);
     }
 
-    // pre-made ResponsiveGridLayout
-    let gridContents = [
+    const gridContents = useMemo(() => [
         <StyledIslandParentScrollbar key="waterfall">
             <MainWaterfallDisplay
                 playbackElapsedSecondsRef={playbackElapsedSecondsRef}
@@ -154,50 +179,29 @@ const MainLayout = React.memo(function MainLayout() {
                 playbackRemainingSecondsRef={playbackRemainingSecondsRef}
             />
         </StyledIslandParentScrollbar>,
-        // <StyledIslandParentScrollbar key="rig-control">
-        //     <ControllerTabs />
-        // </StyledIslandParentScrollbar>,
-    ];
+    ], []);
 
-    let ResponsiveGridLayoutParent = null;
-
-    if (gridEditable === true) {
-        ResponsiveGridLayoutParent =
-            <ResponsiveReactGridLayout
-                useCSSTransforms={true}
-                className="layout"
-                layouts={layouts}
-                onLayoutChange={handleLayoutsChange}
-                breakpoints={{lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0}}
-                cols={{lg: 12, md: 10, sm: 6, xs: 2, xxs: 2}}
-                rowHeight={30}
-                isResizable={true}
-                isDraggable={true}
-                draggableHandle=".react-grid-draggable"
-            >
-                {gridContents}
-            </ResponsiveReactGridLayout>;
-    } else {
-        ResponsiveGridLayoutParent =
-            <ResponsiveReactGridLayout
-                useCSSTransforms={true}
-                className="layout"
-                layouts={layouts}
-                onLayoutChange={handleLayoutsChange}
-                breakpoints={{lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0}}
-                cols={{lg: 12, md: 10, sm: 6, xs: 2, xxs: 2}}
-                rowHeight={30}
-                isResizable={false}
-                isDraggable={false}
-                draggableHandle=".react-grid-draggable"
-            >
-                {gridContents}
-            </ResponsiveReactGridLayout>;
-    }
+    const responsiveGridLayoutParent = mounted ? (
+        <Responsive
+            width={width}
+            className="layout"
+            layouts={layouts}
+            onLayoutChange={handleLayoutsChange}
+            breakpoints={{lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0}}
+            cols={{lg: 12, md: 10, sm: 6, xs: 2, xxs: 2}}
+            rowHeight={30}
+            dragConfig={{enabled: gridEditable, handle: '.react-grid-draggable'}}
+            resizeConfig={{enabled: gridEditable}}
+        >
+            {gridContents}
+        </Responsive>
+    ) : null;
 
     return (
         <>
-            {ResponsiveGridLayoutParent}
+            <div ref={containerRef}>
+                {responsiveGridLayoutParent}
+            </div>
 
             {/* Transcription Subtitles Overlay - positioned over entire page */}
             <TranscriptionSubtitles

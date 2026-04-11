@@ -7,7 +7,8 @@ from audio.audiobroadcaster import AudioBroadcaster
 from audio.audiostreamer import WebAudioStreamer
 from common.logger import logger
 from observations.events import observation_sync
-from session.service import active_sdr_clients
+from server import runtimestate
+from session.service import active_sdr_clients, session_service
 
 # Globals used by audio threads
 audio_consumer: Optional[WebAudioStreamer] = None
@@ -75,8 +76,6 @@ def cleanup_everything():
     # Clean up all SDR sessions
     try:
         if active_sdr_clients:
-            from session.service import session_service
-
             logger.info(f"Cleaning up {len(active_sdr_clients)} SDR sessions...")
             session_ids = list(active_sdr_clients.keys())
             for sid in session_ids:
@@ -104,8 +103,7 @@ def cleanup_everything():
 
     # Stop all transcription consumers (per-VFO)
     try:
-        from pipeline.orchestration.processmanager import process_manager
-
+        process_manager = runtimestate.process_manager
         if process_manager and process_manager.transcription_manager:
             # Stop all transcription consumers across all SDRs and sessions
             for sdr_id in list(process_manager.processes.keys()):

@@ -15,6 +15,7 @@
 
 """VFO (Virtual Frequency Oscillator) handlers."""
 
+import asyncio
 from typing import Any, Dict, Optional, Union
 
 from sqlalchemy import select
@@ -23,6 +24,7 @@ from crud.preferences import fetch_all_preferences
 from db import AsyncSessionLocal
 from db.models import Satellites, Transmitters
 from handlers.entities.sdr import handle_vfo_demodulator_state
+from handlers.entities.transcriptionhelpers import fetch_transmitter_and_satellite
 from pipeline.config.decoderconfigservice import decoder_config_service
 from pipeline.orchestration.processmanager import process_manager
 from pipeline.registries.decoderregistry import decoder_registry
@@ -35,60 +37,6 @@ from vfos.state import VFOManager
 # Key format: "{session_id}_{vfo_number}"
 # Value: Dict of decoder-specific parameters (e.g., {"sf": 7, "bw": 125000, ...})
 _decoder_param_overrides_cache: Dict[str, Dict[str, Any]] = {}
-
-
-async def _fetch_transmitter_and_satellite(transmitter_id: str) -> tuple:
-    """
-    Fetch transmitter and satellite dicts from database.
-
-    Args:
-        transmitter_id: Transmitter ID to fetch
-
-    Returns:
-        Tuple of (transmitter_dict, satellite_dict) or (None, None) if not found
-    """
-    try:
-        async with AsyncSessionLocal() as db_session:
-            result = await db_session.execute(
-                select(Transmitters).where(Transmitters.id == transmitter_id)
-            )
-            transmitter_record = result.scalar_one_or_none()
-            if not transmitter_record:
-                return None, None
-
-            transmitter_dict = {
-                "id": transmitter_record.id,
-                "description": transmitter_record.description,
-                "mode": transmitter_record.mode,
-                "baud": transmitter_record.baud,
-                "downlink_low": transmitter_record.downlink_low,
-                "downlink_high": transmitter_record.downlink_high,
-                "norad_cat_id": transmitter_record.norad_cat_id,
-            }
-
-            # Fetch satellite
-            sat_result = await db_session.execute(
-                select(Satellites).where(Satellites.norad_id == transmitter_record.norad_cat_id)
-            )
-            satellite_record = sat_result.scalar_one_or_none()
-            satellite_dict = None
-            if satellite_record:
-                satellite_dict = {
-                    "norad_id": satellite_record.norad_id,
-                    "name": satellite_record.name,
-                    "alternative_name": satellite_record.alternative_name,
-                    "status": satellite_record.status,
-                    "image": satellite_record.image,
-                }
-
-            return transmitter_dict, satellite_dict
-    except Exception as e:
-        # Use logging directly since logger might not be available at module level
-        import logging
-
-        logger = logging.getLogger("vfo-handler")
-        logger.error(f"Failed to fetch transmitter info: {e}", exc_info=True)
-        return None, None
 
 
 async def update_vfo_parameters(
@@ -121,15 +69,9 @@ async def update_vfo_parameters(
 
     # Extract decoder-specific parameters from incoming data (if present)
     # These are sent from the UI when user changes decoder parameters
-    # Format: { sf: 7, bw: 125000, cr: 1, sync_word: [0x08, 0x10], preamble_len: 8, fldro: false }
+    # Format example: { baudrate: 9600, deviation: 5000, framing: "ax25", differential: false }
     decoder_param_overrides = {}
     decoder_param_keys = [
-        "sf",
-        "bw",
-        "cr",
-        "sync_word",
-        "preamble_len",
-        "fldro",  # LoRa
         "baudrate",
         "deviation",
         "framing",
@@ -198,7 +140,7 @@ async def update_vfo_parameters(
 
         # Handle demodulator state changes ONLY if active state or mode was changed in the update
         # This prevents VFO updates (like selecting a different VFO) from starting/stopping demodulators
-        # However, skip demodulator management if the VFO is using a raw IQ decoder (GMSK, LoRa)
+        # However, skip demodulator management if the VFO is using a raw IQ decoder (e.g., GMSK)
         # as these decoders handle demodulation internally
         if "active" in data or "mode" in data:
             # Check if decoder needs raw IQ using decoder registry
@@ -273,7 +215,7 @@ async def update_vfo_parameters(
                 await handle_vfo_decoder_state(vfo_state, sid, logger, force_restart=True)
 
         # Check if decoder parameters changed (requires restart)
-        # This handles cases where modulation parameters change (e.g., LoRa SF/BW/CR, FSK baudrate, etc.)
+        # This handles cases where modulation parameters change (e.g., FSK baudrate, framing, etc.)
         # without changing the transmitter or decoder type
         # Only check if:
         # - Parameters were included in this update (decoder_param_overrides), OR
@@ -425,13 +367,15 @@ async def toggle_transcription(
                                 and vfo_state.locked_transmitter_id != "none"
                             ):
                                 transmitter_dict, satellite_dict = (
-                                    await _fetch_transmitter_and_satellite(
+                                    await fetch_transmitter_and_satellite(
                                         vfo_state.locked_transmitter_id
                                     )
                                 )
 
-                            # Start per-VFO transcription worker
-                            success = transcription_manager.start_transcription(
+                            # Start/restart can stop old worker and unsubscribe queues.
+                            # Run in a worker thread so Socket.IO event loop stays responsive.
+                            success = await asyncio.to_thread(
+                                transcription_manager.start_transcription,
                                 sdr_id=sdr_id,
                                 session_id=sid,
                                 vfo_number=vfo_number,
@@ -462,7 +406,10 @@ async def toggle_transcription(
         transcription_manager = process_manager.transcription_manager
 
         if transcription_manager:
-            transcription_manager.stop_transcription(
+            # Stop can unsubscribe from broadcaster/worker state.
+            # Offload to avoid blocking the Socket.IO event loop.
+            await asyncio.to_thread(
+                transcription_manager.stop_transcription,
                 sdr_id=sdr_id,
                 session_id=sid,
                 vfo_number=vfo_number,

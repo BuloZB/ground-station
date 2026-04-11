@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import datetime as dt
+import importlib.util
 import sqlite3
 import sys
 import uuid
@@ -8,6 +9,11 @@ from pathlib import Path
 from typing import Iterable, Optional, Protocol, cast
 
 import yaml
+
+try:
+    from satellites.satyaml.satyaml import SatYAML
+except Exception:
+    SatYAML = None
 
 DEFAULT_DB = Path("backend/data/db/gs.db")
 DEFAULT_SERVICE = "Unknown"
@@ -212,8 +218,6 @@ def resolve_yaml_dir(yaml_dir: Optional[Path]) -> Optional[Path]:
         return yaml_dir
 
     try:
-        import importlib.util
-
         satyaml_spec = importlib.util.find_spec("satyaml")
         if satyaml_spec and satyaml_spec.submodule_search_locations:
             for location in satyaml_spec.submodule_search_locations:
@@ -249,8 +253,8 @@ class SatYamlProtocol(Protocol):
 
 def load_satyaml() -> Optional[SatYamlProtocol]:
     try:
-        from satellites.satyaml.satyaml import SatYAML
-
+        if SatYAML is None:
+            return None
         satyaml = SatYAML()
         return cast(SatYamlProtocol, satyaml)
     except Exception:

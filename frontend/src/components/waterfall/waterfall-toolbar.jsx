@@ -26,8 +26,10 @@ import {
 } from '../common/custom-icons.jsx';
 import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
 import { useTranslation } from 'react-i18next';
-import { useSelector, useDispatch } from 'react-redux';
+import { shallowEqual, useSelector, useDispatch } from 'react-redux';
 import { setShowNeighboringTransmitters, setShowBookmarkSource } from './waterfall-slice';
+import { useTheme } from '@mui/material/styles';
+import { BOOKMARK_SOURCE_KEYS, getBookmarkSourceStyle } from './bookmark-source-styles.js';
 
 const WaterfallToolbar = ({
                               startStreamingLoading,
@@ -57,6 +59,7 @@ const WaterfallToolbar = ({
                               takeSnapshot
                           }) => {
     const { t } = useTranslation('waterfall');
+    const theme = useTheme();
     const dispatch = useDispatch();
     const showNeighboringTransmitters = useSelector((state) => state.waterfall.showNeighboringTransmitters);
     const [menuAnchorEl, setMenuAnchorEl] = React.useState(null);
@@ -70,8 +73,24 @@ const WaterfallToolbar = ({
         satnogs: true,
         'gr-satellites': true,
     };
+    const visibleSourceCount = BOOKMARK_SOURCE_KEYS.filter((source) => Boolean(bookmarkSourceState[source])).length;
+    const hasSourceFiltering = visibleSourceCount < BOOKMARK_SOURCE_KEYS.length;
+    const bookmarkButtonTitle = hasSourceFiltering
+        ? `${t('toolbar.bookmark_source_filters', 'Bookmark source filters')} (${visibleSourceCount}/${BOOKMARK_SOURCE_KEYS.length} enabled)`
+        : t('toolbar.bookmark_source_filters', 'Bookmark source filters');
+    const sourceMenuItems = [
+        { key: 'manual', label: t('toolbar.bookmark_source_user_defined', 'User defined') },
+        { key: 'satnogs', label: t('toolbar.bookmark_source_satnogs', 'SATNOGS') },
+        { key: 'gr-satellites', label: t('toolbar.bookmark_source_gr_satellites', 'gr-satellites') },
+        { key: 'satdump', label: t('toolbar.bookmark_source_satdump', 'Satdump') },
+    ];
     const autoScalePreset = useSelector((state) => state.waterfall.autoScalePreset);
-    const vfoMarkers = useSelector((state) => state.vfo.vfoMarkers);
+    const vfoLockedState = useSelector((state) => ({
+        vfo1: state.vfo.vfoMarkers?.[1]?.lockedTransmitterId,
+        vfo2: state.vfo.vfoMarkers?.[2]?.lockedTransmitterId,
+        vfo3: state.vfo.vfoMarkers?.[3]?.lockedTransmitterId,
+        vfo4: state.vfo.vfoMarkers?.[4]?.lockedTransmitterId,
+    }), shallowEqual);
 
     const handleMenuClick = (event) => {
         setMenuAnchorEl(event.currentTarget);
@@ -233,10 +252,25 @@ const WaterfallToolbar = ({
                     sx={{ borderRadius: 0 }}
                     onClick={handleExperimentMenuClick}
                     size="small"
-                    color="primary"
-                    title={t('toolbar.bookmark_source_filters', 'Bookmark source filters')}
+                    color={hasSourceFiltering ? 'warning' : 'primary'}
+                    title={bookmarkButtonTitle}
                 >
                     <BookmarkIcon />
+                    {hasSourceFiltering ? (
+                        <Box
+                            sx={{
+                                position: 'absolute',
+                                top: 7,
+                                right: 7,
+                                width: 7,
+                                height: 7,
+                                borderRadius: '50%',
+                                bgcolor: 'warning.main',
+                                border: '1px solid',
+                                borderColor: 'background.paper',
+                            }}
+                        />
+                    ) : null}
                 </IconButton>
 
                 <IconButton
@@ -340,7 +374,7 @@ const WaterfallToolbar = ({
                     >
                         <VFO1Icon/>
                     </IconButton>
-                    {vfoMarkers[1]?.lockedTransmitterId && vfoMarkers[1]?.lockedTransmitterId !== 'none' && (
+                    {vfoLockedState.vfo1 && vfoLockedState.vfo1 !== 'none' && (
                         <LockIcon
                             sx={{
                                 position: 'absolute',
@@ -374,7 +408,7 @@ const WaterfallToolbar = ({
                     >
                         <VFO2Icon/>
                     </IconButton>
-                    {vfoMarkers[2]?.lockedTransmitterId && vfoMarkers[2]?.lockedTransmitterId !== 'none' && (
+                    {vfoLockedState.vfo2 && vfoLockedState.vfo2 !== 'none' && (
                         <LockIcon
                             sx={{
                                 position: 'absolute',
@@ -408,7 +442,7 @@ const WaterfallToolbar = ({
                     >
                         <VFO3Icon/>
                     </IconButton>
-                    {vfoMarkers[3]?.lockedTransmitterId && vfoMarkers[3]?.lockedTransmitterId !== 'none' && (
+                    {vfoLockedState.vfo3 && vfoLockedState.vfo3 !== 'none' && (
                         <LockIcon
                             sx={{
                                 position: 'absolute',
@@ -442,7 +476,7 @@ const WaterfallToolbar = ({
                     >
                         <VFO4Icon/>
                     </IconButton>
-                    {vfoMarkers[4]?.lockedTransmitterId && vfoMarkers[4]?.lockedTransmitterId !== 'none' && (
+                    {vfoLockedState.vfo4 && vfoLockedState.vfo4 !== 'none' && (
                         <LockIcon
                             sx={{
                                 position: 'absolute',
@@ -566,61 +600,42 @@ const WaterfallToolbar = ({
                 },
             }}
         >
-            <MenuItem onClick={() => toggleBookmarkSource('manual')}>
-                <ListItemIcon>
-                    <Checkbox
-                        edge="start"
-                        checked={Boolean(bookmarkSourceState.manual)}
-                        tabIndex={-1}
-                        disableRipple
-                    />
-                </ListItemIcon>
-                <ListItemText
-                    primary={t('toolbar.bookmark_source_user_defined', 'User defined')}
-                />
-            </MenuItem>
-            <MenuItem onClick={() => toggleBookmarkSource('satnogs')}>
-                <ListItemIcon>
-                    <Checkbox
-                        edge="start"
-                        checked={Boolean(bookmarkSourceState.satnogs)}
-                        tabIndex={-1}
-                        disableRipple
-                    />
-                </ListItemIcon>
-                <ListItemText
-                    primary={t('toolbar.bookmark_source_satnogs', 'SATNOGS')}
-                />
-            </MenuItem>
-            <MenuItem onClick={() => toggleBookmarkSource('gr-satellites')}>
-                <ListItemIcon>
-                    <Checkbox
-                        edge="start"
-                        checked={Boolean(bookmarkSourceState['gr-satellites'])}
-                        tabIndex={-1}
-                        disableRipple
-                    />
-                </ListItemIcon>
-                <ListItemText
-                    primary={t('toolbar.bookmark_source_gr_satellites', 'gr-satellites')}
-                />
-            </MenuItem>
-            <MenuItem onClick={() => toggleBookmarkSource('satdump')}>
-                <ListItemIcon>
-                    <Checkbox
-                        edge="start"
-                        checked={Boolean(bookmarkSourceState.satdump)}
-                        tabIndex={-1}
-                        disableRipple
-                    />
-                </ListItemIcon>
-                <ListItemText
-                    primary={t('toolbar.bookmark_source_satdump', 'Satdump')}
-                />
-            </MenuItem>
+            {sourceMenuItems.map((sourceItem) => {
+                const sourceStyle = getBookmarkSourceStyle(sourceItem.key, theme);
+                return (
+                    <MenuItem key={sourceItem.key} onClick={() => toggleBookmarkSource(sourceItem.key)}>
+                        <ListItemIcon>
+                            <Checkbox
+                                edge="start"
+                                checked={Boolean(bookmarkSourceState[sourceItem.key])}
+                                tabIndex={-1}
+                                disableRipple
+                            />
+                        </ListItemIcon>
+                        <ListItemText
+                            primary={
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Box
+                                        sx={{
+                                            width: 9,
+                                            height: 9,
+                                            borderRadius: '50%',
+                                            bgcolor: sourceStyle.accent,
+                                            border: '1px solid',
+                                            borderColor: 'divider',
+                                            flexShrink: 0,
+                                        }}
+                                    />
+                                    {sourceItem.label}
+                                </Box>
+                            }
+                        />
+                    </MenuItem>
+                );
+            })}
         </Menu>
     </Paper>
     );
 };
 
-export default WaterfallToolbar;
+export default React.memo(WaterfallToolbar);

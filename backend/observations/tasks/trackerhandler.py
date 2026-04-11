@@ -15,6 +15,7 @@
 
 """Tracker task handler - manages rotator tracking lifecycle."""
 
+import asyncio
 import traceback
 from typing import Any, Dict, List
 
@@ -58,6 +59,18 @@ class TrackerHandler:
 
             # Update tracking state to target this satellite
             tracker_manager = get_tracker_manager()
+            unpark_before_tracking = bool(rotator_config.get("unpark_before_tracking", False))
+            tracking_state = await tracker_manager.get_tracking_state() or {}
+            current_rotator_state = str(tracking_state.get("rotator_state", "")).lower()
+
+            # Optional unpark step before switching to tracking mode.
+            if current_rotator_state == "parked" and unpark_before_tracking:
+                await tracker_manager.update_tracking_state(
+                    rotator_state="connected",
+                    rotator_id=rotator_config.get("id"),
+                )
+                await asyncio.sleep(0.2)
+
             await tracker_manager.update_tracking_state(
                 norad_id=satellite.get("norad_id"),
                 group_id=satellite.get("group_id"),
@@ -82,19 +95,36 @@ class TrackerHandler:
             logger.error(traceback.format_exc())
             return False
 
-    async def stop_tracker_task(self, observation_id: str) -> bool:
+    async def stop_tracker_task(self, observation_id: str, rotator_config: Dict[str, Any]) -> bool:
         """
         Stop rotator tracking for an observation.
 
-        Note: Currently, rotators are intentionally left connected after observations
-        for manual control or the next observation. This method is provided for
-        future use if explicit stop behavior is needed.
-
         Args:
             observation_id: The observation ID
+            rotator_config: Rotator configuration dict
 
         Returns:
-            True (always succeeds as it's a no-op)
+            True if tracker stop/park operations succeeded
         """
-        logger.debug(f"Leaving rotator connected after observation {observation_id}")
-        return True
+        try:
+            if not rotator_config.get("tracking_enabled") or not rotator_config.get("id"):
+                logger.debug(f"No rotator configured for observation {observation_id}")
+                return True
+
+            tracker_manager = get_tracker_manager()
+            park_after_observation = bool(rotator_config.get("park_after_observation", False))
+
+            if park_after_observation:
+                await tracker_manager.update_tracking_state(
+                    rotator_state="parked",
+                    rotator_id=rotator_config.get("id"),
+                )
+                logger.info(f"Parked rotator after observation {observation_id}")
+            else:
+                logger.debug(f"Leaving rotator connected after observation {observation_id}")
+
+            return True
+        except Exception as e:
+            logger.error(f"Error stopping tracker for observation {observation_id}: {e}")
+            logger.error(traceback.format_exc())
+            return False

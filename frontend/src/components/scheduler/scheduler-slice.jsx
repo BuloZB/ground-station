@@ -70,7 +70,9 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
  *   ],
  *   rotator: {
  *     id: string | null,
- *     tracking_enabled: boolean
+ *     tracking_enabled: boolean,
+ *     unpark_before_tracking: boolean,
+ *     park_after_observation: boolean
  *   },
  *   rig: {
  *     id: string | null,

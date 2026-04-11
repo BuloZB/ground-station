@@ -58,6 +58,8 @@ const VFOMarkersContainer = ({
                                  waterfallHeight,
                                  bandscopeHeight,
                                  containerWidth,
+                                 transformTick = 0,
+                                 interactionActive = false,
                                  zoomScale,
                                  currentPositionX,
                              }) => {
@@ -369,31 +371,40 @@ const VFOMarkersContainer = ({
     const updateActualWidth = useCallback(() => {
         // Get the actual client dimensions of the element
         const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const roundedWidth = Math.round(rect.width);
 
-        // Only update if the width has changed significantly (avoid unnecessary redraws)
-        if (rect && Math.abs(rect.width - lastMeasuredWidthRef.current) > 1) {
-            if (rect.width > 0) {
-                lastMeasuredWidthRef.current = rect.width;
-                setActualWidth(rect.width);
-            }
+        // Quantize width updates to avoid subpixel jitter churn.
+        if (roundedWidth > 0 && roundedWidth !== lastMeasuredWidthRef.current) {
+            lastMeasuredWidthRef.current = roundedWidth;
+            setActualWidth(roundedWidth);
         }
     }, []);
 
-    // Poll for container width changes
+    // Update width when layout or transform-driven width changes.
     useEffect(() => {
-        const interval = setInterval(() => {
-            updateActualWidth();
-        }, 250);
-
-        return () => {
-            clearInterval(interval);
-        };
-    }, [updateActualWidth]);
-
-    // Update width when the container width changes
-    useEffect(() => {
+        if (interactionActive) {
+            return;
+        }
         updateActualWidth();
-    }, [containerWidth, updateActualWidth]);
+    }, [containerWidth, transformTick, interactionActive, updateActualWidth]);
+
+    // Resize backing store only when dimensions actually change.
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) {
+            return;
+        }
+
+        const targetWidth = Math.max(1, actualWidth);
+        const targetHeight = Math.max(1, height);
+        if (canvas.width !== targetWidth) {
+            canvas.width = targetWidth;
+        }
+        if (canvas.height !== targetHeight) {
+            canvas.height = targetHeight;
+        }
+    }, [actualWidth, height]);
 
     // Send render commands to the worker or fallback to direct rendering
     useEffect(() => {
@@ -414,10 +425,6 @@ const VFOMarkersContainer = ({
             console.warn('Could not get canvas 2d context');
             return;
         }
-
-        // Set canvas dimensions
-        canvas.width = actualWidth;
-        canvas.height = height;
 
         // Clear the canvas
         ctx.clearRect(0, 0, canvas.width, height);

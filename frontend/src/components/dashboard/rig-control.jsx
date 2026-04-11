@@ -48,16 +48,19 @@ import {
     TitleBar
 } from "../common/common.jsx";
 import Grid from "@mui/material/Grid";
-import {Box, Button, Divider, FormControl, IconButton, InputLabel, ListSubheader, MenuItem, Select} from "@mui/material";
+import {Box, Button, Chip, FormControl, IconButton, InputLabel, ListSubheader, MenuItem, Select, Stack, Tooltip} from "@mui/material";
 import SwapVertIcon from '@mui/icons-material/SwapVert';
 import SatelliteList from "../target/satellite-dropdown.jsx";
 import Typography from "@mui/material/Typography";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import AutorenewIcon from '@mui/icons-material/Autorenew';
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import {setCenterFrequency} from "../waterfall/waterfall-slice.jsx";
 import LCDFrequencyDisplay from "../common/lcd-frequency-display.jsx";
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useNavigate } from 'react-router-dom';
+import { RIG_STATES, TRACKER_COMMAND_SCOPES, TRACKER_COMMAND_STATUS } from '../target/tracking-constants.js';
 
 
 const RigControl = React.memo(function RigControl() {
@@ -85,7 +88,19 @@ const RigControl = React.memo(function RigControl() {
         selectedTransmitter,
         availableTransmitters,
         rigData,
+        trackerCommand,
     } = useSelector((state) => state.targetSatTrack);
+    const isRigCommandBusy = Boolean(
+        trackerCommand &&
+        [TRACKER_COMMAND_SCOPES.RIG, TRACKER_COMMAND_SCOPES.TRACKING].includes(trackerCommand.scope) &&
+        trackerCommand?.requestedState?.rigState &&
+        [TRACKER_COMMAND_STATUS.SUBMITTED, TRACKER_COMMAND_STATUS.STARTED].includes(trackerCommand.status)
+    );
+    const inFlightRigState = trackerCommand?.requestedState?.rigState;
+    const isConnectRigActionPending = isRigCommandBusy && inFlightRigState === RIG_STATES.CONNECTED;
+    const isDisconnectRigActionPending = isRigCommandBusy && inFlightRigState === RIG_STATES.DISCONNECTED;
+    const isTrackRigActionPending = isRigCommandBusy && inFlightRigState === RIG_STATES.TRACKING;
+    const isStopRigActionPending = isRigCommandBusy && inFlightRigState === RIG_STATES.STOPPED;
 
     // Safeguard: Reset VFO if hardware rig is selected with VFO 3 or 4
     React.useEffect(() => {
@@ -107,6 +122,148 @@ const RigControl = React.memo(function RigControl() {
     const {
         rigs
     } = useSelector((state) => state.rigs);
+    const [isSocketConnected, setIsSocketConnected] = React.useState(Boolean(socket?.connected));
+    const [lastRigUpdateAt, setLastRigUpdateAt] = React.useState(Date.now());
+    const [now, setNow] = React.useState(Date.now());
+
+    const activeRigCommand = React.useMemo(() => {
+        if (!trackerCommand) return null;
+        const supportsScope = [TRACKER_COMMAND_SCOPES.RIG, TRACKER_COMMAND_SCOPES.TRACKING].includes(trackerCommand.scope);
+        return supportsScope && trackerCommand?.requestedState?.rigState ? trackerCommand : null;
+    }, [trackerCommand]);
+
+    useEffect(() => {
+        if (!socket) return;
+        setIsSocketConnected(Boolean(socket.connected));
+        const handleConnect = () => setIsSocketConnected(true);
+        const handleDisconnect = () => setIsSocketConnected(false);
+        socket.on('connect', handleConnect);
+        socket.on('disconnect', handleDisconnect);
+        return () => {
+            socket.off('connect', handleConnect);
+            socket.off('disconnect', handleDisconnect);
+        };
+    }, [socket]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
+
+    useEffect(() => {
+        setLastRigUpdateAt(Date.now());
+    }, [
+        rigData?.connected,
+        rigData?.tracking,
+        rigData?.stopped,
+        rigData?.vfo1?.frequency,
+        rigData?.vfo2?.frequency,
+        rigData?.doppler_shift,
+    ]);
+
+    const selectedRigDevice = React.useMemo(
+        () => rigs.find((rig) => rig.id === selectedRadioRig),
+        [rigs, selectedRadioRig]
+    );
+
+    const rigStatusChip = React.useMemo(() => {
+        if (!isSocketConnected) {
+            return { label: t('rig_control.not_connected', { defaultValue: 'Not connected' }), color: 'default' };
+        }
+        if (rigData?.tracking) {
+            return { label: 'Tracking', color: 'success' };
+        }
+        if (rigData?.stopped) {
+            return { label: 'Stopped', color: 'warning' };
+        }
+        if (rigData?.connected) {
+            return { label: t('rig_control.connected', { defaultValue: 'Connected' }), color: 'success' };
+        }
+        return { label: t('rig_control.not_connected', { defaultValue: 'Not connected' }), color: 'error' };
+    }, [isSocketConnected, rigData?.tracking, rigData?.stopped, rigData?.connected, t]);
+
+    const commandStateLabel = React.useMemo(() => {
+        if (!activeRigCommand) return t('common.not_available', { ns: 'common', defaultValue: 'N/A' });
+        if (activeRigCommand.status === TRACKER_COMMAND_STATUS.SUBMITTED) return t('common.pending', { ns: 'common', defaultValue: 'Pending' });
+        if (activeRigCommand.status === TRACKER_COMMAND_STATUS.STARTED) return t('common.in_progress', { ns: 'common', defaultValue: 'In progress' });
+        if (activeRigCommand.status === TRACKER_COMMAND_STATUS.SUCCEEDED) return t('common.success', { ns: 'common', defaultValue: 'Success' });
+        if (activeRigCommand.status === TRACKER_COMMAND_STATUS.FAILED) return t('common.failed', { ns: 'common', defaultValue: 'Failed' });
+        return t('common.unknown', { ns: 'common', defaultValue: 'Unknown' });
+    }, [activeRigCommand, t]);
+
+    const commandStatusIcon = React.useMemo(() => {
+        if (!activeRigCommand) return { Icon: MoreHorizIcon, color: 'text.disabled' };
+        if (activeRigCommand.status === TRACKER_COMMAND_STATUS.SUCCEEDED) {
+            return { Icon: CheckCircleOutlineIcon, color: 'success.main' };
+        }
+        if (activeRigCommand.status === TRACKER_COMMAND_STATUS.FAILED) {
+            return { Icon: ErrorOutlineIcon, color: 'error.main' };
+        }
+        if ([TRACKER_COMMAND_STATUS.SUBMITTED, TRACKER_COMMAND_STATUS.STARTED].includes(activeRigCommand.status)) {
+            return { Icon: AutorenewIcon, color: 'info.main' };
+        }
+        return { Icon: MoreHorizIcon, color: 'text.disabled' };
+    }, [activeRigCommand]);
+
+    const lastUpdateAge = Math.max(0, Math.floor((now - lastRigUpdateAt) / 1000));
+
+    const connectRigDisabled =
+        isRigCommandBusy ||
+        [RIG_STATES.TRACKING, RIG_STATES.CONNECTED, RIG_STATES.STOPPED].includes(trackingState['rig_state']) ||
+        ["none", ""].includes(selectedRotator) ||
+        ["none", ""].includes(selectedRadioRig);
+    const connectRigDisabledReason = isRigCommandBusy
+        ? 'Command in progress'
+        : [RIG_STATES.TRACKING, RIG_STATES.CONNECTED, RIG_STATES.STOPPED].includes(trackingState['rig_state'])
+            ? 'Rig is already connected or tracking'
+            : ["none", ""].includes(selectedRotator)
+                ? 'Select a rotator first'
+                : ["none", ""].includes(selectedRadioRig)
+                    ? 'Select a rig first'
+                    : null;
+
+    const disconnectRigDisabled = isRigCommandBusy || [RIG_STATES.DISCONNECTED].includes(trackingState['rig_state']);
+    const disconnectRigDisabledReason = isRigCommandBusy
+        ? 'Command in progress'
+        : [RIG_STATES.DISCONNECTED].includes(trackingState['rig_state'])
+            ? 'Rig is already disconnected'
+            : null;
+
+    const trackRigDisabled =
+        isRigCommandBusy ||
+        trackingState['rig_state'] === RIG_STATES.TRACKING ||
+        trackingState['rig_state'] === RIG_STATES.DISCONNECTED ||
+        satelliteId === "" ||
+        ["none", ""].includes(selectedRadioRig) ||
+        ["none", ""].includes(selectedTransmitter);
+    const trackRigDisabledReason = isRigCommandBusy
+        ? 'Command in progress'
+        : trackingState['rig_state'] === RIG_STATES.TRACKING
+            ? 'Rig is already tracking'
+            : trackingState['rig_state'] === RIG_STATES.DISCONNECTED
+                ? 'Connect the rig first'
+                : satelliteId === ""
+                    ? 'Select a satellite first'
+                    : ["none", ""].includes(selectedRadioRig)
+                        ? 'Select a rig first'
+                        : ["none", ""].includes(selectedTransmitter)
+                            ? 'Select a transmitter first'
+                            : null;
+
+    const stopRigDisabled =
+        isRigCommandBusy ||
+        [RIG_STATES.STOPPED, RIG_STATES.DISCONNECTED, RIG_STATES.CONNECTED].includes(trackingState['rig_state']) ||
+        satelliteId === "" ||
+        ["none", ""].includes(selectedRadioRig);
+    const stopRigDisabledReason = isRigCommandBusy
+        ? 'Command in progress'
+        : [RIG_STATES.STOPPED, RIG_STATES.DISCONNECTED, RIG_STATES.CONNECTED].includes(trackingState['rig_state'])
+            ? 'Rig is not currently tracking'
+            : satelliteId === ""
+                ? 'Select a satellite first'
+                : ["none", ""].includes(selectedRadioRig)
+                    ? 'Select a rig first'
+                    : null;
 
     const groupedTransmitters = React.useMemo(() => {
         const groups = {};
@@ -136,7 +293,7 @@ const RigControl = React.memo(function RigControl() {
     const handleTrackingStop = () => {
         const newTrackingState = {
             ...trackingState,
-            'rig_state': "stopped",
+            'rig_state': RIG_STATES.STOPPED,
             'vfo1': selectedVFO1,
             'vfo2': selectedVFO2,
         };
@@ -158,7 +315,7 @@ const RigControl = React.memo(function RigControl() {
             'norad_id': satelliteId,
             'group_id': groupId,
             'rotator_state': trackingState['rotator_state'],
-            'rig_state': 'tracking',
+            'rig_state': RIG_STATES.TRACKING,
             'rig_id': selectedRadioRig,
             'rotator_id': selectedRotator,
             'transmitter_id': selectedTransmitter,
@@ -354,7 +511,7 @@ const RigControl = React.memo(function RigControl() {
     function connectRig() {
         const data = {
             ...trackingState,
-            'rig_state': "connected",
+            'rig_state': RIG_STATES.CONNECTED,
             'rig_id': selectedRadioRig,
             'rig_vfo': selectedRigVFO,
             'vfo1': selectedVFO1,
@@ -366,7 +523,7 @@ const RigControl = React.memo(function RigControl() {
     function disconnectRig() {
         const data = {
             ...trackingState,
-            'rig_state': "disconnected",
+            'rig_state': RIG_STATES.DISCONNECTED,
             'rig_id': selectedRadioRig,
             'rig_vfo': selectedRigVFO,
             'vfo1': selectedVFO1,
@@ -380,6 +537,73 @@ const RigControl = React.memo(function RigControl() {
             {/*<TitleBar className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}>Radio rig control</TitleBar>*/}
 
             <Grid container spacing={{ xs: 0, md: 0 }} columns={{ xs: 12, sm: 12, md: 12 }}>
+                <Grid
+                    size={{ xs: 12, sm: 12, md: 12 }}
+                    sx={{
+                        px: 0.75,
+                        pt: 0.45,
+                        pb: 0.35,
+                        backgroundColor: 'background.default',
+                        borderBottom: '1px solid',
+                        borderColor: 'divider'
+                    }}
+                >
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ minHeight: 24 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: 0.2 }}>
+                            {t('rig_control.title', { defaultValue: 'Radio Rig Control' })}
+                        </Typography>
+                        <Chip
+                            label={rigStatusChip.label}
+                            color={rigStatusChip.color}
+                            size="small"
+                            sx={{ height: 18, '& .MuiChip-label': { px: 0.75, fontSize: '0.66rem', fontWeight: 600 } }}
+                            variant={rigStatusChip.color === 'default' ? 'outlined' : 'filled'}
+                        />
+                    </Stack>
+                    <Box
+                        title={
+                            `${selectedRigDevice ? `${selectedRigDevice.name} (${selectedRigDevice.host}:${selectedRigDevice.port})` : 'No rig selected'} | ` +
+                            `Socket ${isSocketConnected ? 'Online' : 'Offline'} | ` +
+                            `Updated ${lastUpdateAge}s | ` +
+                            `Cmd ${commandStateLabel}` +
+                            (activeRigCommand?.status === TRACKER_COMMAND_STATUS.FAILED && activeRigCommand?.reason ? ` | ${activeRigCommand.reason}` : '')
+                        }
+                        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5 }}
+                    >
+                        <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            noWrap
+                            sx={{ display: 'block', fontSize: '0.66rem', lineHeight: 1.2, minWidth: 0, flex: 1 }}
+                        >
+                            {`${selectedRigDevice ? selectedRigDevice.name : 'No rig'} | ${isSocketConnected ? 'Online' : 'Offline'}`}
+                        </Typography>
+                        <Box
+                            sx={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 0.4,
+                                flexShrink: 0,
+                                px: 0.5,
+                                py: '1px',
+                                borderRadius: 0.75,
+                                backgroundColor: 'action.hover'
+                            }}
+                        >
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.64rem', lineHeight: 1 }}>
+                                {`${lastUpdateAge}s`}
+                            </Typography>
+                            <Tooltip
+                                title={`Command: ${commandStateLabel}${activeRigCommand?.status === TRACKER_COMMAND_STATUS.FAILED && activeRigCommand?.reason ? ` (${activeRigCommand.reason})` : ''}`}
+                            >
+                                <Box component="span" sx={{ display: 'inline-flex' }}>
+                                    <commandStatusIcon.Icon sx={{ fontSize: '0.8rem', color: commandStatusIcon.color }} />
+                                </Box>
+                            </Tooltip>
+                        </Box>
+                    </Box>
+                </Grid>
+
                 {/* 1. Rig Selection */}
                 <Grid size={{ xs: 12, sm: 12, md: 12 }} style={{padding: '0.5rem 0.5rem 0rem 0.5rem'}}>
                     <Grid container direction="row" spacing={1} sx={{ alignItems: 'flex-end' }}>
@@ -590,7 +814,7 @@ const RigControl = React.memo(function RigControl() {
                 </Grid>
 
 
-                <Grid size={{xs: 12, sm: 12, md: 12}} sx={{height: '135px', overflow: 'auto', pt: 1.5}}>
+                <Grid size={{xs: 12, sm: 12, md: 12}} sx={{height: '135px', overflow: 'auto', pt: 0.5}}>
                     <Grid size={{xs: 12, sm: 12, md: 12}} style={{padding: '0rem 0.5rem 0rem 0.5rem'}}>
                         <Grid container direction="column" spacing={1}>
                             {/* VFO 1 Frequency */}
@@ -650,26 +874,42 @@ const RigControl = React.memo(function RigControl() {
                         alignItems: "stretch",
                     }}>
                         <Grid size="grow" style={{paddingRight: '0.5rem', flex: 1}}>
-                            <Button disabled={
-                                ["tracking", "connected", "stopped"].includes(trackingState['rig_state']) ||
-                                ["none", ""].includes(selectedRotator) ||
-                                ["none", ""].includes(selectedRadioRig)
-                            } fullWidth={true} variant="contained" color="success" style={{height: '50px'}}
-                                    onClick={() => {
-                                        connectRig()
-                                    }}>
-                                {t('rig_control.connect')}
-                            </Button>
+                            <Tooltip title={connectRigDisabled ? connectRigDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        disabled={connectRigDisabled}
+                                        fullWidth={true}
+                                        variant="contained"
+                                        color="success"
+                                        style={{height: '50px'}}
+                                        loading={isConnectRigActionPending}
+                                        onClick={() => {
+                                            connectRig()
+                                        }}
+                                    >
+                                        {t('rig_control.connect')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                         <Grid size="grow" style={{paddingRight: '0rem', flex: 1}}>
-                            <Button disabled={["disconnected"].includes(trackingState['rig_state'])}
-                                    fullWidth={true}
-                                    variant="contained" color="error" style={{height: '50px'}}
-                                    onClick={() => {
-                                        disconnectRig()
-                                    }}>
-                                {t('rig_control.disconnect')}
-                            </Button>
+                            <Tooltip title={disconnectRigDisabled ? disconnectRigDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        disabled={disconnectRigDisabled}
+                                        fullWidth={true}
+                                        variant="contained"
+                                        color="error"
+                                        style={{height: '50px'}}
+                                        loading={isDisconnectRigActionPending}
+                                        onClick={() => {
+                                            disconnectRig()
+                                        }}
+                                    >
+                                        {t('rig_control.disconnect')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                     </Grid>
                 </Grid>
@@ -680,27 +920,38 @@ const RigControl = React.memo(function RigControl() {
                         alignItems: "stretch",
                     }}>
                         <Grid size="grow" style={{paddingRight: '0.5rem'}}>
-                                <Button fullWidth={true} disabled={
-                                    trackingState['rig_state'] === "tracking" || trackingState['rig_state'] === "disconnected" ||
-                                    satelliteId === "" ||
-                                    ["none", ""].includes(selectedRadioRig)
-                                    || ["none", ""].includes(selectedTransmitter)
-                                }
-                                    variant="contained" color="success" style={{height: '60px'}}
-                                    onClick={()=>{handleTrackingStart()}}
-                            >
-                                {t('rig_control.track_radio')}
-                            </Button>
+                            <Tooltip title={trackRigDisabled ? trackRigDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        fullWidth={true}
+                                        disabled={trackRigDisabled}
+                                        variant="contained"
+                                        color="success"
+                                        style={{height: '60px'}}
+                                        loading={isTrackRigActionPending}
+                                        onClick={()=>{handleTrackingStart()}}
+                                    >
+                                        {t('rig_control.track_radio')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                         <Grid size="grow">
-                            <Button fullWidth={true}
-                                    disabled={
-                                ["stopped", "disconnected", "connected"].includes(trackingState['rig_state']) ||
-                                        satelliteId === "" || ["none", ""].includes(selectedRadioRig)}
-                                    variant="contained" color="error" style={{height: '60px'}}
-                                    onClick={() => {handleTrackingStop()}}>
-                                {t('rig_control.stop')}
-                            </Button>
+                            <Tooltip title={stopRigDisabled ? stopRigDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        fullWidth={true}
+                                        disabled={stopRigDisabled}
+                                        variant="contained"
+                                        color="error"
+                                        style={{height: '60px'}}
+                                        loading={isStopRigActionPending}
+                                        onClick={() => {handleTrackingStop()}}
+                                    >
+                                        {t('rig_control.stop')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                     </Grid>
                 </Grid>

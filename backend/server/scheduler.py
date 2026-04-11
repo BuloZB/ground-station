@@ -11,6 +11,7 @@ from common.logger import logger
 from db import AsyncSessionLocal
 from observations.constants import DEFAULT_AUTO_GENERATE_INTERVAL_HOURS
 from observations.generator import generate_observations_for_monitored_satellites
+from tasks.registry import get_task
 
 # Suppress apscheduler internal INFO logs (only show warnings and errors)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
@@ -30,8 +31,6 @@ async def sync_satellite_data_job(background_task_manager):
     """
     try:
         logger.info("Running scheduled satellite data synchronization as background task...")
-
-        from tasks.registry import get_task
 
         # Get the TLE sync task function
         tle_sync_task = get_task("tle_sync")

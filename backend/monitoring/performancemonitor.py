@@ -19,6 +19,8 @@ import queue
 import threading
 import time
 
+from server import runtimestate
+from session.socketregistry import SESSIONS
 from tracker.messages import tracker_stats
 from tracker.runner import tracker_process
 
@@ -713,26 +715,19 @@ class PerformanceMonitor(threading.Thread):
                 # Demodulators without audio broadcasters output to the global audio_queue
                 # which is consumed by WebAudioStreamer
                 if not has_audio_broadcaster:
-                    # Get the global audio queue from server.startup
-                    try:
-                        from server import startup
-
-                        global_audio_queue = getattr(startup, "audio_queue", None)
-
-                        # Check if this demodulator's audio_queue is the global queue
-                        if (
-                            global_audio_queue is not None
-                            and demod_instance.audio_queue is global_audio_queue
-                        ):
-                            # Connect to the session-specific WebAudioStreamer
-                            connections.append(
-                                {
-                                    "target_type": "audio_streamer",
-                                    "target_id": f"web_audio_{session_id}",
-                                }
-                            )
-                    except Exception as e:
-                        logger.debug(f"Could not check audio queue connection: {e}")
+                    global_audio_queue = runtimestate.audio_queue
+                    # Check if this demodulator's audio_queue is the global queue
+                    if (
+                        global_audio_queue is not None
+                        and demod_instance.audio_queue is global_audio_queue
+                    ):
+                        # Connect to the session-specific WebAudioStreamer
+                        connections.append(
+                            {
+                                "target_type": "audio_streamer",
+                                "target_id": f"web_audio_{session_id}",
+                            }
+                        )
 
                 demod_metrics[key] = {
                     "type": type(demod_instance).__name__,
@@ -978,7 +973,7 @@ class PerformanceMonitor(threading.Thread):
                 if not stats_snapshot:
                     continue
 
-                # Get queue sizes - handle both audio_queue (SSTV, Morse) and iq_queue (BPSK, GMSK, LoRa)
+                # Get queue sizes - handle both audio_queue (SSTV, Morse) and iq_queue (BPSK, FSK family)
                 input_queue_size = 0
                 input_queue_maxsize = None
                 if hasattr(decoder_instance, "audio_queue"):
@@ -1015,7 +1010,7 @@ class PerformanceMonitor(threading.Thread):
                     )
                 )
 
-                # For IQ-based decoders (BPSK, GMSK, LoRa, SSTVDecoder)
+                # For IQ-based decoders (BPSK, FSK family, SSTVDecoder)
                 if supplied_rates:
                     # Accept either field names for samples per sec
                     samples_in_rate = (
@@ -1032,7 +1027,7 @@ class PerformanceMonitor(threading.Thread):
                         time_delta,
                     )
 
-                    # Try both samples_in (BPSK, GMSK, LoRa) and iq_samples_in (SSTVDecoderV2)
+                    # Try both samples_in (BPSK, FSK family) and iq_samples_in (SSTVDecoderV2)
                     samples_in_rate = self._calculate_rate(
                         stats_snapshot.get("samples_in", 0)
                         or stats_snapshot.get("iq_samples_in", 0),
@@ -1054,14 +1049,13 @@ class PerformanceMonitor(threading.Thread):
                 decoder_name = vfo_num  # Using vfo_num as decoder name based on the key structure
 
                 # Check if this is an IQ-based decoder by type name (not attribute check)
-                # IQ-based: BPSK, FSK, GFSK, GMSK, LoRa, SSTVDecoder (with integrated FM demod)
+                # IQ-based: BPSK, FSK, GFSK, GMSK, SSTVDecoder (with integrated FM demod)
                 # Audio-based: AFSK, Morse
                 is_iq_decoder = decoder_type in [
                     "BPSKDecoder",
                     "FSKDecoder",
                     "GFSKDecoder",
                     "GMSKDecoder",
-                    "LoRaDecoder",
                     "SSTVDecoder",
                 ]
 
@@ -1164,8 +1158,6 @@ class PerformanceMonitor(threading.Thread):
             session_info = {}
             connected_sessions = None
             try:
-                from handlers.socket import SESSIONS
-
                 connected_sessions = set(SESSIONS.keys())
                 for sid, environ in SESSIONS.items():
                     # Check for real IP behind reverse proxy
@@ -1264,8 +1256,6 @@ class PerformanceMonitor(threading.Thread):
         sessions = {}
 
         try:
-            from handlers.socket import SESSIONS
-
             for sid, environ in SESSIONS.items():
                 # Extract real IP address (support reverse proxy and ASGI)
                 real_ip = "unknown"
@@ -1349,8 +1339,6 @@ class PerformanceMonitor(threading.Thread):
                 self.previous_snapshots[prev_key] = stats_data.copy()
 
                 # Connections: Tracker outputs to all browser sessions
-                from handlers.socket import SESSIONS
-
                 connections = []
                 for sid in SESSIONS.keys():
                     connections.append({"target_type": "browser", "target_id": sid})

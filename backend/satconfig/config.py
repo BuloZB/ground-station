@@ -14,7 +14,10 @@ import logging
 import pathlib
 from typing import Any, Dict, Optional
 
-from satellites.satyaml.satyaml import SatYAML
+try:
+    from satellites.satyaml.satyaml import SatYAML
+except Exception:
+    SatYAML = None
 
 from constants import GR_SATELLITES_FRAMING_MAP, FramingType
 
@@ -47,14 +50,18 @@ class SatelliteConfigService:
         self.overrides = self._load_overrides()
 
         # Initialize gr-satellites YAML parser
-        try:
-            self.satyaml = SatYAML()
-            logger.info(
-                f"Loaded gr-satellites database with {len(list(self.satyaml.yaml_files()))} satellites"
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize SatYAML: {e}")
+        if SatYAML is None:
+            logger.warning("SatYAML unavailable; satellite YAML lookup disabled")
             self.satyaml = None
+        else:
+            try:
+                self.satyaml = SatYAML()
+                logger.info(
+                    f"Loaded gr-satellites database with {len(list(self.satyaml.yaml_files()))} satellites"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize SatYAML: {e}")
+                self.satyaml = None
 
     def _load_overrides(self) -> Dict[str, Any]:
         """Load user overrides from JSON file."""

@@ -17,8 +17,8 @@
  *
  */
 
-import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Box, Typography, Chip, Tooltip, useTheme, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, Alert } from '@mui/material';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import { Box, Typography, Chip, useTheme, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, Alert } from '@mui/material';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import { useSelector, useDispatch } from 'react-redux';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
@@ -40,65 +40,98 @@ import { toast } from 'react-toastify';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatTime } from '../../utils/date-time.js';
 
-// Humanize timestamp to show relative time (e.g., "5m 32s ago")
-const humanizePastTime = (timestamp) => {
-    const now = Date.now();
-    const diffInSeconds = Math.floor((now - timestamp) / 1000);
-
-    if (diffInSeconds < 60) {
-        return `${diffInSeconds}s ago`;
-    }
-
-    const diffInMinutes = Math.floor(diffInSeconds / 60);
-    const remainingSeconds = diffInSeconds % 60;
-
-    if (diffInMinutes < 60) {
-        return `${diffInMinutes}m ${remainingSeconds}s ago`;
-    }
-
-    const diffInHours = Math.floor(diffInMinutes / 60);
-    const remainingMinutes = diffInMinutes % 60;
-
-    if (diffInHours < 24) {
-        return `${diffInHours}h ${remainingMinutes}m ago`;
-    }
-
-    const diffInDays = Math.floor(diffInHours / 24);
-    const remainingHours = diffInHours % 24;
-
-    return `${diffInDays}d ${remainingHours}h ago`;
-};
-
 // Time formatter component that updates without causing re-renders
-const TimeFormatter = React.memo(function TimeFormatter({ value }) {
-    const [, setForceUpdate] = useState(0);
-    const { timezone, locale } = useUserTimeSettings();
-
-    // Force component to update every 5 seconds
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setForceUpdate(prev => prev + 1);
-        }, 5000); // 5 seconds
-        return () => clearInterval(interval);
-    }, []);
-
+const TimeFormatter = React.memo(function TimeFormatter({ value, nowMs, timezone, locale }) {
     const timeString = formatTime(value, {
         timezone,
         locale,
         options: { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' },
     });
+    // Guard against slight server/client clock skew that can make fresh packets appear in the "future".
+    const diffInSeconds = Math.max(0, Math.floor((nowMs - value) / 1000));
 
-    return <span>{humanizePastTime(value)} ({timeString})</span>;
+    if (diffInSeconds < 60) {
+        return <span>{diffInSeconds}s ago ({timeString})</span>;
+    }
+    const diffInMinutes = Math.floor(diffInSeconds / 60);
+    const remainingSeconds = diffInSeconds % 60;
+    if (diffInMinutes < 60) {
+        return <span>{diffInMinutes}m {remainingSeconds}s ago ({timeString})</span>;
+    }
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    const remainingMinutes = diffInMinutes % 60;
+    if (diffInHours < 24) {
+        return <span>{diffInHours}h {remainingMinutes}m ago ({timeString})</span>;
+    }
+    const diffInDays = Math.floor(diffInHours / 24);
+    const remainingHours = diffInHours % 24;
+    return <span>{diffInDays}d {remainingHours}h ago ({timeString})</span>;
 });
 
 // humanizeBytes now provided by common.jsx and imported above
+
+const LIVE_DRAWER_REFRESH_MS = 200;
+const LIVE_DRAWER_ROW_LIMIT = 50;
+const DEFAULT_DRAWER_ROW_LIMIT = 100;
+
+const mapOutputsToRows = (outputs, rowLimit = DEFAULT_DRAWER_ROW_LIMIT) => {
+    return outputs
+        .filter(output => output.type === 'decoder-output')
+        .slice(-rowLimit)
+        .map(output => {
+            const isSstv = output.decoder_type === 'sstv';
+            const isLora = output.decoder_type === ModulationType.LORA;
+
+            // For SSTV and LoRa: use different display logic
+            const fromCallsign = (isSstv || isLora) ? '-' : (output.output.callsigns?.from || '-');
+            const toCallsign = (isSstv || isLora) ? '-' : (output.output.callsigns?.to || '-');
+
+            // Use identified NORAD ID from backend lookup, then configured satellite
+            const noradId = output.output.callsigns?.identified_norad_id || output.output.satellite?.norad_id;
+            const satelliteName = output.output.callsigns?.identified_satellite || output.output.satellite?.name || '-';
+
+            // For SSTV, use mode as parameters, for others use existing parameters
+            const parameters = isSstv ? output.output.mode : output.output.parameters;
+
+            // File size from output
+            const fileSize = output.output.filesize || output.output.packet_length;
+
+            return {
+                id: output.id,
+                timestamp: output.timestamp * 1000,
+                satelliteName: satelliteName,
+                noradId: noradId,
+                from: fromCallsign,
+                to: toCallsign,
+                decoderType: output.decoder_type,
+                parser: output.output.telemetry?.parser || '-',
+                packetLength: fileSize,
+                vfo: output.vfo,
+                hasTelemetry: !!output.output.telemetry,
+                telemetry: output.output.telemetry,
+                parameters: parameters,
+                framing: output.output.decoder_config?.framing || '-',
+                payloadProtocol: output.output.decoder_config?.payload_protocol || '-',
+                configSource: output.output.decoder_config?.source || '-',
+                mode: output.output.mode,
+                width: output.output.width,
+                height: output.output.height,
+                filename: output.output.filename,
+                filepath: output.output.filepath,
+                metadataFilepath: output.output.metadata_filepath,
+                output: output.output,
+            };
+        })
+        .reverse();
+};
 
 const DecodedPacketsDrawer = () => {
     const theme = useTheme();
     const dispatch = useDispatch();
     const { socket } = useSocket();
     const { outputs } = useSelector((state) => state.decoders);
-    const { packetsDrawerOpen, packetsDrawerHeight } = useSelector((state) => state.waterfall);
+    const { packetsDrawerOpen, packetsDrawerHeight, isStreaming } = useSelector((state) => state.waterfall);
+    const { timezone, locale } = useUserTimeSettings();
 
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartY, setDragStartY] = useState(0);
@@ -123,63 +156,38 @@ const DecodedPacketsDrawer = () => {
     const minHeight = 150;
     const maxHeight = 600;
 
-    // Convert outputs to table rows (limit to 100 most recent)
-    const rows = useMemo(() => {
-        return outputs
-            .filter(output => output.type === 'decoder-output')
-            .slice(-100) // Take last 100 entries
-            .map(output => {
-                const isSstv = output.decoder_type === 'sstv';
-                const isLora = output.decoder_type === ModulationType.LORA;
+    const liveMode = isStreaming && packetsDrawerOpen;
+    const rowLimit = liveMode ? LIVE_DRAWER_ROW_LIMIT : DEFAULT_DRAWER_ROW_LIMIT;
+    const latestRows = useMemo(() => mapOutputsToRows(outputs, rowLimit), [outputs, rowLimit]);
+    const latestRowsRef = useRef(latestRows);
+    const [rows, setRows] = useState(latestRows);
+    const [timeNowMs, setTimeNowMs] = useState(() => Date.now());
 
-                // For SSTV and LoRa: use different display logic
-                const fromCallsign = (isSstv || isLora) ? '-' : (output.output.callsigns?.from || '-');
-                const toCallsign = (isSstv || isLora) ? '-' : (output.output.callsigns?.to || '-');
+    useEffect(() => {
+        latestRowsRef.current = latestRows;
+        if (!liveMode) {
+            setRows(latestRows);
+        }
+    }, [latestRows, liveMode]);
 
-                // Use identified NORAD ID from backend lookup, then configured satellite
-                const noradId = output.output.callsigns?.identified_norad_id || output.output.satellite?.norad_id;
-                const satelliteName = output.output.callsigns?.identified_satellite || output.output.satellite?.name || '-';
+    useEffect(() => {
+        if (!liveMode) return;
+        const timer = setInterval(() => {
+            setRows(latestRowsRef.current);
+        }, LIVE_DRAWER_REFRESH_MS);
 
-                // For SSTV, use mode as parameters, for others use existing parameters
-                const parameters = isSstv ? output.output.mode : output.output.parameters;
+        return () => clearInterval(timer);
+    }, [liveMode]);
 
-                // File size from output
-                const fileSize = output.output.filesize || output.output.packet_length;
-
-                return {
-                    id: output.id,
-                    timestamp: output.timestamp * 1000, // Store as milliseconds for TimeFormatter
-                    satelliteName: satelliteName,
-                    noradId: noradId,
-                    from: fromCallsign,
-                    to: toCallsign,
-                    decoderType: output.decoder_type,
-                    parser: output.output.telemetry?.parser || '-',
-                    packetLength: fileSize,
-                    vfo: output.vfo,
-                    hasTelemetry: !!output.output.telemetry,
-                    telemetry: output.output.telemetry,
-                    parameters: parameters,
-                    // Decoder config
-                    framing: output.output.decoder_config?.framing || '-',
-                    payloadProtocol: output.output.decoder_config?.payload_protocol || '-',
-                    configSource: output.output.decoder_config?.source || '-',
-                    // SSTV specific
-                    mode: output.output.mode,
-                    width: output.output.width,
-                    height: output.output.height,
-                    // File paths for telemetry viewer
-                    filename: output.output.filename,
-                    filepath: output.output.filepath,
-                    metadataFilepath: output.output.metadata_filepath,
-                    output: output.output, // Keep full output for handler
-                };
-            })
-            .reverse(); // Most recent first
-    }, [outputs]);
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setTimeNowMs(Date.now());
+        }, 5000);
+        return () => clearInterval(timer);
+    }, []);
 
     // Handler to open telemetry viewer
-    const handleOpenTelemetry = async (row) => {
+    const handleOpenTelemetry = useCallback(async (row) => {
         try {
             console.log('Opening telemetry for row:', row);
 
@@ -256,13 +264,13 @@ const DecodedPacketsDrawer = () => {
             console.error('Error opening telemetry:', error);
             toast.error(`Failed to load telemetry: ${error.message}`);
         }
-    };
+    }, []);
 
     // Handler to delete packet file
-    const handleDeletePacket = (row) => {
+    const handleDeletePacket = useCallback((row) => {
         setPacketToDelete(row);
         setDeleteDialogOpen(true);
-    };
+    }, []);
 
     // Confirm delete and dispatch socket event
     const confirmDeletePacket = async () => {
@@ -278,13 +286,13 @@ const DecodedPacketsDrawer = () => {
         }
     };
 
-    const columns = [
+    const columns = useMemo(() => ([
         {
             field: 'timestamp',
             headerName: 'Time',
             minWidth: 180,
             flex: 1.5,
-            renderCell: (params) => <TimeFormatter value={params.value} />
+            renderCell: (params) => <TimeFormatter value={params.value} nowMs={timeNowMs} timezone={timezone} locale={locale} />
         },
         {
             field: 'from',
@@ -316,18 +324,9 @@ const DecodedPacketsDrawer = () => {
             align: 'center',
             headerAlign: 'center',
             renderCell: (params) => (
-                <Chip
-                    label={getDecoderDisplay(params.value)}
-                    size="small"
-                    sx={{
-                        height: '20px',
-                        fontSize: '0.65rem',
-                        fontWeight: 600,
-                        backgroundColor: alpha(theme.palette.primary.main, 0.15),
-                        border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
-                        color: 'primary.main',
-                    }}
-                />
+                <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                    {getDecoderDisplay(params.value)}
+                </Typography>
             )
         },
         {
@@ -338,18 +337,9 @@ const DecodedPacketsDrawer = () => {
             align: 'center',
             headerAlign: 'center',
             renderCell: (params) => (
-                <Chip
-                    label={getModulationDisplay(params.value)}
-                    size="small"
-                    sx={{
-                        height: '20px',
-                        fontSize: '0.65rem',
-                        fontWeight: 600,
-                        backgroundColor: alpha(theme.palette.warning.main, 0.15),
-                        border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
-                        color: 'warning.main',
-                    }}
-                />
+                <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 700 }}>
+                    {getModulationDisplay(params.value)}
+                </Typography>
             )
         },
         {
@@ -360,20 +350,9 @@ const DecodedPacketsDrawer = () => {
             align: 'center',
             headerAlign: 'center',
             renderCell: (params) => (
-                <Tooltip title={`Payload protocol: ${getModulationDisplay(params.value)}`}>
-                    <Chip
-                        label={getModulationDisplay(params.value)}
-                        size="small"
-                        sx={{
-                            height: '20px',
-                            fontSize: '0.65rem',
-                            fontWeight: 600,
-                            backgroundColor: alpha(theme.palette.success.main, 0.15),
-                            border: `1px solid ${alpha(theme.palette.success.main, 0.3)}`,
-                            color: 'success.main',
-                        }}
-                    />
-                </Tooltip>
+                <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 700 }}>
+                    {getModulationDisplay(params.value)}
+                </Typography>
             )
         },
         {
@@ -384,19 +363,9 @@ const DecodedPacketsDrawer = () => {
             align: 'center',
             headerAlign: 'center',
             renderCell: (params) => (
-                <Chip
-                    label={params.value}
-                    size="small"
-                    sx={{
-                        height: '20px',
-                        fontSize: '0.65rem',
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
-                        backgroundColor: alpha(theme.palette.secondary.main, 0.15),
-                        border: `1px solid ${alpha(theme.palette.secondary.main, 0.3)}`,
-                        color: 'secondary.main',
-                    }}
-                />
+                <Typography variant="caption" sx={{ color: 'secondary.main', textTransform: 'uppercase', fontWeight: 700 }}>
+                    {params.value}
+                </Typography>
             )
         },
         {
@@ -416,18 +385,9 @@ const DecodedPacketsDrawer = () => {
             align: 'center',
             headerAlign: 'center',
             renderCell: (params) => params.value ? (
-                <Chip
-                    label={`VFO${params.value}`}
-                    size="small"
-                    sx={{
-                        height: '20px',
-                        fontSize: '0.65rem',
-                        fontWeight: 600,
-                        backgroundColor: alpha(theme.palette.info.main, 0.15),
-                        border: `1px solid ${alpha(theme.palette.info.main, 0.3)}`,
-                        color: 'info.main',
-                    }}
-                />
+                <Typography variant="caption" sx={{ color: 'info.main', fontWeight: 700 }}>
+                    {`VFO${params.value}`}
+                </Typography>
             ) : '-'
         },
         {
@@ -438,25 +398,9 @@ const DecodedPacketsDrawer = () => {
             align: 'center',
             headerAlign: 'center',
             renderCell: (params) => params.value ? (
-                <Tooltip
-                    title={
-                        <Box sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>
-                            <div>Parser: {params.row.telemetry.parser}</div>
-                            <div>PID: {params.row.telemetry.frame?.pid}</div>
-                            <div>Format: {params.row.telemetry.data?.format || 'parsed'}</div>
-                            {params.row.telemetry.data?.hex && (
-                                <div>Payload: {params.row.telemetry.data.hex.substring(0, 32)}...</div>
-                            )}
-                        </Box>
-                    }
-                    placement="top"
-                >
-                    <CheckIcon sx={{ color: 'success.main', fontSize: '1.1rem' }} />
-                </Tooltip>
+                <CheckIcon sx={{ color: 'success.main', fontSize: '1.1rem' }} />
             ) : (
-                <Tooltip title="No telemetry" placement="top">
-                    <CloseIcon sx={{ color: 'text.disabled', fontSize: '1.1rem' }} />
-                </Tooltip>
+                <CloseIcon sx={{ color: 'text.disabled', fontSize: '1.1rem' }} />
             )
         },
         {
@@ -479,38 +423,192 @@ const DecodedPacketsDrawer = () => {
             headerAlign: 'right',
             renderCell: (params) => (
                 <>
-                    <Tooltip title="View telemetry data">
-                        <IconButton
-                            size={"large"}
-                            onClick={() => handleOpenTelemetry(params.row)}
-                            sx={{
-                                padding: 0,
-                                '&:hover': {
-                                    backgroundColor: alpha(theme.palette.primary.main, 0.1),
-                                }
-                            }}
-                        >
-                            <FolderOpenIcon sx={{ fontSize: '1.3rem' }} />
-                        </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete file">
-                        <IconButton
-                            size={"large"}
-                            onClick={() => handleDeletePacket(params.row)}
-                            sx={{
-                                padding: 0,
-                                '&:hover': {
-                                    backgroundColor: alpha(theme.palette.error.main, 0.1),
-                                }
-                            }}
-                        >
-                            <DeleteIcon sx={{ fontSize: '1.3rem', color: 'error.main' }} />
-                        </IconButton>
-                    </Tooltip>
+                    <IconButton
+                        size={"large"}
+                        onClick={() => handleOpenTelemetry(params.row)}
+                        sx={{
+                            padding: 0,
+                            '&:hover': {
+                                backgroundColor: alpha(theme.palette.primary.main, 0.1),
+                            }
+                        }}
+                    >
+                        <FolderOpenIcon sx={{ fontSize: '1.3rem' }} />
+                    </IconButton>
+                    <IconButton
+                        size={"large"}
+                        onClick={() => handleDeletePacket(params.row)}
+                        sx={{
+                            padding: 0,
+                            '&:hover': {
+                                backgroundColor: alpha(theme.palette.error.main, 0.1),
+                            }
+                        }}
+                    >
+                        <DeleteIcon sx={{ fontSize: '1.3rem', color: 'error.main' }} />
+                    </IconButton>
                 </>
             )
         },
-    ];
+    ]), [theme, handleOpenTelemetry, handleDeletePacket, timeNowMs, timezone, locale]);
+
+    const liveColumns = useMemo(() => ([
+        {
+            field: 'timestamp',
+            headerName: 'Time',
+            minWidth: 180,
+            flex: 1.5,
+            renderCell: (params) => <TimeFormatter value={params.value} nowMs={timeNowMs} timezone={timezone} locale={locale} />
+        },
+        {
+            field: 'from',
+            headerName: 'From',
+            minWidth: 100,
+            flex: 1,
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                    {params.value}
+                </Typography>
+            )
+        },
+        {
+            field: 'to',
+            headerName: 'To',
+            minWidth: 100,
+            flex: 1,
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ color: 'secondary.main', fontWeight: 600 }}>
+                    {params.value}
+                </Typography>
+            )
+        },
+        {
+            field: 'decoderType',
+            headerName: 'Decoder',
+            minWidth: 80,
+            flex: 0.8,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                    {getDecoderDisplay(params.value)}
+                </Typography>
+            )
+        },
+        {
+            field: 'framing',
+            headerName: 'Framing',
+            minWidth: 90,
+            flex: 0.8,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 700 }}>
+                    {getModulationDisplay(params.value)}
+                </Typography>
+            )
+        },
+        {
+            field: 'payloadProtocol',
+            headerName: 'Payload',
+            minWidth: 90,
+            flex: 0.8,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 700 }}>
+                    {getModulationDisplay(params.value)}
+                </Typography>
+            )
+        },
+        {
+            field: 'parser',
+            headerName: 'Parser',
+            minWidth: 100,
+            flex: 1,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ color: 'secondary.main', textTransform: 'uppercase', fontWeight: 700 }}>
+                    {params.value}
+                </Typography>
+            )
+        },
+        {
+            field: 'packetLength',
+            headerName: 'Size',
+            minWidth: 70,
+            flex: 0.6,
+            align: 'center',
+            headerAlign: 'center',
+            valueFormatter: (value) => humanizeBytes(value)
+        },
+        {
+            field: 'vfo',
+            headerName: 'VFO',
+            minWidth: 60,
+            flex: 0.5,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ color: 'info.main', fontWeight: 700 }}>
+                    {params.value ? `VFO${params.value}` : '-'}
+                </Typography>
+            )
+        },
+        {
+            field: 'hasTelemetry',
+            headerName: 'TLM',
+            minWidth: 60,
+            flex: 0.5,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => params.value ? (
+                <CheckIcon sx={{ color: 'success.main', fontSize: '1.1rem' }} />
+            ) : (
+                <CloseIcon sx={{ color: 'text.disabled', fontSize: '1.1rem' }} />
+            )
+        },
+        {
+            field: 'parameters',
+            headerName: 'Parameters',
+            minWidth: 120,
+            flex: 1.5,
+            renderCell: (params) => (
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.65rem', color: 'text.disabled' }}>
+                    {params.value || '-'}
+                </Typography>
+            )
+        },
+        {
+            field: 'actions',
+            headerName: 'Actions',
+            width: 120,
+            sortable: false,
+            align: 'right',
+            headerAlign: 'right',
+            renderCell: (params) => (
+                <>
+                    <IconButton
+                        size={"large"}
+                        onClick={() => handleOpenTelemetry(params.row)}
+                        sx={{ padding: 0 }}
+                    >
+                        <FolderOpenIcon sx={{ fontSize: '1.2rem' }} />
+                    </IconButton>
+                    <IconButton
+                        size={"large"}
+                        onClick={() => handleDeletePacket(params.row)}
+                        sx={{ padding: 0 }}
+                    >
+                        <DeleteIcon sx={{ fontSize: '1.2rem', color: 'error.main' }} />
+                    </IconButton>
+                </>
+            )
+        },
+    ]), [handleOpenTelemetry, handleDeletePacket, timeNowMs, timezone, locale]);
+
+    const displayedColumns = liveMode ? liveColumns : columns;
 
     const handleToggle = () => {
         // Only toggle if user didn't drag
@@ -656,10 +754,13 @@ const DecodedPacketsDrawer = () => {
                 >
                     <DataGrid
                             rows={rows}
-                            columns={columns}
+                            columns={displayedColumns}
                             density="compact"
                             disableRowSelectionOnClick
                             hideFooter
+                            disableColumnFilter={liveMode}
+                            disableColumnSelector={liveMode}
+                            disableColumnMenu={liveMode}
                             initialState={{
                                 sorting: {
                                     sortModel: [{ field: 'timestamp', sort: 'desc' }],

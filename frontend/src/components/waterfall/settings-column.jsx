@@ -25,7 +25,7 @@ import {
     getClassNamesBasedOnGridEditing,
     TitleBar
 } from "../common/common.jsx";
-import {useSelector, useDispatch} from 'react-redux';
+import { shallowEqual, useSelector, useDispatch } from 'react-redux';
 
 import {
     getSDRConfigParameters,
@@ -115,7 +115,6 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         settingsDialogOpen,
         autoDBRange,
         gridEditable,
-        
         rtlGains,
         fftWindow,
         fftWindows,
@@ -134,7 +133,6 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         antennasList,
         selectedAntenna,
         hasSoapyAgc,
-        
         selectedTransmitterId,
         fftAveraging,
         isRecording,
@@ -143,7 +141,53 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         selectedPlaybackRecording,
         playbackRecordingPath,
         playbackStartTime,
-    } = useSelector((state) => state.waterfall);
+    } = useSelector(
+        (state) => ({
+            colorMap: state.waterfall.colorMap,
+            colorMaps: state.waterfall.colorMaps,
+            dbRange: state.waterfall.dbRange,
+            fftSizeOptions: state.waterfall.fftSizeOptions,
+            fftSize: state.waterfall.fftSize,
+            gain: state.waterfall.gain,
+            sampleRate: state.waterfall.sampleRate,
+            centerFrequency: state.waterfall.centerFrequency,
+            selectedOffsetMode: state.waterfall.selectedOffsetMode,
+            selectedOffsetValue: state.waterfall.selectedOffsetValue,
+            errorMessage: state.waterfall.errorMessage,
+            isStreaming: state.waterfall.isStreaming,
+            targetFPS: state.waterfall.targetFPS,
+            settingsDialogOpen: state.waterfall.settingsDialogOpen,
+            autoDBRange: state.waterfall.autoDBRange,
+            gridEditable: state.waterfall.gridEditable,
+            rtlGains: state.waterfall.rtlGains,
+            fftWindow: state.waterfall.fftWindow,
+            fftWindows: state.waterfall.fftWindows,
+            expandedPanels: state.waterfall.expandedPanels,
+            selectedSDRId: state.waterfall.selectedSDRId,
+            gettingSDRParameters: state.waterfall.gettingSDRParameters,
+            gainValues: state.waterfall.gainValues,
+            sampleRateValues: state.waterfall.sampleRateValues,
+            sdrCapabilities: state.waterfall.sdrCapabilities,
+            sdrSettingsById: state.waterfall.sdrSettingsById,
+            hasBiasT: state.waterfall.hasBiasT,
+            hasTunerAgc: state.waterfall.hasTunerAgc,
+            hasRtlAgc: state.waterfall.hasRtlAgc,
+            fftSizeValues: state.waterfall.fftSizeValues,
+            fftWindowValues: state.waterfall.fftWindowValues,
+            antennasList: state.waterfall.antennasList,
+            selectedAntenna: state.waterfall.selectedAntenna,
+            hasSoapyAgc: state.waterfall.hasSoapyAgc,
+            selectedTransmitterId: state.waterfall.selectedTransmitterId,
+            fftAveraging: state.waterfall.fftAveraging,
+            isRecording: state.waterfall.isRecording,
+            recordingDuration: state.waterfall.recordingDuration,
+            recordingName: state.waterfall.recordingName,
+            selectedPlaybackRecording: state.waterfall.selectedPlaybackRecording,
+            playbackRecordingPath: state.waterfall.playbackRecordingPath,
+            playbackStartTime: state.waterfall.playbackStartTime,
+        }),
+        shallowEqual
+    );
 
     const sdrSettings = sdrSettingsById?.[selectedSDRId]?.draft || {};
     const biasT = sdrSettings?.biasT ?? false;
@@ -1208,4 +1252,4 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
     );
 });
 
-export default WaterfallSettings;
+export default React.memo(WaterfallSettings);

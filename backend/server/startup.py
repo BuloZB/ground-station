@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from audio.audiobroadcaster import AudioBroadcaster
 from audio.audiostreamer import WebAudioStreamer
 from common.arguments import arguments
+from common.audio_queue_config import get_audio_queue_config
 from common.logger import logger
 from db import *  # noqa: F401,F403
 from db import engine  # Explicit import for type checker
@@ -28,13 +29,14 @@ from observations.events import set_socketio_instance
 from observations.executor import ObservationExecutor
 from observations.sync import ObservationSchedulerSync
 from pipeline.orchestration.processmanager import process_manager
-from server import shutdown
+from server import runtimestate, shutdown
 from server.firsttime import first_time_initialization, run_initial_sync
 from server.scheduler import run_initial_observation_generation, start_scheduler, stop_scheduler
 from server.sessionsnapshot import start_session_runtime_emitter
 from server.systeminfo import start_system_info_emitter
 from server.version import get_full_version_info, get_update_check
 from tasks.manager import BackgroundTaskManager
+from tasks.registry import get_task
 from tracker.messages import handle_tracker_messages
 from tracker.runner import get_tracker_manager, start_tracker_process
 
@@ -51,13 +53,14 @@ _needs_initial_sync: bool = False
 
 # Audio distribution system
 # Demodulators write to audio_queue, AudioBroadcaster distributes to multiple consumers
-# Keep input queue small (5-10 chunks) to minimize tuning lag
-# At 1024 samples/chunk @ 44.1kHz = 23ms/chunk, 10 chunks = 230ms latency
-audio_queue: queue.Queue = queue.Queue(maxsize=10)
+audio_cfg = get_audio_queue_config()
+audio_queue: queue.Queue = queue.Queue(maxsize=audio_cfg.global_audio_queue_size)
 audio_broadcaster: AudioBroadcaster = AudioBroadcaster(audio_queue)
+runtimestate.audio_queue = audio_queue
 
 # Background task manager (initialized after sio is created)
 background_task_manager: BackgroundTaskManager = None
+runtimestate.process_manager = process_manager
 
 
 @asynccontextmanager
@@ -76,6 +79,7 @@ async def lifespan(fastapiapp: FastAPI):
 
     # Initialize background task manager
     background_task_manager = BackgroundTaskManager(sio)
+    runtimestate.background_task_manager = background_task_manager
     logger.info("BackgroundTaskManager initialized")
 
     # Start audio broadcaster
@@ -83,9 +87,12 @@ async def lifespan(fastapiapp: FastAPI):
     shutdown.audio_broadcaster = audio_broadcaster
 
     # Subscribe consumers to broadcaster
-    playback_queue = audio_broadcaster.subscribe("playback", maxsize=10)
+    playback_queue = audio_broadcaster.subscribe(
+        "playback", maxsize=audio_cfg.web_audio_playback_queue_size
+    )
     shutdown.audio_consumer = WebAudioStreamer(playback_queue, sio, event_loop)
     shutdown.audio_consumer.start()
+    runtimestate.audio_consumer = shutdown.audio_consumer
 
     # Initialize ProcessManager with event loop for TranscriptionManager
     process_manager.set_event_loop(event_loop)
@@ -98,7 +105,6 @@ async def lifespan(fastapiapp: FastAPI):
     if arguments.runonce_soapy_discovery:
         # Single discovery at startup
         logger.info("Starting one-time SoapySDR discovery at startup...")
-        from tasks.registry import get_task
 
         discovery_func = get_task("soapysdr_discovery")
         await background_task_manager.start_task(
@@ -107,7 +113,6 @@ async def lifespan(fastapiapp: FastAPI):
     if arguments.enable_soapy_discovery:
         # Continuous monitoring mode
         logger.info("Starting continuous SoapySDR discovery monitoring...")
-        from tasks.registry import get_task
 
         discovery_func = get_task("soapysdr_discovery")
         await background_task_manager.start_task(

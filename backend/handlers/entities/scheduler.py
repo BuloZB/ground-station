@@ -21,6 +21,7 @@ import crud.monitoredsatellites as crud_satellites
 import crud.scheduledobservations as crud_observations
 import observations.events as obs_events
 from db import AsyncSessionLocal
+from observations.constants import STATUS_FAILED
 from observations.events import emit_scheduled_observations_changed
 from observations.generator import generate_observations_for_monitored_satellites
 from observations.validation import validate_transmitter_frequencies
@@ -161,11 +162,8 @@ async def update_scheduled_observation(
                     logger.error(error_msg)
 
                     # Mark observation as failed in database
-                    from crud.scheduledobservations import update_scheduled_observation_status
-                    from observations.constants import STATUS_FAILED
-
                     async with AsyncSessionLocal() as status_session:
-                        await update_scheduled_observation_status(
+                        await crud_observations.update_scheduled_observation_status(
                             status_session, observation_id, STATUS_FAILED, error_msg
                         )
 

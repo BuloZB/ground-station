@@ -18,8 +18,8 @@
  */
 
 
-import React, {useState, useEffect, useCallback, useMemo, memo, useRef} from 'react';
-import {Responsive, WidthProvider} from 'react-grid-layout/legacy';
+import React, {useState, useEffect, useCallback, useRef} from 'react';
+import {Responsive, useContainerWidth} from 'react-grid-layout';
 import L from 'leaflet';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -66,10 +66,13 @@ let MapObject = null;
 const storageMapZoomValueKey = "target-map-zoom-level";
 
 // global callback for dashboard editing here
-export let handleSetGridEditableTarget = function () {
+const setGridEditableTargetEvent = 'target-set-grid-editable';
+export const handleSetGridEditableTarget = function (value) {
+    window.dispatchEvent(new CustomEvent(setGridEditableTargetEvent, {detail: value}));
 };
 
 export const gridLayoutStoreName = 'target-sat-track-layouts';
+const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
 
 // -------------------------------------------------
 // Leaflet icon path fix for React
@@ -93,6 +96,24 @@ function loadLayoutsFromLocalStorage() {
 
 function saveLayoutsToLocalStorage(layouts) {
     localStorage.setItem(gridLayoutStoreName, JSON.stringify(layouts));
+}
+
+function normalizeLayoutsResizeHandles(layouts) {
+    if (!layouts || typeof layouts !== 'object') {
+        return layouts;
+    }
+
+    return Object.fromEntries(
+        Object.entries(layouts).map(([breakpoint, items]) => [
+            breakpoint,
+            Array.isArray(items)
+                ? items.map((item) => ({
+                    ...item,
+                    resizeHandles: [...SHARED_RESIZE_HANDLES],
+                }))
+                : items,
+        ]),
+    );
 }
 
 const MapSlider = function ({handleSliderChange}) {
@@ -214,7 +235,7 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     const [currentSatellitesCoverage, setCurrentSatellitesCoverage] = useState([]);
     const coverageRef = useRef(null);
 
-    const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), []);
+    const {width, containerRef, mounted} = useContainerWidth({measureBeforeMount: true});
 
     // Handler for refreshing timeline passes
     const handleRefreshTimelinePasses = () => {
@@ -389,9 +410,15 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
         }]
     };
 
-    // globalize the callback
-    handleSetGridEditableTarget = useCallback((value) => {
-        dispatch(setGridEditable(value));
+    useEffect(() => {
+        const onSetGridEditable = (event) => {
+            dispatch(setGridEditable(event.detail));
+        };
+
+        window.addEventListener(setGridEditableTargetEvent, onSetGridEditable);
+        return () => {
+            window.removeEventListener(setGridEditableTargetEvent, onSetGridEditable);
+        };
     }, [dispatch]);
 
     const handleSetMapZoomLevel = useCallback((zoomLevel) => {
@@ -401,12 +428,13 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     // we load any stored layouts from localStorage or fallback to default
     const [layouts, setLayouts] = useState(() => {
         const loaded = loadLayoutsFromLocalStorage();
-        return loaded ?? defaultLayouts;
+        return normalizeLayoutsResizeHandles(loaded ?? defaultLayouts);
     });
 
     function handleLayoutsChange(currentLayout, allLayouts) {
-        setLayouts(allLayouts);
-        saveLayoutsToLocalStorage(allLayouts);
+        const normalizedLayouts = normalizeLayoutsResizeHandles(allLayouts);
+        setLayouts(normalizedLayouts);
+        saveLayoutsToLocalStorage(normalizedLayouts);
     }
 
     useEffect(() => {
@@ -465,44 +493,28 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
         // </StyledIslandParentScrollbar>,
     ];
 
-    let ResponsiveGridLayoutParent = null;
-
-    if (gridEditable === true) {
-        ResponsiveGridLayoutParent = <ResponsiveReactGridLayout
-            useCSSTransforms={true}
+    const ResponsiveGridLayoutParent = mounted ? (
+        <Responsive
+            width={width}
             className="layout"
             layouts={layouts}
             onLayoutChange={handleLayoutsChange}
             breakpoints={{lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0}}
             cols={{lg: 12, md: 10, sm: 6, xs: 2, xxs: 2}}
             rowHeight={30}
-            isResizable={true}
-            isDraggable={true}
-            draggableHandle={".react-grid-draggable"}
+            dragConfig={{enabled: gridEditable, handle: '.react-grid-draggable'}}
+            resizeConfig={{enabled: gridEditable}}
         >
             {gridContents}
-        </ResponsiveReactGridLayout>;
-    } else {
-        ResponsiveGridLayoutParent = <ResponsiveReactGridLayout
-            useCSSTransforms={true}
-            className="layout"
-            layouts={layouts}
-            onLayoutChange={handleLayoutsChange}
-            breakpoints={{lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0}}
-            cols={{lg: 12, md: 10, sm: 6, xs: 2, xxs: 2}}
-            rowHeight={30}
-            isResizable={false}
-            isDraggable={false}
-            draggableHandle={".react-grid-draggable"}
-        >
-            {gridContents}
-        </ResponsiveReactGridLayout>;
-    }
+        </Responsive>
+    ) : null;
 
     return (
         <>
             <TargetSatelliteSelectorBar />
-            {ResponsiveGridLayoutParent}
+            <div ref={containerRef}>
+                {ResponsiveGridLayoutParent}
+            </div>
         </>
     );
 });

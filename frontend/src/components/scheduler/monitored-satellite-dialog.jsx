@@ -213,7 +213,12 @@ export default function MonitoredSatelliteDialog() {
             sdr: initialSession.sdr,
             tasks: initialSession.tasks,
             sessions: [initialSession],
-            rotator: { id: null, tracking_enabled: false },
+            rotator: {
+                id: null,
+                tracking_enabled: false,
+                unpark_before_tracking: false,
+                park_after_observation: false,
+            },
             rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
             min_elevation: 20,
             task_start_elevation: 10,
@@ -375,11 +380,22 @@ export default function MonitoredSatelliteDialog() {
                 tasks: session.tasks || [],
             }));
             const primarySession = normalizedSessions[0] || createEmptySession();
+            const normalizedRotator = {
+                id: selectedMonitoredSatellite?.rotator?.id ?? null,
+                tracking_enabled: Boolean(selectedMonitoredSatellite?.rotator?.tracking_enabled),
+                unpark_before_tracking: Boolean(
+                    selectedMonitoredSatellite?.rotator?.unpark_before_tracking
+                ),
+                park_after_observation: Boolean(
+                    selectedMonitoredSatellite?.rotator?.park_after_observation
+                ),
+            };
             setFormData({
                 ...selectedMonitoredSatellite,
                 sessions: normalizedSessions,
                 sdr: primarySession.sdr,
                 tasks: primarySession.tasks,
+                rotator: normalizedRotator,
             });
             setActiveSessionIndex(0);
         } else {
@@ -390,7 +406,12 @@ export default function MonitoredSatelliteDialog() {
                 sdr: initialSession.sdr,
                 tasks: initialSession.tasks,
                 sessions: [initialSession],
-                rotator: { id: null, tracking_enabled: false },
+                rotator: {
+                    id: null,
+                    tracking_enabled: false,
+                    unpark_before_tracking: false,
+                    park_after_observation: false,
+                },
                 rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
                 min_elevation: 20,
                 task_start_elevation: 10,
@@ -1018,6 +1039,14 @@ export default function MonitoredSatelliteDialog() {
                                             rotator: {
                                                 id: value,
                                                 tracking_enabled: value ? true : false,
+                                                unpark_before_tracking:
+                                                    value
+                                                        ? Boolean(prev.rotator?.unpark_before_tracking)
+                                                        : false,
+                                                park_after_observation:
+                                                    value
+                                                        ? Boolean(prev.rotator?.park_after_observation)
+                                                        : false,
                                             },
                                             rig: {
                                                 ...prev.rig,
@@ -1048,6 +1077,42 @@ export default function MonitoredSatelliteDialog() {
                                     ))}
                                 </Select>
                             </FormControl>
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={Boolean(formData.rotator?.unpark_before_tracking)}
+                                        onChange={(e) =>
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                rotator: {
+                                                    ...prev.rotator,
+                                                    unpark_before_tracking: e.target.checked,
+                                                },
+                                            }))
+                                        }
+                                        disabled={!formData.rotator?.id}
+                                    />
+                                }
+                                label="Unpark before observation start (if currently parked)"
+                            />
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={Boolean(formData.rotator?.park_after_observation)}
+                                        onChange={(e) =>
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                rotator: {
+                                                    ...prev.rotator,
+                                                    park_after_observation: e.target.checked,
+                                                },
+                                            }))
+                                        }
+                                        disabled={!formData.rotator?.id}
+                                    />
+                                }
+                                label="Park rotator after observation end"
+                            />
                         </Stack>
                     </Box>
 

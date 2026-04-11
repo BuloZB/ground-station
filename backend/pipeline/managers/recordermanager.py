@@ -19,7 +19,10 @@ import logging
 from pathlib import Path
 
 from fft.waterfallgenerator import WaterfallConfig, WaterfallGenerator
+from handlers.entities.filebrowser import emit_file_browser_state
 from pipeline.managers.consumerbase import ConsumerManager
+from server import runtimestate
+from tasks.registry import get_task
 
 
 class RecorderManager(ConsumerManager):
@@ -190,8 +193,6 @@ class RecorderManager(ConsumerManager):
             recording_path: Path to the IQ recording file (without extension)
         """
         try:
-            from handlers.entities.filebrowser import emit_file_browser_state
-
             await emit_file_browser_state(
                 self.sio,
                 {
@@ -211,8 +212,7 @@ class RecorderManager(ConsumerManager):
             recording_path: Path to the IQ recording file (without extension)
         """
         try:
-            from server.startup import background_task_manager
-            from tasks.registry import get_task
+            background_task_manager = runtimestate.background_task_manager
 
             if not background_task_manager:
                 self.logger.error(
@@ -224,8 +224,6 @@ class RecorderManager(ConsumerManager):
                     None, self.waterfall_generator.generate_from_sigmf, Path(recording_path)
                 )
                 if success and self.sio:
-                    from handlers.entities.filebrowser import emit_file_browser_state
-
                     await emit_file_browser_state(
                         self.sio,
                         {"action": "waterfall-generated", "recording_path": recording_path},

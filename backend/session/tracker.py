@@ -23,6 +23,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Set, TypedDict, cast
 
+from session.store import active_sdr_clients, get_sdr_session
 from vfos.state import VFOManager
 
 logger = logging.getLogger("session-tracker")
@@ -326,8 +327,6 @@ class SessionTracker:
         Returns:
             SDR configuration dict or None if session not found
         """
-        from session.service import get_sdr_session
-
         return cast(Dict[str, Any] | None, get_sdr_session(session_id))
 
     def get_all_active_sdrs_with_config(self) -> Dict[str, Dict[str, Any]]:
@@ -343,8 +342,6 @@ class SessionTracker:
                 "end_freq": float      # bandwidth end in Hz
             }
         """
-        from session.service import active_sdr_clients
-
         sdrs: Dict[str, Dict[str, Any]] = {}
         for session_id, config in active_sdr_clients.items():
             sdr_id = config.get("sdr_id")
@@ -618,8 +615,6 @@ class SessionTracker:
         Returns:
             Internal session ID (e.g., "internal:obs-abc-123")
         """
-        from vfos.state import VFOManager
-
         session_id = VFOManager.make_internal_session_id(observation_id, session_key)
 
         # Mark as internal
@@ -657,8 +652,6 @@ class SessionTracker:
         Returns:
             True if session was found and removed, False otherwise
         """
-        from vfos.state import VFOManager
-
         if observation_id.startswith(VFOManager.INTERNAL_PREFIX):
             target_ids = [observation_id]
         else:

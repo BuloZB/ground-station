@@ -525,15 +525,17 @@ export const SocketProvider = ({ children }) => {
         };
     }, [collectStats]);
 
+    const providerValue = {
+        socket,
+        handleTokenChange,
+        trafficStatsRef,
+        getSocketIOEngineStats,
+        setCollectStats,
+        addDebugListener,
+    };
+
     return (
-        <SocketContext.Provider value={{
-            socket,
-            handleTokenChange,
-            trafficStatsRef,
-            getSocketIOEngineStats,
-            setCollectStats,
-            addDebugListener,
-        }}>
+        <SocketContext.Provider value={providerValue}>
             {children}
         </SocketContext.Provider>
     );

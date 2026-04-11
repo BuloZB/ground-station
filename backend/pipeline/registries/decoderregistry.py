@@ -18,14 +18,40 @@ from dataclasses import dataclass
 from typing import List, Optional, Type
 
 # Import decoder classes
-from demodulators.afskdecoder import AFSKDecoder
-from demodulators.bpskdecoder import BPSKDecoder
-from demodulators.fskdecoder import FSKDecoder
-from demodulators.gfskdecoder import GFSKDecoder
-from demodulators.gmskdecoder import GMSKDecoder
-from demodulators.loradecoder import LoRaDecoder
-from demodulators.morsedecoder import MorseDecoder
-from demodulators.sstvdecoder import SSTVDecoder
+try:
+    from demodulators.afskdecoder import AFSKDecoder
+except Exception:
+    AFSKDecoder = None
+
+try:
+    from demodulators.bpskdecoder import BPSKDecoder
+except Exception:
+    BPSKDecoder = None
+
+try:
+    from demodulators.fskdecoder import FSKDecoder
+except Exception:
+    FSKDecoder = None
+
+try:
+    from demodulators.gfskdecoder import GFSKDecoder
+except Exception:
+    GFSKDecoder = None
+
+try:
+    from demodulators.gmskdecoder import GMSKDecoder
+except Exception:
+    GMSKDecoder = None
+
+try:
+    from demodulators.morsedecoder import MorseDecoder
+except Exception:
+    MorseDecoder = None
+
+try:
+    from demodulators.sstvdecoder import SSTVDecoder
+except Exception:
+    SSTVDecoder = None
 
 
 @dataclass
@@ -73,9 +99,11 @@ class DecoderRegistry:
         if self._initialized:
             return
 
-        # Define capabilities for each decoder
-        self._decoders = {
-            "afsk": DecoderCapabilities(
+        # Define capabilities for each decoder (only when class imports succeeded)
+        self._decoders = {}
+
+        if AFSKDecoder is not None:
+            self._decoders["afsk"] = DecoderCapabilities(
                 name="afsk",
                 decoder_class=AFSKDecoder,
                 needs_raw_iq=False,
@@ -85,8 +113,10 @@ class DecoderRegistry:
                 supports_transmitter_config=True,
                 restart_on_params=["baudrate", "af_carrier", "deviation", "framing"],
                 description="Audio Frequency Shift Keying decoder (APRS, packet radio)",
-            ),
-            "sstv": DecoderCapabilities(
+            )
+
+        if SSTVDecoder is not None:
+            self._decoders["sstv"] = DecoderCapabilities(
                 name="sstv",
                 decoder_class=SSTVDecoder,
                 needs_raw_iq=True,  # Receives IQ directly (integrated FM demod)
@@ -96,8 +126,10 @@ class DecoderRegistry:
                 supports_transmitter_config=True,  # SSTV now accepts satellite/transmitter metadata
                 restart_on_params=[],
                 description="Slow-scan television image decoder (process-based with integrated FM demod)",
-            ),
-            "morse": DecoderCapabilities(
+            )
+
+        if MorseDecoder is not None:
+            self._decoders["morse"] = DecoderCapabilities(
                 name="morse",
                 decoder_class=MorseDecoder,
                 needs_raw_iq=False,
@@ -107,8 +139,10 @@ class DecoderRegistry:
                 supports_transmitter_config=False,
                 restart_on_params=[],  # TODO: Add Morse-specific parameters
                 description="Morse code (CW) decoder",
-            ),
-            "fsk": DecoderCapabilities(
+            )
+
+        if FSKDecoder is not None:
+            self._decoders["fsk"] = DecoderCapabilities(
                 name="fsk",
                 decoder_class=FSKDecoder,
                 needs_raw_iq=True,  # Works on raw IQ samples
@@ -118,8 +152,10 @@ class DecoderRegistry:
                 supports_transmitter_config=True,
                 restart_on_params=["baudrate", "deviation", "framing", "framing_params"],
                 description="Frequency Shift Keying decoder (FSK/GFSK/GMSK)",
-            ),
-            "gmsk": DecoderCapabilities(
+            )
+
+        if GMSKDecoder is not None:
+            self._decoders["gmsk"] = DecoderCapabilities(
                 name="gmsk",
                 decoder_class=GMSKDecoder,  # Alias to FSKDecoder
                 needs_raw_iq=True,  # Works on raw IQ samples
@@ -129,8 +165,10 @@ class DecoderRegistry:
                 supports_transmitter_config=True,
                 restart_on_params=["baudrate", "deviation", "framing", "framing_params"],
                 description="Gaussian Minimum Shift Keying decoder (alias to FSK)",
-            ),
-            "gfsk": DecoderCapabilities(
+            )
+
+        if GFSKDecoder is not None:
+            self._decoders["gfsk"] = DecoderCapabilities(
                 name="gfsk",
                 decoder_class=GFSKDecoder,  # Extends FSKDecoder with modulation_subtype="GFSK"
                 needs_raw_iq=True,  # Works on raw IQ samples
@@ -140,8 +178,10 @@ class DecoderRegistry:
                 supports_transmitter_config=True,
                 restart_on_params=["baudrate", "deviation", "framing", "framing_params"],
                 description="Gaussian Frequency Shift Keying decoder",
-            ),
-            "bpsk": DecoderCapabilities(
+            )
+
+        if BPSKDecoder is not None:
+            self._decoders["bpsk"] = DecoderCapabilities(
                 name="bpsk",
                 decoder_class=BPSKDecoder,
                 needs_raw_iq=True,  # Works on raw IQ samples
@@ -151,19 +191,7 @@ class DecoderRegistry:
                 supports_transmitter_config=True,
                 restart_on_params=["baudrate", "differential", "framing", "framing_params"],
                 description="Binary Phase Shift Keying decoder",
-            ),
-            "lora": DecoderCapabilities(
-                name="lora",
-                decoder_class=LoRaDecoder,
-                needs_raw_iq=True,  # Works on raw IQ samples
-                required_demodulator=None,  # No demodulator needed
-                demodulator_mode=None,
-                default_bandwidth=125000,  # 125 kHz typical
-                supports_transmitter_config=False,
-                restart_on_params=["sf", "bw", "cr", "sync_word", "preamble_len", "fldro"],
-                description="LoRa chirp spread spectrum decoder",
-            ),
-        }
+            )
 
         self._initialized = True
 

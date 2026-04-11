@@ -31,10 +31,14 @@ import { toast } from "../../utils/toast-with-timestamp.jsx";
 import {getClassNamesBasedOnGridEditing, TitleBar} from "../common/common.jsx";
 import { useTranslation } from 'react-i18next';
 import Grid from "@mui/material/Grid";
-import {Button, FormControl, IconButton, InputLabel, MenuItem, Select} from "@mui/material";
+import {Box, Button, Chip, FormControl, IconButton, InputLabel, MenuItem, Select, Stack, Tooltip} from "@mui/material";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import SettingsIcon from '@mui/icons-material/Settings';
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import AutorenewIcon from '@mui/icons-material/Autorenew';
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import { GaugeAz, GaugeEl } from '../target/rotator-gauges.jsx';
 import {
     getCurrentStatusofRotator,
@@ -45,6 +49,7 @@ import {
     canConnectRotator,
     isRotatorSelectionDisabled
 } from '../target/rotator-utils.js';
+import { ROTATOR_STATES, TRACKER_COMMAND_SCOPES, TRACKER_COMMAND_STATUS } from '../target/tracking-constants.js';
 import { useNavigate } from 'react-router-dom';
 
 
@@ -77,13 +82,140 @@ const RotatorControl = React.memo(function RotatorControl() {
         activePass,
         rotatorConnecting,
         rotatorDisconnecting,
+        trackerCommand,
     } = useSelector((state) => state.targetSatTrack);
 
     const { rigs } = useSelector((state) => state.rigs);
     const { rotators } = useSelector((state) => state.rotators);
+    const isRotatorCommandBusy = Boolean(
+        trackerCommand &&
+        [TRACKER_COMMAND_SCOPES.ROTATOR, TRACKER_COMMAND_SCOPES.TRACKING].includes(trackerCommand.scope) &&
+        trackerCommand?.requestedState?.rotatorState &&
+        [TRACKER_COMMAND_STATUS.SUBMITTED, TRACKER_COMMAND_STATUS.STARTED].includes(trackerCommand.status)
+    );
+    const inFlightRotatorState = trackerCommand?.requestedState?.rotatorState;
+    const isConnectActionPending = isRotatorCommandBusy && inFlightRotatorState === ROTATOR_STATES.CONNECTED;
+    const isDisconnectActionPending = isRotatorCommandBusy && inFlightRotatorState === ROTATOR_STATES.DISCONNECTED;
+    const isTrackActionPending = isRotatorCommandBusy && inFlightRotatorState === ROTATOR_STATES.TRACKING;
+    const isStopActionPending = isRotatorCommandBusy && inFlightRotatorState === ROTATOR_STATES.STOPPED;
+    const isParkActionPending = isRotatorCommandBusy && inFlightRotatorState === ROTATOR_STATES.PARKED;
+    const [isSocketConnected, setIsSocketConnected] = React.useState(Boolean(socket?.connected));
+    const [lastRotatorUpdateAt, setLastRotatorUpdateAt] = React.useState(Date.now());
+    const [now, setNow] = React.useState(Date.now());
+
+    const activeRotatorCommand = React.useMemo(() => {
+        if (!trackerCommand) return null;
+        const supportsScope = [TRACKER_COMMAND_SCOPES.ROTATOR, TRACKER_COMMAND_SCOPES.TRACKING].includes(trackerCommand.scope);
+        return supportsScope && trackerCommand?.requestedState?.rotatorState ? trackerCommand : null;
+    }, [trackerCommand]);
+
+    React.useEffect(() => {
+        if (!socket) return;
+        setIsSocketConnected(Boolean(socket.connected));
+        const handleConnect = () => setIsSocketConnected(true);
+        const handleDisconnect = () => setIsSocketConnected(false);
+        socket.on('connect', handleConnect);
+        socket.on('disconnect', handleDisconnect);
+        return () => {
+            socket.off('connect', handleConnect);
+            socket.off('disconnect', handleDisconnect);
+        };
+    }, [socket]);
+
+    React.useEffect(() => {
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
+
+    React.useEffect(() => {
+        setLastRotatorUpdateAt(Date.now());
+    }, [
+        rotatorData?.connected,
+        rotatorData?.tracking,
+        rotatorData?.slewing,
+        rotatorData?.parked,
+        rotatorData?.stopped,
+        rotatorData?.az,
+        rotatorData?.el,
+    ]);
+
+    const selectedRotatorDevice = React.useMemo(
+        () => rotators.find((rotator) => rotator.id === selectedRotator),
+        [rotators, selectedRotator]
+    );
+
+    const rotatorStatusChip = React.useMemo(() => {
+        if (!isSocketConnected) return { label: 'Offline', color: 'default' };
+        if (!rotatorData?.connected) return { label: 'Disconnected', color: 'error' };
+        if (rotatorData?.tracking) return { label: 'Tracking', color: 'success' };
+        if (rotatorData?.slewing) return { label: 'Slewing', color: 'warning' };
+        if (rotatorData?.parked) return { label: 'Parked', color: 'warning' };
+        if (rotatorData?.stopped) return { label: 'Stopped', color: 'warning' };
+        return { label: 'Connected', color: 'success' };
+    }, [isSocketConnected, rotatorData?.connected, rotatorData?.tracking, rotatorData?.slewing, rotatorData?.parked, rotatorData?.stopped]);
+
+    const commandStateLabel = React.useMemo(() => {
+        if (!activeRotatorCommand) return t('common.not_available', { ns: 'common', defaultValue: 'N/A' });
+        if (activeRotatorCommand.status === TRACKER_COMMAND_STATUS.SUBMITTED) return t('common.pending', { ns: 'common', defaultValue: 'Pending' });
+        if (activeRotatorCommand.status === TRACKER_COMMAND_STATUS.STARTED) return t('common.in_progress', { ns: 'common', defaultValue: 'In progress' });
+        if (activeRotatorCommand.status === TRACKER_COMMAND_STATUS.SUCCEEDED) return t('common.success', { ns: 'common', defaultValue: 'Success' });
+        if (activeRotatorCommand.status === TRACKER_COMMAND_STATUS.FAILED) return t('common.failed', { ns: 'common', defaultValue: 'Failed' });
+        return t('common.unknown', { ns: 'common', defaultValue: 'Unknown' });
+    }, [activeRotatorCommand, t]);
+
+    const commandStatusIcon = React.useMemo(() => {
+        if (!activeRotatorCommand) return { Icon: MoreHorizIcon, color: 'text.disabled' };
+        if (activeRotatorCommand.status === TRACKER_COMMAND_STATUS.SUCCEEDED) {
+            return { Icon: CheckCircleOutlineIcon, color: 'success.main' };
+        }
+        if (activeRotatorCommand.status === TRACKER_COMMAND_STATUS.FAILED) {
+            return { Icon: ErrorOutlineIcon, color: 'error.main' };
+        }
+        if ([TRACKER_COMMAND_STATUS.SUBMITTED, TRACKER_COMMAND_STATUS.STARTED].includes(activeRotatorCommand.status)) {
+            return { Icon: AutorenewIcon, color: 'info.main' };
+        }
+        return { Icon: MoreHorizIcon, color: 'text.disabled' };
+    }, [activeRotatorCommand]);
+
+    const lastUpdateAge = Math.max(0, Math.floor((now - lastRotatorUpdateAt) / 1000));
+
+    const connectDisabled = isRotatorCommandBusy || !canConnectRotator(rotatorData, selectedRotator);
+    const connectDisabledReason = isRotatorCommandBusy
+        ? 'Command in progress'
+        : !canConnectRotator(rotatorData, selectedRotator)
+            ? 'Select a rotator first'
+            : null;
+
+    const disconnectDisabled = isRotatorCommandBusy || [ROTATOR_STATES.DISCONNECTED].includes(trackingState['rotator_state']);
+    const disconnectDisabledReason = isRotatorCommandBusy
+        ? 'Command in progress'
+        : [ROTATOR_STATES.DISCONNECTED].includes(trackingState['rotator_state'])
+            ? 'Rotator is already disconnected'
+            : null;
+
+    const parkDisabled = isRotatorCommandBusy || [ROTATOR_STATES.DISCONNECTED].includes(trackingState['rotator_state']);
+    const parkDisabledReason = isRotatorCommandBusy
+        ? 'Command in progress'
+        : [ROTATOR_STATES.DISCONNECTED].includes(trackingState['rotator_state'])
+            ? 'Connect the rotator first'
+            : null;
+
+    const trackDisabled = isRotatorCommandBusy || !canStartTracking(trackingState, satelliteId, selectedRotator);
+    const trackDisabledReason = isRotatorCommandBusy
+        ? 'Command in progress'
+        : !canStartTracking(trackingState, satelliteId, selectedRotator)
+            ? 'Select satellite and rotator, then connect first'
+            : null;
+
+    const stopDisabled = isRotatorCommandBusy || !canStopTracking(trackingState, satelliteId, selectedRotator);
+    const stopDisabledReason = isRotatorCommandBusy
+        ? 'Command in progress'
+        : !canStopTracking(trackingState, satelliteId, selectedRotator)
+            ? 'Rotator is not currently tracking'
+            : null;
 
     const handleTrackingStop = () => {
-        const newTrackingState = {...trackingState, 'rotator_state': "stopped"};
+        const newTrackingState = {...trackingState, 'rotator_state': ROTATOR_STATES.STOPPED};
         dispatch(setTrackingStateInBackend({socket, data: newTrackingState}));
     };
 
@@ -91,7 +223,7 @@ const RotatorControl = React.memo(function RotatorControl() {
         const newTrackingState = createTrackingState({
             satelliteId,
             groupId,
-            rotatorState: "tracking",
+            rotatorState: ROTATOR_STATES.TRACKING,
             rigState: trackingState['rig_state'],
             selectedRadioRig,
             selectedRotator,
@@ -112,7 +244,7 @@ const RotatorControl = React.memo(function RotatorControl() {
         const newTrackingState = createTrackingState({
             satelliteId,
             groupId,
-            rotatorState: "parked",
+            rotatorState: ROTATOR_STATES.PARKED,
             rigState: trackingState['rig_state'],
             selectedRadioRig,
             selectedRotator,
@@ -129,7 +261,7 @@ const RotatorControl = React.memo(function RotatorControl() {
         const newTrackingState = createTrackingState({
             satelliteId,
             groupId,
-            rotatorState: "connected",
+            rotatorState: ROTATOR_STATES.CONNECTED,
             rigState: trackingState['rig_state'],
             selectedRadioRig,
             selectedRotator,
@@ -149,7 +281,7 @@ const RotatorControl = React.memo(function RotatorControl() {
         const newTrackingState = createTrackingState({
             satelliteId,
             groupId,
-            rotatorState: "disconnected",
+            rotatorState: ROTATOR_STATES.DISCONNECTED,
             rigState: trackingState['rig_state'],
             selectedRadioRig,
             selectedRotator,
@@ -177,6 +309,72 @@ const RotatorControl = React.memo(function RotatorControl() {
         <>
             {/*<TitleBar className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}>Rotator control</TitleBar>*/}
             <Grid container spacing={{ xs: 0, md: 0 }} columns={{ xs: 12, sm: 12, md: 12 }}>
+                <Grid
+                    size={{ xs: 12, sm: 12, md: 12 }}
+                    sx={{
+                        px: 0.75,
+                        pt: 0.45,
+                        pb: 0.35,
+                        backgroundColor: 'background.default',
+                        borderBottom: '1px solid',
+                        borderColor: 'divider'
+                    }}
+                >
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ minHeight: 24 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: 0.2 }}>
+                            {t('rotator_control.title', { defaultValue: 'Rotator Control' })}
+                        </Typography>
+                        <Chip
+                            label={rotatorStatusChip.label}
+                            color={rotatorStatusChip.color}
+                            size="small"
+                            sx={{ height: 18, '& .MuiChip-label': { px: 0.75, fontSize: '0.66rem', fontWeight: 600 } }}
+                            variant={rotatorStatusChip.color === 'default' ? 'outlined' : 'filled'}
+                        />
+                    </Stack>
+                    <Box
+                        title={
+                            `${selectedRotatorDevice ? `${selectedRotatorDevice.name} (${selectedRotatorDevice.host}:${selectedRotatorDevice.port})` : 'No rotator selected'} | ` +
+                            `Socket ${isSocketConnected ? 'Online' : 'Offline'} | ` +
+                            `Updated ${lastUpdateAge}s | ` +
+                            `Cmd ${commandStateLabel}` +
+                            (activeRotatorCommand?.status === TRACKER_COMMAND_STATUS.FAILED && activeRotatorCommand?.reason ? ` | ${activeRotatorCommand.reason}` : '')
+                        }
+                        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5 }}
+                    >
+                        <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            noWrap
+                            sx={{ display: 'block', fontSize: '0.66rem', lineHeight: 1.2, minWidth: 0, flex: 1 }}
+                        >
+                            {`${selectedRotatorDevice ? selectedRotatorDevice.name : 'No rotator'} | ${isSocketConnected ? 'Online' : 'Offline'}`}
+                        </Typography>
+                        <Box
+                            sx={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 0.4,
+                                flexShrink: 0,
+                                px: 0.5,
+                                py: '1px',
+                                borderRadius: 0.75,
+                                backgroundColor: 'action.hover'
+                            }}
+                        >
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.64rem', lineHeight: 1 }}>
+                                {`${lastUpdateAge}s`}
+                            </Typography>
+                            <Tooltip
+                                title={`Command: ${commandStateLabel}${activeRotatorCommand?.status === TRACKER_COMMAND_STATUS.FAILED && activeRotatorCommand?.reason ? ` (${activeRotatorCommand.reason})` : ''}`}
+                            >
+                                <Box component="span" sx={{ display: 'inline-flex' }}>
+                                    <commandStatusIcon.Icon sx={{ fontSize: '0.8rem', color: commandStatusIcon.color }} />
+                                </Box>
+                            </Tooltip>
+                        </Box>
+                    </Box>
+                </Grid>
 
                 <Grid size={{ xs: 12, sm: 12, md: 12 }} style={{padding: '0.5rem 0.5rem 0rem 0.5rem'}}>
                     <Grid container direction="row" spacing={1} sx={{ alignItems: 'flex-end' }}>
@@ -414,36 +612,61 @@ const RotatorControl = React.memo(function RotatorControl() {
                         alignItems: "stretch",
                     }}>
                         <Grid size="grow" style={{paddingRight: '0.5rem', flex: 1}}>
-                            <Button
-                            loading={rotatorConnecting}
-                            disabled={!canConnectRotator(rotatorData, selectedRotator)}
-                            fullWidth={true} variant="contained" color="success" style={{height: '40px'}}
-                                    onClick={() => {
-                                        connectRotator()
-                                    }}>
-                                {t('rotator_control.connect')}
-                            </Button>
+                            <Tooltip title={connectDisabled ? connectDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        loading={isConnectActionPending || rotatorConnecting}
+                                        disabled={connectDisabled}
+                                        fullWidth={true}
+                                        variant="contained"
+                                        color="success"
+                                        style={{height: '40px'}}
+                                        onClick={() => {
+                                            connectRotator()
+                                        }}
+                                    >
+                                        {t('rotator_control.connect')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                         <Grid size="grow" style={{paddingRight: '0.5rem', flex: 1.5}}>
-                            <Button
-                                loading={rotatorDisconnecting}
-                                disabled={["disconnected"].includes(trackingState['rotator_state'])}
-                                fullWidth={true}
-                                variant="contained" color="error" style={{height: '40px'}}
-                                onClick={() => {
-                                     disconnectRotator()
-                                }}>
-                                {t('rotator_control.disconnect')}
-                            </Button>
+                            <Tooltip title={disconnectDisabled ? disconnectDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        loading={isDisconnectActionPending || rotatorDisconnecting}
+                                        disabled={disconnectDisabled}
+                                        fullWidth={true}
+                                        variant="contained"
+                                        color="error"
+                                        style={{height: '40px'}}
+                                        onClick={() => {
+                                             disconnectRotator()
+                                        }}
+                                    >
+                                        {t('rotator_control.disconnect')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                         <Grid size="grow" style={{paddingRight: '0rem', flex: 1}}>
-                            <Button disabled={["disconnected"].includes(trackingState['rotator_state'])}
-                                    fullWidth={true} variant="contained" color="warning" style={{height: '40px'}}
-                                    onClick={() => {
-                                        parkRotator()
-                                    }}>
-                                {t('rotator_control.park')}
-                            </Button>
+                            <Tooltip title={parkDisabled ? parkDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        loading={isParkActionPending}
+                                        disabled={parkDisabled}
+                                        fullWidth={true}
+                                        variant="contained"
+                                        color="warning"
+                                        style={{height: '40px'}}
+                                        onClick={() => {
+                                            parkRotator()
+                                        }}
+                                    >
+                                        {t('rotator_control.park')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                     </Grid>
                 </Grid>
@@ -454,21 +677,38 @@ const RotatorControl = React.memo(function RotatorControl() {
                         alignItems: "stretch",
                     }}>
                         <Grid size="grow" style={{paddingRight: '0.5rem'}}>
-                            <Button fullWidth={true}
-                                    disabled={!canStartTracking(trackingState, satelliteId, selectedRotator)}
-                                    variant="contained" color="success" style={{height: '60px'}}
-                                    onClick={()=>{handleTrackingStart()}}
-                            >
-                                {t('rotator_control.track')}
-                            </Button>
+                            <Tooltip title={trackDisabled ? trackDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        fullWidth={true}
+                                        loading={isTrackActionPending}
+                                        disabled={trackDisabled}
+                                        variant="contained"
+                                        color="success"
+                                        style={{height: '60px'}}
+                                        onClick={()=>{handleTrackingStart()}}
+                                    >
+                                        {t('rotator_control.track')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                         <Grid size="grow">
-                            <Button fullWidth={true}
-                                    disabled={!canStopTracking(trackingState, satelliteId, selectedRotator)}
-                                    variant="contained" color="error" style={{height: '60px'}}
-                                    onClick={() => {handleTrackingStop()}}>
-                                {t('rotator_control.stop')}
-                            </Button>
+                            <Tooltip title={stopDisabled ? stopDisabledReason : ''}>
+                                <span style={{ display: 'block' }}>
+                                    <Button
+                                        fullWidth={true}
+                                        loading={isStopActionPending}
+                                        disabled={stopDisabled}
+                                        variant="contained"
+                                        color="error"
+                                        style={{height: '60px'}}
+                                        onClick={() => {handleTrackingStop()}}
+                                    >
+                                        {t('rotator_control.stop')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
                         </Grid>
                     </Grid>
                 </Grid>

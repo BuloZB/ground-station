@@ -96,6 +96,14 @@ const satelliteIconDimCircle = L.divIcon({
     popupAnchor: [0, -10],
 });
 
+const overviewVisibleSatelliteIcon = L.divIcon({
+    className: satelliteIcon2.options.className,
+    html: satelliteIcon2.options.html,
+    iconSize: satelliteIcon2.options.iconSize,
+    iconAnchor: [10, 10],
+    popupAnchor: satelliteIcon2.options.popupAnchor,
+});
+
 const CenterHomeButton = React.memo(function CenterHomeButton() {
     const { t } = useTranslation('overview');
     const {location} = useSelector((state) => state.location);
@@ -541,10 +549,11 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                             position={[lat, lon]}
                             altitude={altitude}
                             velocity={velocity}
+                            isVisible={isVisible}
                             trackingSatelliteId={trackingSatelliteId}
                             selectedSatelliteId={selectedSatelliteId}
                             markerEventHandlers={markerEventHandlers}
-                            satelliteIcon={isVisible ? satelliteIcon2 : satelliteIconDimCircle}
+                            satelliteIcon={isVisible ? overviewVisibleSatelliteIcon : satelliteIconDimCircle}
                             opacity={1}
                             handleSetTrackingOnBackend={handleSetTrackingOnBackend}
                         />
@@ -554,7 +563,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                         <Marker
                             key={'marker-' + satellite['norad_id']}
                             position={[lat, lon]}
-                            icon={satelliteIcon2}
+                            icon={overviewVisibleSatelliteIcon}
                             eventHandlers={markerEventHandlers}
                             opacity={1}
                         ></Marker>

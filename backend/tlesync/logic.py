@@ -50,6 +50,7 @@ from tlesync.utils import (
     update_satellite_group_with_removal_detection,
     update_satellite_with_satnogs_data,
 )
+from tracker.runner import get_tracker_manager
 
 # Global state to track satellite synchronization progress
 sync_state = create_initial_sync_state()
@@ -92,8 +93,6 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
         if not satellite_norad_ids and not transmitter_norad_ids:
             return
         try:
-            from tracker.runner import get_tracker_manager
-
             manager = get_tracker_manager()
             if satellite_norad_ids:
                 for norad_id in satellite_norad_ids:

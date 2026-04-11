@@ -84,6 +84,11 @@
     "max_az": "Maximum Azimuth",
     "min_el": "Minimum Elevation",
     "max_el": "Maximum Elevation",
+    "park_az": "Park Azimuth",
+    "park_el": "Park Elevation",
+    "park_position_helper": "Optional. Leave both empty to use the rotator's native park behavior.",
+    "enable_park_override": "Override native park position (advanced)",
+    "park_override_warning": "Warning: enabling fixed park coordinates can move hardware unexpectedly. Use only if you trust the configured park angles.",
     "azimuth_range": "Azimuth Range",
     "elevation_range": "Elevation",
     "azimuth_mode_0_360": "0° to 360°",
@@ -105,7 +110,8 @@
     "validation": {
       "min_az_lte_max_az": "Min azimuth must be <= max azimuth",
       "invalid_azimuth_mode": "Invalid azimuth mode",
-      "min_el_lte_max_el": "Min elevation must be <= max elevation"
+      "min_el_lte_max_el": "Min elevation must be <= max elevation",
+      "park_both_or_none": "Park azimuth and elevation must both be set or both left empty"
     },
     "saved_success": "Rotator saved successfully",
     "deleted_success": "Rotator(s) deleted successfully",

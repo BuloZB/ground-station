@@ -66,6 +66,8 @@ class TestRotatorsCRUD:
         assert result["data"]["host"] == "localhost"
         assert result["data"]["port"] == 4533
         assert result["data"]["azimuth_mode"] == "0_360"
+        assert result["data"]["parkaz"] is None
+        assert result["data"]["parkel"] is None
         assert "id" in result["data"]
 
     async def test_add_rotator_with_negative_azimuth_mode(self, db_session):
@@ -119,6 +121,26 @@ class TestRotatorsCRUD:
         assert result["success"] is True
         assert len(result["data"]) == 2
 
+    async def test_add_rotator_with_park_position(self, db_session):
+        """Test successful rotator creation with explicit park position."""
+        rotator_data = {
+            "name": "Park Rotator",
+            "host": "localhost",
+            "port": 4533,
+            "minaz": 0,
+            "maxaz": 360,
+            "minel": 0,
+            "maxel": 90,
+            "parkaz": 180.5,
+            "parkel": 10.25,
+        }
+
+        result = await add_rotator(db_session, rotator_data)
+
+        assert result["success"] is True
+        assert result["data"]["parkaz"] == 180.5
+        assert result["data"]["parkel"] == 10.25
+
     async def test_fetch_rotator_by_id(self, db_session):
         """Test fetching a single rotator by ID."""
         add_result = await add_rotator(
@@ -169,6 +191,37 @@ class TestRotatorsCRUD:
         assert result["success"] is True
         assert result["data"]["name"] == "New Name"
         assert result["data"]["port"] == 4534
+
+    async def test_edit_rotator_can_unset_park_position(self, db_session):
+        """Test unsetting park position by passing null values."""
+        add_result = await add_rotator(
+            db_session,
+            {
+                "name": "Parked Rotator",
+                "host": "localhost",
+                "port": 4533,
+                "minaz": 0,
+                "maxaz": 360,
+                "minel": 0,
+                "maxel": 90,
+                "parkaz": 180,
+                "parkel": 15,
+            },
+        )
+
+        rotator_id = add_result["data"]["id"]
+        edit_result = await edit_rotator(
+            db_session,
+            {
+                "id": rotator_id,
+                "parkaz": None,
+                "parkel": None,
+            },
+        )
+
+        assert edit_result["success"] is True
+        assert edit_result["data"]["parkaz"] is None
+        assert edit_result["data"]["parkel"] is None
 
     async def test_delete_rotators_success(self, db_session):
         """Test successful rotator deletion."""

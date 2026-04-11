@@ -17,6 +17,8 @@
 import asyncio
 import logging
 
+from common.audio_queue_config import get_audio_queue_config
+from handlers.entities.filebrowser import emit_file_browser_state
 from pipeline.managers.consumerbase import ConsumerManager
 
 
@@ -30,6 +32,7 @@ class AudioRecorderManager(ConsumerManager):
         super().__init__(processes)
         self.logger = logging.getLogger("audio-recorder-manager")
         self.sio = sio  # Socket.IO instance for emitting notifications
+        self.audio_cfg = get_audio_queue_config()
 
     def start_audio_recorder(self, sdr_id, session_id, vfo_number, recorder_class, **kwargs):
         """
@@ -86,7 +89,9 @@ class AudioRecorderManager(ConsumerManager):
         try:
             # Subscribe to the audio broadcaster to get a dedicated queue
             subscription_key = f"audio_recorder:{session_id}:vfo{vfo_number}"
-            audio_queue = audio_broadcaster.subscribe(subscription_key, maxsize=20)
+            audio_queue = audio_broadcaster.subscribe(
+                subscription_key, maxsize=self.audio_cfg.audio_recorder_queue_size
+            )
 
             # Add vfo_number to kwargs
             kwargs["vfo_number"] = vfo_number
@@ -178,8 +183,6 @@ class AudioRecorderManager(ConsumerManager):
             recording_path: Path to the audio recording file (without extension)
         """
         try:
-            from handlers.entities.filebrowser import emit_file_browser_state
-
             await emit_file_browser_state(
                 self.sio,
                 {

@@ -64,7 +64,10 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from common.logger import logger
+from handlers.entities.filebrowser import emit_file_browser_state
+from hardware.soapysdrbrowser import update_discovered_servers
 from tlesync.state import sync_state_manager
+from tracker.runner import get_tracker_manager
 
 
 class TaskStatus(Enum):
@@ -336,8 +339,6 @@ class BackgroundTaskManager:
             # Special handling for waterfall generation tasks
             if task_info.name.startswith("Waterfall:") and task_info.status == TaskStatus.COMPLETED:
                 try:
-                    from handlers.entities.filebrowser import emit_file_browser_state
-
                     # Extract recording path from task name (format: "Waterfall: filename")
                     # We need the full path though, which should be in the task's args
                     # For now, just emit a generic waterfall-generated event
@@ -355,8 +356,6 @@ class BackgroundTaskManager:
             # Special handling for SatDump processing tasks
             if task_info.name.startswith("SatDump:") and task_info.status == TaskStatus.COMPLETED:
                 try:
-                    from handlers.entities.filebrowser import emit_file_browser_state
-
                     await emit_file_browser_state(
                         self.sio,
                         {
@@ -464,8 +463,6 @@ class BackgroundTaskManager:
 
             # Update the main process's discovered_servers
             try:
-                from hardware.soapysdrbrowser import update_discovered_servers
-
                 update_discovered_servers(servers_data)
                 logger.info("Updated main process discovered_servers")
 
@@ -530,8 +527,6 @@ class BackgroundTaskManager:
             ):
                 task_info.tracker_notified = True
                 try:
-                    from tracker.runner import get_tracker_manager
-
                     manager = get_tracker_manager()
 
                     satellite_norad_ids = {

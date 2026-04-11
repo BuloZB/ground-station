@@ -25,26 +25,26 @@ import { useTranslation } from 'react-i18next';
 import { removeTask, stopBackgroundTask } from './tasks-slice.jsx';
 import {
     Box,
+    CircularProgress,
     IconButton,
     Popover,
     Typography,
     List,
     ListItem,
-    ListItemText,
     Chip,
     LinearProgress,
     Button,
-    Divider,
     Stack,
     Paper,
     Tooltip,
 } from "@mui/material";
-import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
+import PendingActionsIcon from '@mui/icons-material/PendingActions';
 import StopIcon from '@mui/icons-material/Stop';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorIcon from '@mui/icons-material/Error';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import CancelIcon from '@mui/icons-material/Cancel';
-import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import PlayDisabledIcon from '@mui/icons-material/PlayDisabled';
 
 // Terminal output component with auto-scroll
@@ -345,7 +345,21 @@ const BackgroundTasksPopover = () => {
         if (hasFailedTasks) return 'error.main';
         if (runningTaskIds.length > 0) return 'info.main';
         if (hasStoppedTasks) return 'warning.main';
+        if (completedTaskIds.length > 0) return 'success.main';
         return 'text.secondary';
+    };
+
+    const renderStatusIcon = () => {
+        if (hasFailedTasks) {
+            return <ErrorOutlineIcon />;
+        }
+        if (runningTaskIds.length > 0) {
+            return <PendingActionsIcon />;
+        }
+        if (completedTaskIds.length > 0) {
+            return <CheckCircleOutlineIcon />;
+        }
+        return <PendingActionsIcon />;
     };
 
     const getTooltip = () => {
@@ -384,7 +398,7 @@ const BackgroundTasksPopover = () => {
     const getStatusChip = (status) => {
         switch (status) {
             case 'running':
-                return <Chip label="Running" size="small" color="info" icon={<PlaylistPlayIcon />} />;
+                return <Chip label="Running" size="small" color="info" icon={<PendingActionsIcon />} />;
             case 'completed':
                 return <Chip label="Completed" size="small" color="success" icon={<CheckCircleIcon />} />;
             case 'failed':
@@ -567,7 +581,18 @@ const BackgroundTasksPopover = () => {
                         display: hideIcon ? 'none' : 'inline-flex',
                     }}
                 >
-                    <PlaylistPlayIcon />
+                    {runningTaskIds.length > 0 && (
+                        <CircularProgress
+                            size={28}
+                            thickness={5}
+                            color="inherit"
+                            sx={{
+                                position: 'absolute',
+                                opacity: 0.7,
+                            }}
+                        />
+                    )}
+                    {renderStatusIcon()}
                     {runningTaskIds.length > 0 && (
                         <Box
                             sx={{

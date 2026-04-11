@@ -26,7 +26,7 @@ class VFOState:
     transcription_translate_to: str = (
         "none"  # Target language for translation (none = no translation)
     )
-    decoder: str = "none"  # Decoder type: none, sstv, afsk, gmsk, gfsk, bpsk, lora, morse
+    decoder: str = "none"  # Decoder type: none, sstv, afsk, gmsk, gfsk, bpsk, morse
     locked_transmitter_id: str = "none"
     parameters_enabled: bool = True  # Enable/disable custom decoder parameters
 
@@ -348,7 +348,7 @@ class VFOManager:
             center_freq: Center frequency in Hz
             bandwidth: Bandwidth in Hz
             modulation: Modulation type (FM, AM, SSB, etc.)
-            decoder: Decoder type (afsk, bpsk, gmsk, lora, sstv, morse, none)
+            decoder: Decoder type (afsk, bpsk, gmsk, sstv, morse, none)
             locked_transmitter_id: Transmitter ID for doppler tracking (default: "none")
             squelch: Squelch level in dB (default: -150, wide open)
             volume: Audio volume 0-100 (default: 50)

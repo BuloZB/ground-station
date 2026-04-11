@@ -29,7 +29,7 @@ import {
     Fade,
 } from '@mui/material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
-import {useDispatch, useSelector} from "react-redux";
+import { shallowEqual, useDispatch, useSelector } from "react-redux";
 import { AutoScaleOnceIcon, AutoDBIcon } from '../common/custom-icons.jsx';
 import {
     getClassNamesBasedOnGridEditing,
@@ -194,7 +194,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         waterFallCanvasWidth,
         waterFallCanvasHeight,
         bandScopeHeight,
-        bandscopeTopPadding = 0,
+        bandscopeTopPadding,
         frequencyScaleHeight,
         selectedSDRId,
         startStreamingLoading,
@@ -210,18 +210,66 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         waterFallScaleX,
         waterFallPositionX,
         sdrSettingsById,
-    } = useSelector((state) => state.waterfall);
+    } = useSelector(
+        (state) => ({
+            colorMap: state.waterfall.colorMap,
+            waterfallRendererMode: state.waterfall.waterfallRendererMode,
+            colorMaps: state.waterfall.colorMaps,
+            dbRange: state.waterfall.dbRange,
+            fftSizeOptions: state.waterfall.fftSizeOptions,
+            fftSize: state.waterfall.fftSize,
+            gain: state.waterfall.gain,
+            sampleRate: state.waterfall.sampleRate,
+            centerFrequency: state.waterfall.centerFrequency,
+            errorMessage: state.waterfall.errorMessage,
+            errorDialogOpen: state.waterfall.errorDialogOpen,
+            isStreaming: state.waterfall.isStreaming,
+            isConnected: state.waterfall.isConnected,
+            targetFPS: state.waterfall.targetFPS,
+            isPlaying: state.waterfall.isPlaying,
+            autoDBRange: state.waterfall.autoDBRange,
+            gridEditable: state.waterfall.gridEditable,
+            fftWindow: state.waterfall.fftWindow,
+            fftAveraging: state.waterfall.fftAveraging,
+            dBRange: state.waterfall.dBRange,
+            waterFallVisualWidth: state.waterfall.waterFallVisualWidth,
+            waterFallCanvasWidth: state.waterfall.waterFallCanvasWidth,
+            waterFallCanvasHeight: state.waterfall.waterFallCanvasHeight,
+            bandScopeHeight: state.waterfall.bandScopeHeight,
+            bandscopeTopPadding: state.waterfall.bandscopeTopPadding ?? 0,
+            frequencyScaleHeight: state.waterfall.frequencyScaleHeight,
+            selectedSDRId: state.waterfall.selectedSDRId,
+            startStreamingLoading: state.waterfall.startStreamingLoading,
+            gettingSDRParameters: state.waterfall.gettingSDRParameters,
+            showRightSideWaterFallAccessories: state.waterfall.showRightSideWaterFallAccessories,
+            showLeftSideWaterFallAccessories: state.waterfall.showLeftSideWaterFallAccessories,
+            selectedAntenna: state.waterfall.selectedAntenna,
+            selectedOffsetValue: state.waterfall.selectedOffsetValue,
+            fftDataOverflow: state.waterfall.fftDataOverflow,
+            fftDataOverflowLimit: state.waterfall.fftDataOverflowLimit,
+            showRotatorDottedLines: state.waterfall.showRotatorDottedLines,
+            autoScalePreset: state.waterfall.autoScalePreset,
+            waterFallScaleX: state.waterfall.waterFallScaleX,
+            waterFallPositionX: state.waterfall.waterFallPositionX,
+            sdrSettingsById: state.waterfall.sdrSettingsById,
+        }),
+        shallowEqual
+    );
 
     const tunerAgc = sdrSettingsById?.[selectedSDRId]?.draft?.tunerAgc ?? false;
     const rtlAgc = sdrSettingsById?.[selectedSDRId]?.draft?.rtlAgc ?? false;
     const soapyAgc = sdrSettingsById?.[selectedSDRId]?.draft?.soapyAgc ?? false;
 
     const {
-        vfoMarkers,
-        maxVFOMarkers,
         vfoColors,
         vfoActive,
-    } = useSelector((state) => state.vfo);
+    } = useSelector(
+        (state) => ({
+            vfoColors: state.vfo.vfoColors,
+            vfoActive: state.vfo.vfoActive,
+        }),
+        shallowEqual
+    );
 
     // Get target satellite name from Redux
     const targetSatelliteName = useSelector((state) => state.targetSatTrack?.satelliteData?.details?.name || '');
@@ -769,21 +817,31 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         };
     }, [waterfallRendererMode, isStreaming, autoDBRange]);
 
-    const toggleLeftSide = () => dispatch(setShowLeftSideWaterFallAccessories(!showLeftSideWaterFallAccessories));
-    const toggleRightSide = () => dispatch(setShowRightSideWaterFallAccessories(!showRightSideWaterFallAccessories));
-    const toggleAutoRange = () => dispatch(setAutoDBRange(!autoDBRange));
-    const autoScale = () => {
+    const toggleLeftSide = useCallback(() => {
+        dispatch(setShowLeftSideWaterFallAccessories(!showLeftSideWaterFallAccessories));
+    }, [dispatch, showLeftSideWaterFallAccessories]);
+
+    const toggleRightSide = useCallback(() => {
+        dispatch(setShowRightSideWaterFallAccessories(!showRightSideWaterFallAccessories));
+    }, [dispatch, showRightSideWaterFallAccessories]);
+
+    const toggleAutoRange = useCallback(() => {
+        dispatch(setAutoDBRange(!autoDBRange));
+    }, [dispatch, autoDBRange]);
+
+    const autoScale = useCallback(() => {
         if (workerRef.current) {
             workerRef.current.postMessage({ cmd: 'autoScaleDbRange' });
         }
-    };
-    const handleToggleVfo = (index) => {
+    }, []);
+
+    const handleToggleVfo = useCallback((index) => {
         if (vfoActive[index]) {
             dispatch(setVfoInactive(index));
         } else {
             dispatch(setVfoActive(index));
         }
-    };
+    }, [dispatch, vfoActive]);
 
     return (
         <div ref={mainWaterFallContainer}>

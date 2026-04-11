@@ -1,9 +1,9 @@
 import os
 import threading
 import time
-from typing import Dict
 
 from common.logger import logger
+from db import AsyncSessionLocal
 
 # Import all entity modules to register their handlers
 from handlers.entities import (
@@ -28,14 +28,18 @@ from handlers.entities.databasebackup import (
 )
 from handlers.entities.filebrowser import filebrowser_request_routing
 from handlers.entities.sdr import sdr_data_request_routing
+from handlers.entities.transmitterimport import (
+    import_gr_satellites_transmitters,
+    import_satdump_transmitters,
+)
 from handlers.routing import dispatch_request, handler_registry
 from pipeline.orchestration.processmanager import process_manager
+from server import runtimestate
 from server.shutdown import cleanup_everything
 from session.service import session_service
+from session.socketregistry import SESSIONS
 from session.tracker import session_tracker
-
-# hold a list of sessions
-SESSIONS: Dict[str, Dict] = {}
+from tasks.registry import get_task
 
 
 def _register_all_handlers():
@@ -64,8 +68,6 @@ def register_socketio_handlers(sio):
 
     @sio.on("connect")
     async def connect(sid, environ, auth=None):
-        from server.startup import background_task_manager
-
         # Import here to avoid circular dependency
         # Prefer reverse-proxy header if present, else fall back to REMOTE_ADDR
         xff = environ.get("HTTP_X_FORWARDED_FOR") or environ.get("X-Forwarded-For")
@@ -97,8 +99,8 @@ def register_socketio_handlers(sio):
             logger.debug("Failed to set session metadata in tracker", exc_info=True)
 
         # Send current running tasks to newly connected client
-        if background_task_manager:
-            running_tasks = background_task_manager.get_running_tasks()
+        if runtimestate.background_task_manager:
+            running_tasks = runtimestate.background_task_manager.get_running_tasks()
             if running_tasks:
                 await sio.emit("background_task:list", {"tasks": running_tasks}, to=sid)
 
@@ -227,11 +229,6 @@ def register_socketio_handlers(sio):
     @sio.on("transmitter_import")
     async def handle_transmitter_import(sid, data=None):
         """Handle transmitter imports from external sources."""
-        from db import AsyncSessionLocal
-        from handlers.entities.transmitterimport import (
-            import_gr_satellites_transmitters,
-            import_satdump_transmitters,
-        )
 
         logger.info(
             f"Transmitter import event from: {sid}, source: {data.get('source') if data else None}"
@@ -256,12 +253,10 @@ def register_socketio_handlers(sio):
     @sio.on("background_task:start")
     async def handle_background_task_start(sid, data=None):
         """Handle request to start a background task."""
-        from server.startup import background_task_manager
-        from tasks.registry import get_task
 
         logger.info(f"Background task start request from: {sid}, data: {data}")
 
-        if not background_task_manager:
+        if not runtimestate.background_task_manager:
             return {"success": False, "error": "Background task manager not initialized"}
 
         if not data or "task_name" not in data:
@@ -281,7 +276,7 @@ def register_socketio_handlers(sio):
                 return {"success": False, "error": f"Unknown task: {task_name}"}
 
             # Start the task
-            task_id = await background_task_manager.start_task(
+            task_id = await runtimestate.background_task_manager.start_task(
                 func=task_func, args=args, kwargs=kwargs, name=name, task_id=task_id
             )
 
@@ -294,11 +289,9 @@ def register_socketio_handlers(sio):
     @sio.on("background_task:stop")
     async def handle_background_task_stop(sid, data=None):
         """Handle request to stop a background task."""
-        from server.startup import background_task_manager
-
         logger.info(f"Background task stop request from: {sid}, data: {data}")
 
-        if not background_task_manager:
+        if not runtimestate.background_task_manager:
             return {"success": False, "error": "Background task manager not initialized"}
 
         if not data or "task_id" not in data:
@@ -309,7 +302,7 @@ def register_socketio_handlers(sio):
             timeout = data.get("timeout", 5.0)
 
             # Stop the task
-            stopped = await background_task_manager.stop_task(task_id, timeout=timeout)
+            stopped = await runtimestate.background_task_manager.stop_task(task_id, timeout=timeout)
 
             if stopped:
                 return {"success": True, "task_id": task_id}
@@ -323,11 +316,9 @@ def register_socketio_handlers(sio):
     @sio.on("background_task:get")
     async def handle_background_task_get(sid, data=None):
         """Handle request to get information about a background task."""
-        from server.startup import background_task_manager
-
         logger.debug(f"Background task get request from: {sid}, data: {data}")
 
-        if not background_task_manager:
+        if not runtimestate.background_task_manager:
             return {"success": False, "error": "Background task manager not initialized"}
 
         if not data or "task_id" not in data:
@@ -335,7 +326,7 @@ def register_socketio_handlers(sio):
 
         try:
             task_id = data["task_id"]
-            task_info = background_task_manager.get_task(task_id)
+            task_info = runtimestate.background_task_manager.get_task(task_id)
 
             if task_info:
                 return {"success": True, "task": task_info}
@@ -349,20 +340,18 @@ def register_socketio_handlers(sio):
     @sio.on("background_task:list")
     async def handle_background_task_list(sid, data=None):
         """Handle request to list all background tasks."""
-        from server.startup import background_task_manager
-
         logger.debug(f"Background task list request from: {sid}")
 
-        if not background_task_manager:
+        if not runtimestate.background_task_manager:
             return {"success": False, "error": "Background task manager not initialized"}
 
         try:
             only_running = data.get("only_running", False) if data else False
 
             if only_running:
-                tasks = background_task_manager.get_running_tasks()
+                tasks = runtimestate.background_task_manager.get_running_tasks()
             else:
-                tasks = background_task_manager.get_all_tasks()
+                tasks = runtimestate.background_task_manager.get_all_tasks()
 
             return {"success": True, "tasks": tasks}
 

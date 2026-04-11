@@ -27,6 +27,14 @@ from db.models import Cameras, Rigs, Rotators, SDRs
 VALID_AZIMUTH_MODES = {"0_360", "-180_180"}
 
 
+def _normalize_optional_float(value):
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    return float(value)
+
+
 async def fetch_rotators(
     session: AsyncSession, rotator_id: Optional[Union[uuid.UUID, str]] = None
 ) -> dict:
@@ -62,6 +70,11 @@ async def add_rotator(session: AsyncSession, data: dict) -> dict:
     try:
         azimuth_mode = data.get("azimuth_mode", "0_360")
         assert azimuth_mode in VALID_AZIMUTH_MODES, "azimuth_mode must be 0_360 or -180_180"
+        parkaz = _normalize_optional_float(data.get("parkaz"))
+        parkel = _normalize_optional_float(data.get("parkel"))
+        assert (parkaz is None) == (
+            parkel is None
+        ), "parkaz and parkel must either both be set or both be null"
 
         new_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
@@ -77,6 +90,8 @@ async def add_rotator(session: AsyncSession, data: dict) -> dict:
                 azimuth_mode=azimuth_mode,
                 minel=data["minel"],
                 maxel=data["maxel"],
+                parkaz=parkaz,
+                parkel=parkel,
                 aztolerance=data.get("aztolerance", 2.0),
                 eltolerance=data.get("eltolerance", 2.0),
                 added=now,
@@ -103,18 +118,22 @@ async def edit_rotator(session: AsyncSession, data: dict) -> dict:
     """
     try:
         # Extract rotator_id from data
-        rotator_id = data.pop("id", None)
-        rotator_id = uuid.UUID(rotator_id)
-
-        if not rotator_id:
+        rotator_id_raw = data.pop("id", None)
+        if not rotator_id_raw:
             raise Exception("id is required.")
+        rotator_id = uuid.UUID(rotator_id_raw)
 
         if "azimuth_mode" in data:
             azimuth_mode = data["azimuth_mode"]
             assert azimuth_mode in VALID_AZIMUTH_MODES, "azimuth_mode must be 0_360 or -180_180"
 
-        del data["updated"]
-        del data["added"]
+        if "parkaz" in data:
+            data["parkaz"] = _normalize_optional_float(data.get("parkaz"))
+        if "parkel" in data:
+            data["parkel"] = _normalize_optional_float(data.get("parkel"))
+
+        data.pop("updated", None)
+        data.pop("added", None)
 
         # Confirm the rotator exists
         stmt = select(Rotators).filter(Rotators.id == rotator_id)
@@ -122,6 +141,12 @@ async def edit_rotator(session: AsyncSession, data: dict) -> dict:
         rotator = result.scalar_one_or_none()
         if not rotator:
             return {"success": False, "error": f"Rotator with id {rotator_id} not found."}
+
+        effective_parkaz = data["parkaz"] if "parkaz" in data else rotator.parkaz
+        effective_parkel = data["parkel"] if "parkel" in data else rotator.parkel
+        assert (effective_parkaz is None) == (
+            effective_parkel is None
+        ), "parkaz and parkel must either both be set or both be null"
 
         # Add updated timestamp
         data["updated"] = datetime.now(timezone.utc)

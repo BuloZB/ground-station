@@ -22,7 +22,17 @@ import * as React from 'react';
 import Box from '@mui/material/Box';
 import {DataGrid, gridClasses} from "@mui/x-data-grid";
 import Stack from "@mui/material/Stack";
-import {Alert, AlertTitle, Button, InputAdornment, MenuItem, TextField, Typography} from "@mui/material";
+import {
+    Alert,
+    AlertTitle,
+    Button,
+    Checkbox,
+    FormControlLabel,
+    InputAdornment,
+    MenuItem,
+    TextField,
+    Typography
+} from "@mui/material";
 import {useEffect, useMemo, useState} from "react";
 import { useTranslation } from 'react-i18next';
 import DialogTitle from "@mui/material/DialogTitle";
@@ -54,6 +64,7 @@ export default function AntennaRotatorTable() {
     const [selected, setSelected] = useState([]);
     const [pageSize, setPageSize] = useState(10);
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [parkPositionEnabled, setParkPositionEnabled] = useState(false);
     const { t } = useTranslation('hardware');
     const {
         loading,
@@ -69,6 +80,9 @@ export default function AntennaRotatorTable() {
     const requiresDeleteConfirmationText = selected.length > 1;
     const canConfirmDelete = !requiresDeleteConfirmationText || deleteConfirmText.trim() === 'DELETE';
     const formatDegrees = (value) => (value === null || value === undefined || value === '' ? '' : `${value}°`);
+    const formatParkDegrees = (value) =>
+        (value === null || value === undefined || value === '' ? '-' : `${value}°`);
+    const isEmptyValue = (value) => value === '' || value === null || value === undefined;
 
     const columns = [
         {field: 'name', headerName: t('rotator.name'), flex: 1, minWidth: 150},
@@ -128,6 +142,22 @@ export default function AntennaRotatorTable() {
             valueFormatter: (value) => formatDegrees(value)
         },
         {
+            field: 'parkaz',
+            headerName: t('rotator.park_az'),
+            type: 'number',
+            flex: 1,
+            minWidth: 100,
+            valueFormatter: (value) => formatParkDegrees(value)
+        },
+        {
+            field: 'parkel',
+            headerName: t('rotator.park_el'),
+            type: 'number',
+            flex: 1,
+            minWidth: 100,
+            valueFormatter: (value) => formatParkDegrees(value)
+        },
+        {
             field: 'aztolerance',
             headerName: t('rotator.az_tolerance'),
             type: 'number',
@@ -157,8 +187,28 @@ export default function AntennaRotatorTable() {
         dispatch(setFormValues({...formValues, [name]: value}));
     };
 
+    const toOptionalNumber = (value) => {
+        if (value === '' || value === null || value === undefined) {
+            return null;
+        }
+        return Number(value);
+    };
+
+    const preparePayload = () => ({
+        ...formValues,
+        port: Number(formValues.port),
+        minaz: Number(formValues.minaz),
+        maxaz: Number(formValues.maxaz),
+        minel: Number(formValues.minel),
+        maxel: Number(formValues.maxel),
+        parkaz: toOptionalNumber(formValues.parkaz),
+        parkel: toOptionalNumber(formValues.parkel),
+        aztolerance: Number(formValues.aztolerance),
+        eltolerance: Number(formValues.eltolerance),
+    });
+
     const handleSubmit = () => {
-        dispatch(submitOrEditRotator({socket, formValues}))
+        dispatch(submitOrEditRotator({socket, formValues: preparePayload()}))
             .unwrap()
             .then(() => {
                 toast.success(t('rotator.saved_success'));
@@ -177,7 +227,6 @@ export default function AntennaRotatorTable() {
     } else if (Number(formValues.port) <= 0 || Number(formValues.port) > 65535) {
         validationErrors.port = t('shared.port_range');
     }
-    const isEmptyValue = (value) => value === '' || value === null || value === undefined;
     if (isEmptyValue(formValues.minaz)) {
         validationErrors.minaz = t('shared.required');
     } else if (Number.isNaN(Number(formValues.minaz))) {
@@ -213,6 +262,16 @@ export default function AntennaRotatorTable() {
         validationErrors.minel = t('rotator.validation.min_el_lte_max_el');
         validationErrors.maxel = t('rotator.validation.min_el_lte_max_el');
     }
+    if (!isEmptyValue(formValues.parkaz) && Number.isNaN(Number(formValues.parkaz))) {
+        validationErrors.parkaz = t('shared.must_be_number');
+    }
+    if (!isEmptyValue(formValues.parkel) && Number.isNaN(Number(formValues.parkel))) {
+        validationErrors.parkel = t('shared.must_be_number');
+    }
+    if (isEmptyValue(formValues.parkaz) !== isEmptyValue(formValues.parkel)) {
+        validationErrors.parkaz = t('rotator.validation.park_both_or_none');
+        validationErrors.parkel = t('rotator.validation.park_both_or_none');
+    }
     if (isEmptyValue(formValues.aztolerance)) {
         validationErrors.aztolerance = t('shared.required');
     } else if (Number.isNaN(Number(formValues.aztolerance))) {
@@ -228,6 +287,12 @@ export default function AntennaRotatorTable() {
         validationErrors.eltolerance = t('shared.must_be_gte_zero');
     }
     const hasValidationErrors = Object.keys(validationErrors).length > 0;
+
+    useEffect(() => {
+        if (!openAddDialog) return;
+        const hasParkValues = !isEmptyValue(formValues.parkaz) || !isEmptyValue(formValues.parkel);
+        setParkPositionEnabled(hasParkValues);
+    }, [openAddDialog]);
 
     const handleDelete = () => {
         dispatch(deleteRotators({socket, selectedIds: selected}))
@@ -527,6 +592,50 @@ export default function AntennaRotatorTable() {
                                                 </InputAdornment>
                                             )
                                         }}
+                                    />
+                                    <Alert severity="warning" sx={{ mt: 1 }}>
+                                        {t('rotator.park_override_warning')}
+                                    </Alert>
+                                    <FormControlLabel
+                                        control={
+                                            <Checkbox
+                                                checked={parkPositionEnabled}
+                                                onChange={(event) => {
+                                                    const enabled = event.target.checked;
+                                                    setParkPositionEnabled(enabled);
+                                                    if (!enabled) {
+                                                        dispatch(setFormValues({ parkaz: null, parkel: null }));
+                                                    }
+                                                }}
+                                            />
+                                        }
+                                        label={t('rotator.enable_park_override')}
+                                    />
+                                    <TextField
+                                        name="parkaz"
+                                        label={t('rotator.park_az')}
+                                        type="number"
+                                        fullWidth
+                                        size="small"
+                                        onChange={handleChange}
+                                        value={formValues.parkaz ?? ''}
+                                        error={Boolean(validationErrors.parkaz)}
+                                        helperText={validationErrors.parkaz || t('rotator.park_position_helper')}
+                                        disabled={!parkPositionEnabled}
+                                        InputProps={{ endAdornment: <InputAdornment position="end">°</InputAdornment> }}
+                                    />
+                                    <TextField
+                                        name="parkel"
+                                        label={t('rotator.park_el')}
+                                        type="number"
+                                        fullWidth
+                                        size="small"
+                                        onChange={handleChange}
+                                        value={formValues.parkel ?? ''}
+                                        error={Boolean(validationErrors.parkel)}
+                                        helperText={validationErrors.parkel || t('rotator.park_position_helper')}
+                                        disabled={!parkPositionEnabled}
+                                        InputProps={{ endAdornment: <InputAdornment position="end">°</InputAdornment> }}
                                     />
                                 </Stack>
                             </DialogContent>

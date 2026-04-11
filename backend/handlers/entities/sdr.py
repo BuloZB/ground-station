@@ -25,6 +25,7 @@ from demodulators.fmdemodulator import FMDemodulator
 from demodulators.fmstereodemodulator import FMStereoDemodulator
 from demodulators.ssbdemodulator import SSBDemodulator
 from handlers.entities.filebrowser import emit_file_browser_state
+from handlers.entities.transcriptionhelpers import fetch_transmitter_and_satellite
 from pipeline.orchestration.processmanager import process_manager
 from server.audiorecorder import start_audio_recording, stop_audio_recording
 from server.recorder import start_recording, stop_recording
@@ -628,6 +629,29 @@ def _auto_start_transcription(sdr_id, session_id, vfo_number, vfo_state, logger)
             logger.debug("Transcription manager not initialized, skipping auto-start")
             return
 
+        # Avoid repeatedly re-running auto-start flow only when worker is already alive
+        # AND settings are unchanged. If settings changed (language/provider/translation),
+        # allow start_transcription() to perform the restart.
+        desired_provider = getattr(vfo_state, "transcription_provider", "gemini") or "gemini"
+        desired_language = vfo_state.transcription_language or "auto"
+        desired_translate_to = vfo_state.transcription_translate_to or "none"
+
+        existing_worker = transcription_manager.get_active_transcription_consumer(
+            sdr_id, session_id, vfo_number
+        )
+        if (
+            existing_worker
+            and existing_worker.is_alive()
+            and getattr(existing_worker, "provider_name", None) == desired_provider
+            and getattr(existing_worker, "language", None) == desired_language
+            and getattr(existing_worker, "translate_to", None) == desired_translate_to
+        ):
+            logger.debug(
+                f"Transcription already active for session {session_id} VFO {vfo_number} "
+                f"with matching settings, skipping auto-start"
+            )
+            return
+
         # Fetch API keys from preferences
         async def fetch_and_start():
             async with AsyncSessionLocal() as dbsession:
@@ -682,18 +706,15 @@ def _auto_start_transcription(sdr_id, session_id, vfo_number, vfo_state, logger)
                     return
 
                 # Get language settings from VFO state
-                language = vfo_state.transcription_language or "auto"
-                translate_to = vfo_state.transcription_translate_to or "none"
+                language = desired_language
+                translate_to = desired_translate_to
 
                 # Fetch transmitter and satellite info
                 satellite_dict = None
                 transmitter_dict = None
 
                 if vfo_state.locked_transmitter_id and vfo_state.locked_transmitter_id != "none":
-                    # Import helper from vfo.py
-                    from handlers.entities.vfo import _fetch_transmitter_and_satellite
-
-                    transmitter_dict, satellite_dict = await _fetch_transmitter_and_satellite(
+                    transmitter_dict, satellite_dict = await fetch_transmitter_and_satellite(
                         vfo_state.locked_transmitter_id
                     )
 
@@ -757,10 +778,32 @@ def handle_vfo_demodulator_state(vfo_state, session_id, logger):
 
         # If demodulator started and transcription is enabled, auto-start transcription
         if demod_started and vfo_state.transcription_enabled:
-            logger.info(
-                f"Auto-starting transcription for VFO {vfo_number} (transcription_enabled=True)"
-            )
-            _auto_start_transcription(sdr_id, session_id, vfo_number, vfo_state, logger)
+            transcription_manager = process_manager.transcription_manager
+            existing_worker = None
+            desired_provider = getattr(vfo_state, "transcription_provider", "gemini") or "gemini"
+            desired_language = vfo_state.transcription_language or "auto"
+            desired_translate_to = vfo_state.transcription_translate_to or "none"
+            if transcription_manager:
+                existing_worker = transcription_manager.get_active_transcription_consumer(
+                    sdr_id, session_id, vfo_number
+                )
+
+            if (
+                existing_worker
+                and existing_worker.is_alive()
+                and getattr(existing_worker, "provider_name", None) == desired_provider
+                and getattr(existing_worker, "language", None) == desired_language
+                and getattr(existing_worker, "translate_to", None) == desired_translate_to
+            ):
+                logger.debug(
+                    f"Transcription worker already active for VFO {vfo_number} with matching settings, "
+                    f"skipping auto-start trigger"
+                )
+            else:
+                logger.info(
+                    f"Auto-starting transcription for VFO {vfo_number} (transcription_enabled=True)"
+                )
+                _auto_start_transcription(sdr_id, session_id, vfo_number, vfo_state, logger)
     else:
         # Stop demodulator for this specific VFO
         process_manager.stop_demodulator(sdr_id, session_id, vfo_number)

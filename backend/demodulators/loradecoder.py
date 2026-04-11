@@ -23,6 +23,7 @@ import queue
 import threading
 import time
 from enum import Enum
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import numpy as np
@@ -924,8 +925,6 @@ class LoRaDecoder(BaseDecoderProcess):
         """Get cached VFO state for metadata purposes."""
         # Create a simple namespace object from cached dict for backward compatibility
         if self.cached_vfo_state:
-            from types import SimpleNamespace
-
             return SimpleNamespace(**self.cached_vfo_state)
         return None
 

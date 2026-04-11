@@ -55,6 +55,7 @@ import multiprocessing
 import os
 import queue
 import time
+import traceback
 from enum import Enum
 from typing import Any, Dict
 
@@ -153,8 +154,6 @@ class AFSKMessageHandler(gr.basic_block):
 
         except Exception as e:
             logger.error(f"Error handling message: {e}")
-            import traceback
-
             traceback.print_exc()
 
 
@@ -325,8 +324,6 @@ class AFSKFlowgraph(gr.top_block):
 
         except Exception as e:
             logger.error(f"Error processing buffer: {e}")
-            import traceback
-
             traceback.print_exc()
             # Clear buffer on error to avoid repeated failures
             with self.sample_lock:

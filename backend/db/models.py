@@ -82,7 +82,9 @@ class JsonField(TypeDecorator):
         """
         When reading from DB, deserialize JSON string to Python object.
         """
-        if value is not None:
+        # Some dialects/DB drivers already return JSON columns as Python
+        # objects (dict/list). Only decode when we receive a JSON string.
+        if isinstance(value, (str, bytes, bytearray)):
             return json.loads(value)
         return value
 
@@ -237,6 +239,8 @@ class Rotators(Base):
     azimuth_mode = Column(String, nullable=False, default="0_360")
     minel = Column(Integer, nullable=False)
     maxel = Column(Integer, nullable=False)
+    parkaz = Column(Float, nullable=True)
+    parkel = Column(Float, nullable=True)
     aztolerance = Column(Float, nullable=False, default=2.0)
     eltolerance = Column(Float, nullable=False, default=2.0)
     added = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))

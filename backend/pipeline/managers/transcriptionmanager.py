@@ -19,6 +19,11 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+from audio.deepgramtranscriptionworker import DeepgramTranscriptionWorker
+from audio.geminitranscriptionworker import GeminiTranscriptionWorker
+from common.audio_queue_config import get_audio_queue_config
+from handlers.entities.filebrowser import emit_file_browser_state
+
 
 class TranscriptionManager:
     """
@@ -45,6 +50,7 @@ class TranscriptionManager:
         self.processes = processes
         self.sio = sio
         self.event_loop = event_loop
+        self.audio_cfg = get_audio_queue_config()
 
         # API keys for different providers
         self.gemini_api_key = None
@@ -228,13 +234,13 @@ class TranscriptionManager:
 
                 # Subscribe to the audio broadcaster
                 subscription_key = f"transcription:{session_id}_vfo{vfo_number}"
-                transcription_queue = audio_broadcaster.subscribe(subscription_key, maxsize=50)
+                transcription_queue = audio_broadcaster.subscribe(
+                    subscription_key, maxsize=self.audio_cfg.transcription_queue_size
+                )
 
                 # Create the appropriate worker based on provider
                 try:
                     if provider == "gemini":
-                        from audio.geminitranscriptionworker import GeminiTranscriptionWorker
-
                         transcription_worker = GeminiTranscriptionWorker(
                             transcription_queue=transcription_queue,
                             sio=self.sio,
@@ -248,8 +254,6 @@ class TranscriptionManager:
                             transmitter=transmitter,
                         )
                     elif provider == "deepgram":
-                        from audio.deepgramtranscriptionworker import DeepgramTranscriptionWorker
-
                         transcription_worker = DeepgramTranscriptionWorker(
                             transcription_queue=transcription_queue,
                             sio=self.sio,
@@ -409,8 +413,6 @@ class TranscriptionManager:
         Emit file browser state update for transcription started.
         """
         try:
-            from handlers.entities.filebrowser import emit_file_browser_state
-
             await emit_file_browser_state(
                 self.sio,
                 {
@@ -429,8 +431,6 @@ class TranscriptionManager:
             transcription_file_path: Path to the transcription file
         """
         try:
-            from handlers.entities.filebrowser import emit_file_browser_state
-
             await emit_file_browser_state(
                 self.sio,
                 {

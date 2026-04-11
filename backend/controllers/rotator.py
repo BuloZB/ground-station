@@ -257,10 +257,17 @@ class RotatorController:
     async def park(self, park_az=None, park_el=None) -> bool:
         """Park the rotator."""
         try:
-            self.logger.info("Parking rotator")
+            if (park_az is None) != (park_el is None):
+                raise ValueError("park_az and park_el must either both be set or both be null")
 
-            # Send park command
-            response = await self._send_command("K", waitforreply=False)
+            if park_az is not None and park_el is not None:
+                self.logger.info(
+                    "Parking rotator using configured target az=%s el=%s", park_az, park_el
+                )
+                response = await self._send_command(f"P {park_az} {park_el}")
+            else:
+                self.logger.info("Parking rotator using hardware-native park command")
+                response = await self._send_command("K", waitforreply=False)
 
             # Check response
             if response.startswith("RPRT"):

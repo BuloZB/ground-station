@@ -19,12 +19,11 @@
 
 
 import React, {useCallback, useEffect, useRef, useState, useImperativeHandle, forwardRef} from "react";
-import {useDispatch, useSelector} from "react-redux";
+import { shallowEqual, useDispatch, useSelector } from "react-redux";
 import {Box, IconButton, useTheme} from "@mui/material";
 import FrequencyScale from "./frequency-scale.jsx";
 import BookmarkCanvas from "./bookmarks-overlay.jsx";
 import {
-    setBookMarks,
     setWaterFallScaleX,
     setWaterFallPositionX
 } from "./waterfall-slice.jsx";
@@ -33,6 +32,7 @@ import FrequencyBandOverlay from './bandplan-overlay.jsx';
 import {useDopplerNeighbors} from '../../hooks/useDopplerNeighbors.jsx';
 
 const PLAYBACK_COUNTDOWN_UPDATE_MS = 250;
+const INTERACTION_IDLE_MS = 120;
 
 const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                                               bandscopeCanvasRef,
@@ -60,31 +60,39 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
     const lastPinchDistanceRef = useRef(0);
     const pinchCenterXRef = useRef(0);
     const persistTimerRef = useRef(null);
+    const bookmarkMeasureRafRef = useRef(null);
+    const interactionIdleTimerRef = useRef(null);
+    const interactionActiveRef = useRef(false);
     const dispatch = useDispatch();
 
     // Activate doppler neighbor calculation hook
     useDopplerNeighbors();
     const {
-        waterFallVisualWidth,
         waterFallCanvasWidth,
         waterFallCanvasHeight,
         bandScopeHeight,
-        bandscopeTopPadding = 0,
+        bandscopeTopPadding,
         waterFallScaleX,
         waterFallPositionX,
-        frequencyScaleHeight,
-        autoDBRange,
-        bookmarks,
         isRecording,
         isStreaming,
         selectedSDRId,
-    } = useSelector((state) => state.waterfall);
-
-    // Add state for bookmarks
-    const [visualContainerWidth, setVisualContainerWidth] = useState(waterFallCanvasWidth);
+    } = useSelector((state) => ({
+        waterFallCanvasWidth: state.waterfall.waterFallCanvasWidth,
+        waterFallCanvasHeight: state.waterfall.waterFallCanvasHeight,
+        bandScopeHeight: state.waterfall.bandScopeHeight,
+        bandscopeTopPadding: state.waterfall.bandscopeTopPadding ?? 0,
+        waterFallScaleX: state.waterfall.waterFallScaleX,
+        waterFallPositionX: state.waterfall.waterFallPositionX,
+        isRecording: state.waterfall.isRecording,
+        isStreaming: state.waterfall.isStreaming,
+        selectedSDRId: state.waterfall.selectedSDRId,
+    }), shallowEqual);
 
     // Track playback countdown for display
     const [playbackCountdown, setPlaybackCountdown] = useState(0);
+    const [bookmarkTransformTick, setBookmarkTransformTick] = useState(0);
+    const [isTransformInteracting, setIsTransformInteracting] = useState(false);
 
     // Update playback countdown from ref
     useEffect(() => {
@@ -151,28 +159,6 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
         applyTransform();
     }, []);
 
-    // Function to add a bookmark at a specific frequency
-    const addBookmark = useCallback((frequency, label, color = '#ffff00') => {
-        const newBookmark = {
-            id: Date.now().toString(),
-            frequency,
-            label: label || `${(frequency / 1e6).toFixed(3)} MHz`,
-            color
-        };
-
-        dispatch(setBookMarks([...bookmarks, newBookmark]));
-
-    }, []);
-
-    // Add a bookmark at the center frequency
-    const addCenterFrequencyBookmark = useCallback(() => {
-        addBookmark(
-            centerFrequency,
-            `Center ${(centerFrequency / 1e6).toFixed(3)} MHz`,
-            '#00ffff'
-        );
-    }, [addBookmark, centerFrequency]);
-
     // Handle clicks on bookmarks
     const handleBookmarkClick = useCallback((bookmark) => {
         // Example: You could show a dialog to edit or delete the bookmark
@@ -202,12 +188,41 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
 
     }, [handleResize]);
 
+    const notifyBookmarkTransform = useCallback(() => {
+        if (bookmarkMeasureRafRef.current !== null) {
+            return;
+        }
+
+        bookmarkMeasureRafRef.current = requestAnimationFrame(() => {
+            bookmarkMeasureRafRef.current = null;
+            setBookmarkTransformTick((value) => value + 1);
+        });
+    }, []);
+
+    const markTransformInteraction = useCallback(() => {
+        if (!interactionActiveRef.current) {
+            interactionActiveRef.current = true;
+            setIsTransformInteracting(true);
+        }
+
+        if (interactionIdleTimerRef.current) {
+            clearTimeout(interactionIdleTimerRef.current);
+        }
+
+        interactionIdleTimerRef.current = setTimeout(() => {
+            interactionIdleTimerRef.current = null;
+            interactionActiveRef.current = false;
+            setIsTransformInteracting(false);
+        }, INTERACTION_IDLE_MS);
+    }, []);
+
     // Apply a transform directly to a DOM element
     const applyTransform = useCallback(() => {
         if (containerRef.current) {
             containerRef.current.style.transform = `translateX(${positionXRef.current}px) scaleX(${scaleRef.current})`;
+            notifyBookmarkTransform();
         }
-    }, []);
+    }, [notifyBookmarkTransform]);
 
     // Debounced persist function
     const persistToRedux = useCallback(() => {
@@ -239,6 +254,14 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
             // Clear any pending persist operations
             if (persistTimerRef.current) {
                 clearTimeout(persistTimerRef.current);
+            }
+            if (bookmarkMeasureRafRef.current !== null) {
+                cancelAnimationFrame(bookmarkMeasureRafRef.current);
+                bookmarkMeasureRafRef.current = null;
+            }
+            if (interactionIdleTimerRef.current) {
+                clearTimeout(interactionIdleTimerRef.current);
+                interactionIdleTimerRef.current = null;
             }
         }
     }, []);
@@ -274,6 +297,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
         // Update refs
         scaleRef.current = newScale;
         positionXRef.current = newPositionX;
+        markTransformInteraction();
 
         // Apply the transform immediately
         applyTransform();
@@ -281,7 +305,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
         // Persist to Redux (debounced)
         persistToRedux();
 
-    }, [applyTransform, persistToRedux]);
+    }, [applyTransform, persistToRedux, markTransformInteraction]);
 
     // Panning functionality
     const panOnXAxisOnly = useCallback((deltaX) => {
@@ -301,10 +325,11 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
             maxPanLeft,
             Math.min(0, positionXRef.current + deltaX)
         );
+        markTransformInteraction();
 
         // Apply transform directly
         applyTransform();
-    }, [applyTransform]);
+    }, [applyTransform, markTransformInteraction]);
 
     // Reset to the default state
     const resetCustomTransform = useCallback(() => {
@@ -581,25 +606,30 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                             marginTop: `${bandscopeTopPadding}px`,
                         }}
                     />
-                    <BookmarkCanvas
-                        centerFrequency={centerFrequency}
-                        sampleRate={sampleRate}
-                        containerWidth={visualContainerWidth}
-                        height={bandScopeHeight + bandscopeTopPadding}
-                        topPadding={bandscopeTopPadding}
-                        onBookmarkClick={handleBookmarkClick}
-                    />
                     {/* Add the new FrequencyBandOverlay component */}
                     <FrequencyBandOverlay
                         centerFrequency={centerFrequency}
                         sampleRate={sampleRate}
-                        containerWidth={visualContainerWidth}
+                        containerWidth={waterFallCanvasWidth}
+                        transformTick={bookmarkTransformTick}
+                        interactionActive={isTransformInteracting}
                         height={bandScopeHeight + bandscopeTopPadding}
                         topPadding={bandscopeTopPadding}
                         bands={frequencyBands}
                         bandHeight={20}
                         zoomScale={scaleRef.current}
                         panOffset={positionXRef.current}
+                    />
+                    <BookmarkCanvas
+                        centerFrequency={centerFrequency}
+                        sampleRate={sampleRate}
+                        containerWidth={waterFallCanvasWidth}
+                        transformTick={bookmarkTransformTick}
+                        interactionActive={isTransformInteracting}
+                        height={bandScopeHeight + bandscopeTopPadding}
+                        bandOverlayHeight={20}
+                        topPadding={bandscopeTopPadding}
+                        onBookmarkClick={handleBookmarkClick}
                     />
                     <VFOMarkersContainer
                         centerFrequency={centerFrequency}
@@ -608,6 +638,8 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                         bandscopeHeight={bandScopeHeight}
                         bandscopeTopPadding={bandscopeTopPadding}
                         containerWidth={containerWidthRef.current}
+                        transformTick={bookmarkTransformTick}
+                        interactionActive={isTransformInteracting}
                         zoomScale={scaleRef.current}
                         currentPositionX={positionXRef.current}
                     />
@@ -615,8 +647,10 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
 
                 <FrequencyScale
                     centerFrequency={centerFrequency}
-                    containerWidth={visualContainerWidth}
+                    containerWidth={waterFallCanvasWidth}
                     sampleRate={sampleRate}
+                    transformTick={bookmarkTransformTick}
+                    interactionActive={isTransformInteracting}
                 />
 
                 {waterfallRendererMode === 'dom-tiles' ? (
