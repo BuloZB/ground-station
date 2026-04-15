@@ -9,6 +9,8 @@ from typing import Any, Dict
 import numpy as np
 import psutil
 
+from common.iqsamples import require_complex64
+
 # Configure logging for the worker process
 logger = logging.getLogger("uhd-worker")
 
@@ -480,6 +482,7 @@ def uhd_worker_process(
                     continue
 
                 samples = samples_buffer[:buffer_position]
+                samples = require_complex64(samples, source="uhd-worker")
 
                 # Stream IQ data to consumers (FFT processor, demodulators, etc.)
                 # Broadcast to both queues so FFT and demodulation can work independently

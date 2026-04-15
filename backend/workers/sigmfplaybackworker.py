@@ -24,6 +24,8 @@ from typing import Any, Dict
 import numpy as np
 import psutil
 
+from common.iqsamples import require_complex64
+
 # Configure logging for the worker process
 logger = logging.getLogger("sigmf-playback")
 SUPPORTED_DATATYPES = {"cf32_le", "ci16_le", "ci16", "ci8", "ci8_le", "cu8", "cu8_le"}
@@ -293,6 +295,7 @@ def sigmf_playback_worker_process(
 
                 # Convert bytes to complex64 samples
                 samples = parse_iq_samples(data, datatype)
+                samples = require_complex64(samples, source="sigmf-playback-worker")
                 samples_read = len(samples)
                 total_samples_read += samples_read
                 stats["samples_read"] += samples_read

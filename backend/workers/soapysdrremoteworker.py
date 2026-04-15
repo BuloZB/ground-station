@@ -23,6 +23,8 @@ import psutil
 import SoapySDR
 from SoapySDR import SOAPY_SDR_CF32, SOAPY_SDR_RX
 
+from common.iqsamples import require_complex64
+
 # Configure logging for the worker process
 logger = logging.getLogger("soapysdr-remote")
 
@@ -662,6 +664,9 @@ def soapysdr_remote_worker_process(
 
                 # We have enough samples to process
                 samples = samples_buffer[:buffer_position]
+
+                # Enforce pipeline contract: workers publish complex64 IQ samples.
+                samples = require_complex64(samples, source="soapysdr-remote-worker")
 
                 # Stream IQ data to consumers (FFT processor, demodulators, etc.)
                 # Broadcast to both queues so FFT and demodulation can work independently

@@ -23,6 +23,8 @@ from typing import Any, Dict
 import numpy as np
 import psutil
 
+from common.iqsamples import require_complex64
+
 # Suppress a very specific third-party warning emitted at import-time by pyrtlsdr
 # Context: pyrtlsdr (or its transitive imports) currently uses setuptools.pkg_resources,
 # which is deprecated and scheduled for removal. We keep Setuptools pinned (<81) to avoid
@@ -271,6 +273,9 @@ def rtlsdr_worker_process(
                 stats["samples_read"] += len(samples)
                 stats["last_activity"] = time.time()
 
+                # Enforce pipeline contract: workers publish complex64 IQ samples.
+                samples = require_complex64(samples, source="rtlsdr-worker")
+
                 # Remove DC offset
                 samples = remove_dc_offset(samples)
 
@@ -284,7 +289,7 @@ def rtlsdr_worker_process(
                         try:
                             if not iq_queue_fft.full():
                                 iq_message = {
-                                    "samples": samples,
+                                    "samples": samples.copy(),
                                     # `center_freq` is intentionally logical (not hardware RF).
                                     # Downstream DSP computes translation against this field.
                                     "center_freq": logical_center_freq,
@@ -313,7 +318,7 @@ def rtlsdr_worker_process(
                         try:
                             if not iq_queue_demod.full():
                                 demod_message = {
-                                    "samples": samples,
+                                    "samples": samples.copy(),
                                     "center_freq": logical_center_freq,
                                     "logical_center_freq_hz": logical_center_freq,
                                     "rf_center_freq_hz": sdr.center_freq,

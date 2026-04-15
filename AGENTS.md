@@ -23,3 +23,8 @@
 - Python dev/test tools for backend are in `backend/venv/bin` (for example `./venv/bin/pytest`, `./venv/bin/python`, `./venv/bin/alembic` from inside `backend/`).
 - For pytest runs, set `ALEMBIC_CONTEXT=1` to avoid app CLI argument parsing conflicts (example: `cd backend && ALEMBIC_CONTEXT=1 ./venv/bin/pytest -q`).
 - Frontend E2E tests require the app/backend to be running and reachable by Playwright test config.
+
+## GitHub Safety
+- Never post/comment/create/update/delete on GitHub (issues/PRs/comments/labels/assignees/milestones/releases) unless the user explicitly asks for that exact write action in the current turn.
+- Default to read-only `gh` usage (list/view/status/check) unless explicit write permission is given in the current turn.
+- If there is any ambiguity, stop and ask before running any `gh` command that mutates remote state.
