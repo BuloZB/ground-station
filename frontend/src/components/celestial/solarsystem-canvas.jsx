@@ -27,6 +27,20 @@ const formatAu = (value) => {
     if (value >= 1) return `${value.toFixed(value >= 10 ? 0 : 1)} AU`;
     return `${value.toFixed(2)} AU`;
 };
+const getTwoPointerGesture = (pointerMap) => {
+    if (pointerMap.size < 2) return null;
+    const points = Array.from(pointerMap.values());
+    const p1 = points[0];
+    const p2 = points[1];
+    const centerX = (p1.x + p2.x) / 2;
+    const centerY = (p1.y + p2.y) / 2;
+    const distance = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    return {
+        centerX,
+        centerY,
+        distance,
+    };
+};
 
 const drawArrowHead = (ctx, fromX, fromY, toX, toY, color) => {
     const dx = toX - fromX;
@@ -60,10 +74,18 @@ const SolarSystemCanvas = ({ scene, fitAllSignal = 0, initialViewport = null, on
     const lastFitSignalRef = useRef(fitAllSignal);
     const hasPersistentViewportRef = useRef(!!initialViewport);
     const viewportRef = useRef(DEFAULT_VIEWPORT);
-    const dragRef = useRef({
+    const activePointersRef = useRef(new Map());
+    const gestureRef = useRef({
+        mode: null,
+        lastCenterX: 0,
+        lastCenterY: 0,
+        lastDistance: 0,
+    });
+    const touchGestureRef = useRef({
         active: false,
-        x: 0,
-        y: 0,
+        lastCenterX: 0,
+        lastCenterY: 0,
+        lastDistance: 0,
     });
 
     const [viewport, setViewport] = useState(() => normalizeViewport(initialViewport || DEFAULT_VIEWPORT));
@@ -330,35 +352,207 @@ const SolarSystemCanvas = ({ scene, fitAllSignal = 0, initialViewport = null, on
     }, []);
 
     const handlePointerDown = (event) => {
+        if (event.pointerType === 'touch') return;
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
         hasPersistentViewportRef.current = true;
         event.currentTarget.setPointerCapture?.(event.pointerId);
-        dragRef.current.active = true;
-        dragRef.current.x = event.clientX;
-        dragRef.current.y = event.clientY;
+        activePointersRef.current.set(event.pointerId, {
+            x: event.clientX,
+            y: event.clientY,
+        });
+
+        const activeCount = activePointersRef.current.size;
+        if (activeCount === 1) {
+            gestureRef.current.mode = 'pan';
+            gestureRef.current.lastCenterX = event.clientX;
+            gestureRef.current.lastCenterY = event.clientY;
+            gestureRef.current.lastDistance = 0;
+            return;
+        }
+
+        if (activeCount >= 2) {
+            const gesture = getTwoPointerGesture(activePointersRef.current);
+            if (!gesture) return;
+            gestureRef.current.mode = 'pinch';
+            gestureRef.current.lastCenterX = gesture.centerX;
+            gestureRef.current.lastCenterY = gesture.centerY;
+            gestureRef.current.lastDistance = gesture.distance;
+        }
     };
 
     const handlePointerMove = (event) => {
-        if (!dragRef.current.active) return;
-        const dx = event.clientX - dragRef.current.x;
-        const dy = event.clientY - dragRef.current.y;
-        dragRef.current.x = event.clientX;
-        dragRef.current.y = event.clientY;
+        if (!activePointersRef.current.has(event.pointerId)) return;
+        activePointersRef.current.set(event.pointerId, {
+            x: event.clientX,
+            y: event.clientY,
+        });
+
+        if (activePointersRef.current.size === 1 && gestureRef.current.mode === 'pan') {
+            const dx = event.clientX - gestureRef.current.lastCenterX;
+            const dy = event.clientY - gestureRef.current.lastCenterY;
+            gestureRef.current.lastCenterX = event.clientX;
+            gestureRef.current.lastCenterY = event.clientY;
+            setViewport((prev) => {
+                const next = {
+                    ...prev,
+                    panX: prev.panX + dx,
+                    panY: prev.panY + dy,
+                };
+                viewportRef.current = next;
+                return next;
+            });
+            return;
+        }
+
+        if (activePointersRef.current.size >= 2) {
+            const gesture = getTwoPointerGesture(activePointersRef.current);
+            const container = containerRef.current;
+            if (!gesture || !container || gestureRef.current.lastDistance <= 0) return;
+
+            const rect = container.getBoundingClientRect();
+            const width = rect.width;
+            const height = rect.height;
+            const zoomRatio = gesture.distance / gestureRef.current.lastDistance;
+            const anchorX = gestureRef.current.lastCenterX - rect.left;
+            const anchorY = gestureRef.current.lastCenterY - rect.top;
+            const nextCenterX = gesture.centerX - rect.left;
+            const nextCenterY = gesture.centerY - rect.top;
+
+            setViewport((prev) => {
+                const nextZoom = clamp(prev.zoom * zoomRatio, MIN_ZOOM, MAX_ZOOM);
+                const prevCx = width / 2 + prev.panX;
+                const prevCy = height / 2 + prev.panY;
+                const worldX = (anchorX - prevCx) / prev.zoom;
+                const worldY = (prevCy - anchorY) / prev.zoom;
+                const nextCx = nextCenterX - worldX * nextZoom;
+                const nextCy = nextCenterY + worldY * nextZoom;
+
+                const next = {
+                    zoom: nextZoom,
+                    panX: nextCx - width / 2,
+                    panY: nextCy - height / 2,
+                };
+                viewportRef.current = next;
+                return next;
+            });
+
+            gestureRef.current.lastCenterX = gesture.centerX;
+            gestureRef.current.lastCenterY = gesture.centerY;
+            gestureRef.current.lastDistance = Math.max(gesture.distance, 0.0001);
+        }
+    };
+
+    const handlePointerUp = (event) => {
+        activePointersRef.current.delete(event.pointerId);
+
+        if (!activePointersRef.current.size) {
+            if (gestureRef.current.mode) {
+                commitViewport(viewportRef.current);
+            }
+            gestureRef.current.mode = null;
+            gestureRef.current.lastCenterX = 0;
+            gestureRef.current.lastCenterY = 0;
+            gestureRef.current.lastDistance = 0;
+            return;
+        }
+
+        if (activePointersRef.current.size === 1) {
+            const remainingPointer = Array.from(activePointersRef.current.values())[0];
+            gestureRef.current.mode = 'pan';
+            gestureRef.current.lastCenterX = remainingPointer.x;
+            gestureRef.current.lastCenterY = remainingPointer.y;
+            gestureRef.current.lastDistance = 0;
+            return;
+        }
+
+        const gesture = getTwoPointerGesture(activePointersRef.current);
+        if (gesture) {
+            gestureRef.current.mode = 'pinch';
+            gestureRef.current.lastCenterX = gesture.centerX;
+            gestureRef.current.lastCenterY = gesture.centerY;
+            gestureRef.current.lastDistance = gesture.distance;
+        }
+    };
+
+    const handleTouchStart = (event) => {
+        if (event.touches.length < 2) return;
+        hasPersistentViewportRef.current = true;
+        const touch1 = event.touches[0];
+        const touch2 = event.touches[1];
+        touchGestureRef.current.active = true;
+        touchGestureRef.current.lastCenterX = (touch1.clientX + touch2.clientX) / 2;
+        touchGestureRef.current.lastCenterY = (touch1.clientY + touch2.clientY) / 2;
+        touchGestureRef.current.lastDistance = Math.max(
+            Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY),
+            0.0001,
+        );
+        event.preventDefault();
+    };
+
+    const handleTouchMove = (event) => {
+        if (event.touches.length < 2 || !touchGestureRef.current.active) return;
+        const container = containerRef.current;
+        if (!container) return;
+
+        const touch1 = event.touches[0];
+        const touch2 = event.touches[1];
+        const centerX = (touch1.clientX + touch2.clientX) / 2;
+        const centerY = (touch1.clientY + touch2.clientY) / 2;
+        const distance = Math.max(Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY), 0.0001);
+        const rect = container.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        const zoomRatio = distance / touchGestureRef.current.lastDistance;
+        const anchorX = touchGestureRef.current.lastCenterX - rect.left;
+        const anchorY = touchGestureRef.current.lastCenterY - rect.top;
+        const nextCenterX = centerX - rect.left;
+        const nextCenterY = centerY - rect.top;
+
         setViewport((prev) => {
+            const nextZoom = clamp(prev.zoom * zoomRatio, MIN_ZOOM, MAX_ZOOM);
+            const prevCx = width / 2 + prev.panX;
+            const prevCy = height / 2 + prev.panY;
+            const worldX = (anchorX - prevCx) / prev.zoom;
+            const worldY = (prevCy - anchorY) / prev.zoom;
+            const nextCx = nextCenterX - worldX * nextZoom;
+            const nextCy = nextCenterY + worldY * nextZoom;
+
             const next = {
-                ...prev,
-                panX: prev.panX + dx,
-                panY: prev.panY + dy,
+                zoom: nextZoom,
+                panX: nextCx - width / 2,
+                panY: nextCy - height / 2,
             };
             viewportRef.current = next;
             return next;
         });
+
+        touchGestureRef.current.lastCenterX = centerX;
+        touchGestureRef.current.lastCenterY = centerY;
+        touchGestureRef.current.lastDistance = distance;
+        event.preventDefault();
     };
 
-    const handlePointerUp = () => {
-        if (dragRef.current.active) {
+    const handleTouchEnd = (event) => {
+        if (event.touches.length >= 2) {
+            const touch1 = event.touches[0];
+            const touch2 = event.touches[1];
+            touchGestureRef.current.active = true;
+            touchGestureRef.current.lastCenterX = (touch1.clientX + touch2.clientX) / 2;
+            touchGestureRef.current.lastCenterY = (touch1.clientY + touch2.clientY) / 2;
+            touchGestureRef.current.lastDistance = Math.max(
+                Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY),
+                0.0001,
+            );
+            return;
+        }
+
+        if (touchGestureRef.current.active) {
+            touchGestureRef.current.active = false;
+            touchGestureRef.current.lastCenterX = 0;
+            touchGestureRef.current.lastCenterY = 0;
+            touchGestureRef.current.lastDistance = 0;
             commitViewport(viewportRef.current);
         }
-        dragRef.current.active = false;
     };
 
     const handleWheel = (event) => {
@@ -424,13 +618,16 @@ const SolarSystemCanvas = ({ scene, fitAllSignal = 0, initialViewport = null, on
         <Box sx={{ width: '100%', height: '100%', position: 'relative' }}>
             <Box
                 ref={containerRef}
-                sx={{ width: '100%', height: '100%', cursor: 'grab' }}
+                sx={{ width: '100%', height: '100%', cursor: 'grab', touchAction: 'pan-x pan-y' }}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerUp}
-                onPointerLeave={handlePointerUp}
                 onWheel={handleWheel}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
             >
                 <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
             </Box>
@@ -450,6 +647,24 @@ const SolarSystemCanvas = ({ scene, fitAllSignal = 0, initialViewport = null, on
             >
                 {timestampText}
             </Typography>
+            <Box
+                sx={{
+                    position: 'absolute',
+                    left: 10,
+                    bottom: 8,
+                    color: 'text.secondary',
+                    backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.28)' : 'rgba(255,255,255,0.52)',
+                    px: 0.8,
+                    py: 0.35,
+                    borderRadius: 0.5,
+                    fontFamily: 'monospace',
+                    opacity: 0.9,
+                }}
+            >
+                <Typography variant="caption" sx={{ fontFamily: 'inherit', lineHeight: 1.1 }}>
+                    Touch: 2-finger pan/zoom | Mouse: drag + Shift+wheel
+                </Typography>
+            </Box>
             <Box
                 sx={{
                     position: 'absolute',
