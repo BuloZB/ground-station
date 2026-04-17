@@ -6,16 +6,25 @@ const PLANET_COLORS = {
     mercury: '#c2b280',
     venus: '#d6b57d',
     earth: '#4f8cff',
+    moon: '#cfd8dc',
     mars: '#c04f3d',
     jupiter: '#d2a679',
+    io: '#f4e6b3',
+    europa: '#d8d8cf',
+    ganymede: '#bfae95',
+    callisto: '#a89f91',
     saturn: '#d9c188',
+    enceladus: '#dbe9f4',
+    rhea: '#c9c1b6',
+    titan: '#d8b078',
+    iapetus: '#b8b0a2',
     uranus: '#76c7c0',
     neptune: '#5a7bd8',
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 1200;
+const MAX_ZOOM = 20000;
 const WHEEL_COMMIT_DELAY_MS = 180;
 const DEFAULT_VIEWPORT = { zoom: 18, panX: 0, panY: 0 };
 const DEFAULT_DISPLAY_OPTIONS = {
@@ -49,6 +58,13 @@ const hexToRgba = (hex, alpha) => {
     const g = Number.parseInt(value.slice(2, 4), 16);
     const b = Number.parseInt(value.slice(4, 6), 16);
     return `rgba(${r},${g},${b},${alpha})`;
+};
+const resolveTrackedColor = (body, fallbackHex) => {
+    const value = String(body?.color || '').trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+        return value;
+    }
+    return fallbackHex;
 };
 const ASTEROID_ZONE_FALLBACK_COLORS = {
     imb: '#4F8CFF',
@@ -94,6 +110,18 @@ const getTwoPointerGesture = (pointerMap) => {
         distance,
     };
 };
+const hasFiniteXYZ = (position) =>
+    Array.isArray(position)
+    && position.length >= 3
+    && Number.isFinite(Number(position[0]))
+    && Number.isFinite(Number(position[1]))
+    && Number.isFinite(Number(position[2]));
+
+const hasFiniteXY = (position) =>
+    Array.isArray(position)
+    && position.length >= 2
+    && Number.isFinite(Number(position[0]))
+    && Number.isFinite(Number(position[1]));
 
 const drawArrowHead = (ctx, fromX, fromY, toX, toY, color) => {
     const dx = toX - fromX;
@@ -227,12 +255,12 @@ const SolarSystemCanvas = ({
             });
         });
         tracked.forEach((body) => {
-            if (Array.isArray(body.position_xyz_au)) {
+            if (hasFiniteXYZ(body.position_xyz_au)) {
                 points.push(body.position_xyz_au);
             }
             const samples = body.orbit_samples_xyz_au || [];
             samples.forEach((sample) => {
-                if (Array.isArray(sample)) points.push(sample);
+                if (hasFiniteXY(sample)) points.push(sample);
             });
         });
 
@@ -474,19 +502,19 @@ const SolarSystemCanvas = ({
 
         // Tracked objects from Horizons.
         if (effectiveDisplayOptions.showTrackedObjects) tracked.forEach((body) => {
+            if (!hasFiniteXYZ(body.position_xyz_au)) return;
             const samples = body.orbit_samples_xyz_au || [];
             if (!samples.length || !effectiveDisplayOptions.showTrackedOrbits) return;
 
-            const strokeColor = body.stale
-                ? (theme.palette.mode === 'dark' ? 'rgba(239,71,111,0.45)' : 'rgba(196,47,89,0.45)')
-                : (theme.palette.mode === 'dark' ? 'rgba(6,214,160,0.42)' : 'rgba(0,130,96,0.42)');
+            const trackedHexColor = resolveTrackedColor(body, body.stale ? '#EF476F' : '#06D6A0');
+            const trackedStrokeColor = hexToRgba(trackedHexColor, body.stale ? 0.35 : 0.45);
             ctx.beginPath();
             samples.forEach((sample, index) => {
                 const [sx, sy] = toScreen(sample);
                 if (index === 0) ctx.moveTo(sx, sy);
                 else ctx.lineTo(sx, sy);
             });
-            ctx.strokeStyle = strokeColor;
+            ctx.strokeStyle = trackedStrokeColor;
             ctx.lineWidth = 1;
             ctx.setLineDash([3, 4]);
             ctx.stroke();
@@ -496,12 +524,21 @@ const SolarSystemCanvas = ({
             if (samples.length >= 2) {
                 const [startX, startY] = toScreen(samples[0]);
                 const [startNextX, startNextY] = toScreen(samples[1]);
-                drawArrowHead(ctx, startX, startY, startNextX, startNextY, strokeColor);
+                drawArrowHead(ctx, startX, startY, startNextX, startNextY, trackedStrokeColor);
 
                 const lastIndex = samples.length - 1;
                 const [endPrevX, endPrevY] = toScreen(samples[lastIndex - 1]);
                 const [endX, endY] = toScreen(samples[lastIndex]);
-                drawArrowHead(ctx, endPrevX, endPrevY, endX, endY, strokeColor);
+                const dirX = endX - endPrevX;
+                const dirY = endY - endPrevY;
+                const dirLen = Math.hypot(dirX, dirY);
+                if (dirLen > 0.001) {
+                    const ux = dirX / dirLen;
+                    const uy = dirY / dirLen;
+                    const arrowTipX = endX + ux * 8;
+                    const arrowTipY = endY + uy * 8;
+                    drawArrowHead(ctx, endX, endY, arrowTipX, arrowTipY, trackedStrokeColor);
+                }
             }
         });
 
@@ -509,9 +546,11 @@ const SolarSystemCanvas = ({
         if (effectiveDisplayOptions.showTrackedObjects) {
             ctx.font = '11px monospace';
             tracked.forEach((body) => {
+                if (!hasFiniteXYZ(body.position_xyz_au)) return;
                 const [sx, sy] = toScreen(body.position_xyz_au);
+                const trackedHexColor = resolveTrackedColor(body, body.stale ? '#EF476F' : '#06D6A0');
 
-                ctx.fillStyle = body.stale ? '#ef476f' : '#06d6a0';
+                ctx.fillStyle = trackedHexColor;
                 ctx.fillRect(sx - 3, sy - 3, 6, 6);
 
                 if (effectiveDisplayOptions.showTrackedLabels) {

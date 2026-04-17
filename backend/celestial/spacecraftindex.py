@@ -49,6 +49,10 @@ def get_spacecraft_index() -> List[Dict[str, Any]]:
                 "command": command,
                 "aliases": [str(alias).strip() for alias in aliases if str(alias).strip()],
                 "agency": str(item.get("agency") or "").strip(),
+                "mission_status": str(item.get("mission_status") or "unknown").strip().lower(),
+                "status_label": str(item.get("status_label") or "").strip(),
+                "status_notes": str(item.get("status_notes") or "").strip(),
+                "status_source": str(item.get("status_source") or "").strip(),
             }
         )
 

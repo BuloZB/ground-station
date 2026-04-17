@@ -4,6 +4,7 @@ const normalizeMonitoredEntry = (entry) => ({
     id: entry?.id,
     displayName: entry?.display_name ?? entry?.displayName ?? '',
     command: entry?.command ?? '',
+    color: entry?.color ?? null,
     sourceMode: entry?.source_mode ?? entry?.sourceMode ?? null,
     enabled: entry?.enabled !== false,
     lastRefreshAt: entry?.last_refresh_at ?? entry?.lastRefreshAt ?? null,
@@ -70,6 +71,7 @@ export const updateMonitoredCelestial = createAsyncThunk(
                         id: entry.id,
                         display_name: entry.displayName,
                         command: entry.command,
+                        color: entry.color ?? null,
                         enabled: entry.enabled,
                     },
                     (response) => {
@@ -148,10 +150,14 @@ const monitoredSlice = createSlice({
         openGridSettingsDialog: false,
         tableColumnVisibility: {
             displayName: true,
+            color: true,
             command: true,
             source: true,
             sourceMode: true,
             enabled: true,
+            visibility: true,
+            elevationDeg: true,
+            azimuthDeg: true,
             distanceFromSunAu: true,
             speedKmS: true,
             lightTimeMinutes: true,
@@ -164,7 +170,7 @@ const monitoredSlice = createSlice({
             lastError: true,
         },
         tablePageSize: 10,
-        tableSortModel: [{ field: 'enabled', sort: 'desc' }, { field: 'displayName', sort: 'asc' }],
+        tableSortModel: [{ field: 'visibility', sort: 'desc' }, { field: 'displayName', sort: 'asc' }],
     },
     reducers: {
         openAddDialog: (state) => {

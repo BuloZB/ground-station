@@ -106,6 +106,7 @@ async def _build_scene_payload(data: Optional[Dict], logger: Any) -> Dict[str, A
         {
             "command": item.get("command"),
             "name": item.get("display_name") or item.get("command"),
+            "color": item.get("color"),
         }
         for item in entries
         if item.get("command")
@@ -196,6 +197,7 @@ async def refresh_monitored_celestial_now(
             {
                 "command": item.get("command"),
                 "name": item.get("display_name") or item.get("command"),
+                "color": item.get("color"),
             }
             for item in targets
             if item.get("command")

@@ -56,7 +56,7 @@ def _parse_epoch(data: Optional[Dict[str, Any]]) -> datetime:
         return datetime.now(timezone.utc)
 
 
-def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, str]]:
+def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not data:
         return DEFAULT_CELESTIAL_TARGETS.copy()
 
@@ -64,7 +64,7 @@ def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, str]]:
     if not requested:
         return DEFAULT_CELESTIAL_TARGETS.copy()
 
-    normalized: List[Dict[str, str]] = []
+    normalized: List[Dict[str, Any]] = []
 
     for item in requested:
         if isinstance(item, str):
@@ -78,7 +78,8 @@ def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, str]]:
             if not command:
                 continue
             name = str(item.get("name") or command).strip()
-            normalized.append({"command": command, "name": name})
+            color = item.get("color")
+            normalized.append({"command": command, "name": name, "color": color})
 
     return normalized
 
@@ -167,7 +168,7 @@ async def _attach_observer_view(
 
 
 async def _fetch_celestial_with_cache(
-    targets: List[Dict[str, str]],
+    targets: List[Dict[str, Any]],
     epoch: datetime,
     past_hours: int,
     future_hours: int,
@@ -182,6 +183,7 @@ async def _fetch_celestial_with_cache(
     for target in targets:
         command = target["command"]
         name = target["name"]
+        color = target.get("color")
         observer_cache_key = "no-observer"
         if observer_location:
             observer_cache_key = (
@@ -209,6 +211,7 @@ async def _fetch_celestial_with_cache(
         if use_cached and cached_entry:
             cached_payload = dict(cached_entry.payload)
             cached_payload["name"] = name
+            cached_payload["color"] = color
             cached_payload["stale"] = False
             cached_payload["cache"] = "hit"
             await _attach_observer_view(
@@ -231,6 +234,7 @@ async def _fetch_celestial_with_cache(
                 step_minutes,
             )
             fetched["name"] = name
+            fetched["color"] = color
             fetched["stale"] = False
             fetched["cache"] = "miss"
 
@@ -264,32 +268,32 @@ async def _fetch_celestial_with_cache(
 
             if fallback_payload:
                 fallback_payload["name"] = name
+                fallback_payload["color"] = color
                 fallback_payload["stale"] = True
                 fallback_payload["cache"] = "stale"
                 fallback_payload["error"] = str(exc)
-                await _attach_observer_view(
-                    fallback_payload,
-                    command=command,
-                    epoch=epoch,
-                    observer_location=observer_location,
-                    logger=logger,
-                )
+                fallback_payload["sky_position"] = None
+                fallback_payload["visibility"] = {
+                    "above_horizon": None,
+                    "visible": None,
+                    "horizon_threshold_deg": 0.0,
+                }
                 rows.append(fallback_payload)
             else:
                 error_row = {
                     "name": name,
                     "command": command,
+                    "color": color,
                     "source": "horizons",
                     "stale": True,
                     "error": str(exc),
+                    "sky_position": None,
+                    "visibility": {
+                        "above_horizon": None,
+                        "visible": None,
+                        "horizon_threshold_deg": 0.0,
+                    },
                 }
-                await _attach_observer_view(
-                    error_row,
-                    command=command,
-                    epoch=epoch,
-                    observer_location=observer_location,
-                    logger=logger,
-                )
                 rows.append(error_row)
 
     return rows

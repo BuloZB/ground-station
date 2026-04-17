@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
     Box,
     Button,
-    CircularProgress,
     Dialog,
     DialogActions,
     DialogContent,
@@ -51,6 +50,37 @@ const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
 const DEFAULT_PAST_HOURS = 24;
 const DEFAULT_FUTURE_HOURS = 24;
 const DEFAULT_STEP_MINUTES = 60;
+const DIALOG_PAPER_SX = {
+    bgcolor: 'background.paper',
+    border: (theme) => `1px solid ${theme.palette.divider}`,
+    borderRadius: 2,
+};
+const DIALOG_TITLE_SX = {
+    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+    borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+    fontSize: '1.25rem',
+    fontWeight: 'bold',
+    py: 2.5,
+};
+const DIALOG_CONTENT_SX = {
+    bgcolor: 'background.paper',
+    px: 3,
+    py: 3,
+};
+const DIALOG_ACTIONS_SX = {
+    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+    borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+    px: 3,
+    py: 2.5,
+    gap: 2,
+};
+const DIALOG_CANCEL_BUTTON_SX = {
+    borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400',
+    '&:hover': {
+        borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.600' : 'grey.500',
+        bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
+    },
+};
 
 function loadLayoutsFromLocalStorage() {
     try {
@@ -289,11 +319,6 @@ const CelestialMainLayout = () => {
                     disabled={!socket}
                 />
                 <Box sx={{ p: 0, flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
-                    {celestialState.solarLoading || celestialState.tracksLoading ? (
-                        <Stack direction="row" spacing={2} alignItems="center" sx={{ p: 1, position: 'absolute', zIndex: 2 }}>
-                            <CircularProgress size={18} />
-                        </Stack>
-                    ) : null}
                     {celestialState.error && !hasSolarScene ? (
                         <Typography variant="body2" color="error" sx={{ p: 1 }}>
                             {celestialState.error}
@@ -352,9 +377,10 @@ const CelestialMainLayout = () => {
                 onClose={() => setOpenSolarSystemLayoutOptionsDialog(false)}
                 maxWidth="sm"
                 fullWidth
+                PaperProps={{ sx: DIALOG_PAPER_SX }}
             >
-                <DialogTitle>Solar System Layout Options</DialogTitle>
-                <DialogContent>
+                <DialogTitle sx={DIALOG_TITLE_SX}>Solar System Layout Options</DialogTitle>
+                <DialogContent sx={DIALOG_CONTENT_SX}>
                     <Stack spacing={0.25} sx={{ pt: 0.5 }}>
                         {[
                             ['showGrid', 'Show grid'],
@@ -394,11 +420,19 @@ const CelestialMainLayout = () => {
                         ))}
                     </Stack>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => dispatch(resetSolarSystemDisplayOptions())}>
+                <DialogActions sx={DIALOG_ACTIONS_SX}>
+                    <Button
+                        onClick={() => dispatch(resetSolarSystemDisplayOptions())}
+                        variant="outlined"
+                        sx={DIALOG_CANCEL_BUTTON_SX}
+                    >
                         Reset
                     </Button>
-                    <Button onClick={() => setOpenSolarSystemLayoutOptionsDialog(false)} variant="contained">
+                    <Button
+                        onClick={() => setOpenSolarSystemLayoutOptionsDialog(false)}
+                        color="success"
+                        variant="contained"
+                    >
                         Close
                     </Button>
                 </DialogActions>

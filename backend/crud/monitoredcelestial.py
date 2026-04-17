@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import colorsys
+import hashlib
 import re
 import traceback
 import uuid
@@ -23,6 +25,69 @@ from common.common import logger, serialize_object
 from db.models import MonitoredCelestial
 
 UNIQUE_CONSTRAINT_PATTERN = re.compile(r"UNIQUE constraint failed: \w+\.(\w+)")
+HEX_COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
+DEFAULT_CELESTIAL_COLOR_PALETTE = [
+    "#FF6B6B",
+    "#4ECDC4",
+    "#45B7D1",
+    "#F7B801",
+    "#6A4C93",
+    "#2EC4B6",
+    "#E71D36",
+    "#A1C349",
+    "#5E60CE",
+    "#FF9F1C",
+    "#3A86FF",
+    "#8338EC",
+]
+
+
+def _normalize_color(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    color = str(value).strip()
+    if not color:
+        return None
+
+    if not HEX_COLOR_PATTERN.match(color):
+        raise ValueError("Color must be a valid hex value like #1A2B3C")
+
+    return color.upper()
+
+
+def _hsl_to_hex(hue: float, saturation: float, lightness: float) -> str:
+    red, green, blue = colorsys.hls_to_rgb(hue, lightness, saturation)
+    return f"#{int(red * 255):02X}{int(green * 255):02X}{int(blue * 255):02X}"
+
+
+def _deterministic_color_from_command(command: str, salt: int = 0) -> str:
+    digest = hashlib.sha1(f"{command}:{salt}".encode("utf-8")).hexdigest()
+    hue = (int(digest[0:8], 16) % 360) / 360.0
+    saturation = 0.72
+    lightness = 0.56
+    return _hsl_to_hex(hue, saturation, lightness)
+
+
+async def _pick_color_for_new_target(session: AsyncSession, command: str) -> str:
+    result = await session.execute(select(MonitoredCelestial.color))
+    rows = result.scalars().all()
+    used = {
+        str(color).strip().upper()
+        for color in rows
+        if color and HEX_COLOR_PATTERN.match(str(color).strip())
+    }
+
+    for candidate in DEFAULT_CELESTIAL_COLOR_PALETTE:
+        if candidate not in used:
+            return candidate
+
+    for salt in range(0, 64):
+        generated = _deterministic_color_from_command(command, salt=salt)
+        if generated not in used:
+            return generated
+
+    return _deterministic_color_from_command(command, salt=128)
 
 
 def _normalize_entry(row: dict) -> dict:
@@ -30,6 +95,7 @@ def _normalize_entry(row: dict) -> dict:
         "id": row.get("id"),
         "display_name": row.get("display_name") or "",
         "command": row.get("command") or "",
+        "color": row.get("color"),
         "enabled": bool(row.get("enabled", True)),
         "last_refresh_at": row.get("last_refresh_at"),
         "last_error": row.get("last_error"),
@@ -84,11 +150,18 @@ async def add_monitored_celestial(session: AsyncSession, data: dict) -> dict:
             return {"success": False, "error": "Command is required"}
         if not display_name:
             return {"success": False, "error": "Display name is required"}
+        try:
+            color = _normalize_color(data.get("color"))
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        if not color:
+            color = await _pick_color_for_new_target(session, command)
 
         payload = {
             "id": target_id,
             "display_name": display_name,
             "command": command,
+            "color": color,
             "enabled": bool(data.get("enabled", True)),
             "last_refresh_at": data.get("last_refresh_at"),
             "last_error": data.get("last_error"),
@@ -139,6 +212,11 @@ async def edit_monitored_celestial(session: AsyncSession, data: dict) -> dict:
             ).strip()
         if "command" in data:
             update_data["command"] = str(data.get("command") or "").strip()
+        if "color" in data:
+            try:
+                update_data["color"] = _normalize_color(data.get("color"))
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
         if "enabled" in data:
             update_data["enabled"] = bool(data.get("enabled"))
         if "last_refresh_at" in data:

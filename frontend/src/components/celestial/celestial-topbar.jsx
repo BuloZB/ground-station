@@ -5,21 +5,20 @@ import {
     Button,
     Chip,
     FormControl,
-    InputLabel,
     Dialog,
     DialogActions,
     DialogContent,
     DialogTitle,
     MenuItem,
     Select,
+    Paper,
     Stack,
     Table,
     TableBody,
     TableCell,
     TableHead,
     TableRow,
-    ToggleButton,
-    ToggleButtonGroup,
+    TableContainer,
     TextField,
     Typography,
 } from '@mui/material';
@@ -40,13 +39,13 @@ import {
     openManageDialog,
     setMonitoredFormError,
     setMonitoredFormField,
-    setSelectedMonitoredIds,
     toggleMonitoredCelestialEnabled,
     updateMonitoredCelestial,
 } from './monitored-slice.jsx';
 import { refreshMonitoredCelestialNow } from './celestial-slice.jsx';
 
 const STALE_MS = 5 * 60 * 1000;
+const HEX_COLOR_PATTERN = /^#[0-9A-F]{6}$/;
 const HOUR_OPTIONS = [
     { value: 6, label: '6h' },
     { value: 12, label: '12h' },
@@ -59,6 +58,37 @@ const HOUR_OPTIONS = [
     { value: 4320, label: '6mo' },
     { value: 8760, label: '1y' },
 ];
+const DIALOG_PAPER_SX = {
+    bgcolor: 'background.paper',
+    border: (theme) => `1px solid ${theme.palette.divider}`,
+    borderRadius: 2,
+};
+const DIALOG_TITLE_SX = {
+    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+    borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+    fontSize: '1.25rem',
+    fontWeight: 'bold',
+    py: 2.5,
+};
+const DIALOG_CONTENT_SX = {
+    bgcolor: 'background.paper',
+    px: 3,
+    py: 3,
+};
+const DIALOG_ACTIONS_SX = {
+    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+    borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+    px: 3,
+    py: 2.5,
+    gap: 2,
+};
+const DIALOG_CANCEL_BUTTON_SX = {
+    borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400',
+    '&:hover': {
+        borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.600' : 'grey.500',
+        bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
+    },
+};
 
 const getStatusMeta = (entry) => {
     if (entry?.lastError) {
@@ -90,6 +120,24 @@ const formatLastRefresh = (value) => {
     return date.toLocaleString();
 };
 
+const normalizeHexColor = (value) => {
+    const text = String(value || '').trim();
+    if (!text) {
+        return '';
+    }
+
+    const prefixed = text.startsWith('#') ? text : `#${text}`;
+    return prefixed.toUpperCase();
+};
+
+const getMissionStatusMeta = (status, statusLabel = '') => {
+    const normalized = String(status || 'unknown').trim().toLowerCase();
+    if (normalized === 'active') return { label: statusLabel || 'Active', color: 'success' };
+    if (normalized === 'completed') return { label: statusLabel || 'Completed', color: 'default' };
+    if (normalized === 'failed') return { label: statusLabel || 'Failed', color: 'error' };
+    return { label: statusLabel || 'Unknown', color: 'warning' };
+};
+
 const CelestialTopBar = ({
     projectionPastHours = 24,
     projectionFutureHours = 24,
@@ -102,7 +150,6 @@ const CelestialTopBar = ({
     const celestialLoading = useSelector((state) => state.celestial?.tracksLoading);
     const {
         monitored,
-        selectedIds,
         addDialogOpen,
         manageDialogOpen,
         form,
@@ -112,25 +159,19 @@ const CelestialTopBar = ({
 
     const [editDialogOpen, setEditDialogOpen] = useState(false);
     const [editError, setEditError] = useState('');
-    const [editForm, setEditForm] = useState({ id: '', displayName: '', command: '', enabled: true });
-    const [addMode, setAddMode] = useState('catalog');
+    const [editForm, setEditForm] = useState({
+        id: '',
+        displayName: '',
+        command: '',
+        color: '',
+        enabled: true,
+    });
     const [catalogLoading, setCatalogLoading] = useState(false);
     const [catalogError, setCatalogError] = useState('');
     const [catalogEntries, setCatalogEntries] = useState([]);
     const [selectedCatalogEntry, setSelectedCatalogEntry] = useState(null);
+    const [targetInputValue, setTargetInputValue] = useState('');
     const [addFeedback, setAddFeedback] = useState('');
-
-    const monitoredCount = monitored.length;
-
-    const monitoredOptions = useMemo(
-        () =>
-            monitored.map((entry) => ({
-                id: entry.id,
-                label: entry.displayName,
-                command: entry.command,
-            })),
-        [monitored],
-    );
 
     const enabledCount = useMemo(
         () => monitored.filter((entry) => entry.enabled).length,
@@ -150,6 +191,22 @@ const CelestialTopBar = ({
             socket.off('connect', fetchData);
         };
     }, [socket, dispatch]);
+
+    useEffect(() => {
+        if (!socket) {
+            return;
+        }
+        let active = true;
+        socket.emit('data_request', 'get-spacecraft-index', { limit: 1000 }, (response) => {
+            if (!active) return;
+            if (response?.success) {
+                setCatalogEntries(response.data || []);
+            }
+        });
+        return () => {
+            active = false;
+        };
+    }, [socket]);
 
     useEffect(() => {
         if (!addDialogOpen || !socket) {
@@ -179,13 +236,45 @@ const CelestialTopBar = ({
 
     useEffect(() => {
         if (addDialogOpen) {
+            setAddFeedback('');
+            setTargetInputValue(form.command || '');
             return;
         }
         setSelectedCatalogEntry(null);
+        setTargetInputValue('');
         setCatalogError('');
         setAddFeedback('');
-        setAddMode('catalog');
-    }, [addDialogOpen]);
+    }, [addDialogOpen, form.command]);
+
+    const inferredSourceMode = useMemo(() => {
+        const command = String(form.command || '').trim().toLowerCase();
+        const catalogCommand = String(selectedCatalogEntry?.command || '').trim().toLowerCase();
+        if (selectedCatalogEntry && command && command === catalogCommand) {
+            return 'catalog';
+        }
+        return 'exact';
+    }, [form.command, selectedCatalogEntry]);
+
+    const catalogByCommand = useMemo(() => {
+        const map = {};
+        (catalogEntries || []).forEach((entry) => {
+            const key = String(entry?.command || '').trim().toLowerCase();
+            if (key) {
+                map[key] = entry;
+            }
+        });
+        return map;
+    }, [catalogEntries]);
+
+    const monitoredCommands = useMemo(
+        () =>
+            new Set(
+                (monitored || [])
+                    .map((entry) => String(entry?.command || '').trim().toLowerCase())
+                    .filter(Boolean),
+            ),
+        [monitored],
+    );
 
     const handleAdd = async () => {
         setAddFeedback('');
@@ -207,24 +296,21 @@ const CelestialTopBar = ({
             return;
         }
 
-        if (addMode === 'catalog' && !selectedCatalogEntry) {
-            dispatch(setMonitoredFormError('Select a spacecraft from the static catalog.'));
-            return;
-        }
-
-        await dispatch(
+        const result = await dispatch(
             createMonitoredCelestial({
                 socket,
                 entry: {
                     displayName: name,
                     command: cmd,
                     enabled: true,
-                    sourceMode: addMode,
+                    sourceMode: inferredSourceMode,
                 },
             }),
         );
-        setAddFeedback(`Added "${name}" using command "${cmd}".`);
-        setSelectedCatalogEntry(null);
+        if (result.meta.requestStatus === 'fulfilled') {
+            setAddFeedback(`Added "${name}" using command "${cmd}".`);
+            setSelectedCatalogEntry(null);
+        }
     };
 
     const handleRefreshAll = useCallback(async () => {
@@ -257,6 +343,7 @@ const CelestialTopBar = ({
             id: entry.id,
             displayName: entry.displayName,
             command: entry.command,
+            color: entry.color || '',
             enabled: entry.enabled,
         });
         setEditError('');
@@ -271,8 +358,13 @@ const CelestialTopBar = ({
 
         const name = editForm.displayName.trim();
         const cmd = editForm.command.trim();
+        const normalizedColor = normalizeHexColor(editForm.color);
         if (!name || !cmd) {
             setEditError('Display name and command are required.');
+            return;
+        }
+        if (normalizedColor && !HEX_COLOR_PATTERN.test(normalizedColor)) {
+            setEditError('Color must be a valid hex value like #1A2B3C.');
             return;
         }
 
@@ -291,6 +383,7 @@ const CelestialTopBar = ({
                     id: editForm.id,
                     displayName: name,
                     command: cmd,
+                    color: normalizedColor || null,
                     enabled: editForm.enabled,
                 },
             }),
@@ -304,8 +397,6 @@ const CelestialTopBar = ({
 
         setEditError(result.payload || result.error?.message || 'Failed to update monitored target.');
     };
-
-    const selectedOptions = monitoredOptions.filter((option) => selectedIds.includes(option.id));
 
     return (
         <>
@@ -322,40 +413,24 @@ const CelestialTopBar = ({
                     minHeight: '64px',
                 }}
             >
-                <Autocomplete
-                    multiple
-                    size="small"
-                    options={monitoredOptions}
-                    value={selectedOptions}
-                    onChange={(event, value) => dispatch(setSelectedMonitoredIds(value.map((v) => v.id)))}
-                    isOptionEqualToValue={(opt, val) => opt.id === val.id}
-                    getOptionLabel={(option) => option.label}
-                    renderTags={(tagValue, getTagProps) =>
-                        tagValue.map((option, index) => (
-                            <Chip
-                                {...getTagProps({ index })}
-                                key={option.id}
-                                label={option.label}
-                                size="small"
-                            />
-                        ))
-                    }
-                    renderInput={(params) => (
-                        <TextField {...params} placeholder="Select monitored targets" />
-                    )}
-                    sx={{ flex: 1, minWidth: 260 }}
-                />
-
                 <Stack direction="row" spacing={1} alignItems="center">
                     <Stack direction="row" spacing={0.5} alignItems="center">
                         <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
                             Past
                         </Typography>
-                        <FormControl size="small" sx={{ minWidth: 84 }}>
+                        <FormControl size="small" sx={{ minWidth: 72 }}>
                             <Select
+                                size="small"
                                 value={projectionPastHours}
                                 onChange={(event) => onProjectionPastHoursChange?.(Number(event.target.value))}
                                 disabled={!socket || celestialLoading}
+                                sx={{
+                                    '& .MuiSelect-select': {
+                                        py: 0.5,
+                                        pl: 1,
+                                        pr: 3,
+                                    },
+                                }}
                             >
                                 {HOUR_OPTIONS.map((option) => (
                                     <MenuItem key={`past-${option.value}`} value={option.value}>
@@ -369,11 +444,19 @@ const CelestialTopBar = ({
                         <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
                             Future
                         </Typography>
-                        <FormControl size="small" sx={{ minWidth: 84 }}>
+                        <FormControl size="small" sx={{ minWidth: 72 }}>
                             <Select
+                                size="small"
                                 value={projectionFutureHours}
                                 onChange={(event) => onProjectionFutureHoursChange?.(Number(event.target.value))}
                                 disabled={!socket || celestialLoading}
+                                sx={{
+                                    '& .MuiSelect-select': {
+                                        py: 0.5,
+                                        pl: 1,
+                                        pr: 3,
+                                    },
+                                }}
                             >
                                 {HOUR_OPTIONS.map((option) => (
                                     <MenuItem key={`future-${option.value}`} value={option.value}>
@@ -385,7 +468,7 @@ const CelestialTopBar = ({
                     </Stack>
                 </Stack>
 
-                <Stack direction="row" spacing={1}>
+                <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
                     <Button
                         size="small"
                         variant="outlined"
@@ -415,94 +498,152 @@ const CelestialTopBar = ({
                 </Stack>
             </Box>
 
-            <Dialog open={addDialogOpen} onClose={() => dispatch(closeAddDialog())} maxWidth="sm" fullWidth>
-                <DialogTitle>Add Monitored Celestial Target</DialogTitle>
-                <DialogContent>
-                    <Stack spacing={2} sx={{ pt: 1 }}>
-                        <ToggleButtonGroup
-                            color="primary"
-                            exclusive
-                            size="small"
-                            value={addMode}
-                            onChange={(event, value) => {
-                                if (!value) return;
-                                setAddMode(value);
-                                dispatch(setMonitoredFormError(''));
-                                setAddFeedback('');
-                            }}
-                        >
-                            <ToggleButton value="catalog">Static Catalog</ToggleButton>
-                            <ToggleButton value="exact">Exact Command</ToggleButton>
-                        </ToggleButtonGroup>
-
-                        {addMode === 'catalog' ? (
-                            <FormControl size="small" fullWidth>
-                                <InputLabel id="catalog-spacecraft-select-label">
-                                    Static spacecraft list
-                                </InputLabel>
-                                <Select
-                                    labelId="catalog-spacecraft-select-label"
-                                    label="Static spacecraft list"
-                                    value={selectedCatalogEntry?.id || ''}
-                                    onChange={(event) => {
-                                        const value = String(event.target.value || '');
-                                        const entry = catalogEntries.find((item) => item.id === value) || null;
-                                        setSelectedCatalogEntry(entry);
-                                        setAddFeedback('');
+            <Dialog
+                open={addDialogOpen}
+                onClose={() => dispatch(closeAddDialog())}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{ sx: DIALOG_PAPER_SX }}
+            >
+                <DialogTitle sx={DIALOG_TITLE_SX}>Add Monitored Celestial Target</DialogTitle>
+                <DialogContent sx={DIALOG_CONTENT_SX}>
+                    <Stack spacing={2} sx={{ pt: 3 }}>
+                        <Box>
+                            <Autocomplete
+                                freeSolo
+                                options={catalogEntries}
+                                loading={catalogLoading}
+                            value={selectedCatalogEntry}
+                            inputValue={targetInputValue}
+                            isOptionEqualToValue={(option, value) => option?.id === value?.id}
+                            getOptionDisabled={(option) =>
+                                monitoredCommands.has(String(option?.command || '').trim().toLowerCase())
+                            }
+                            getOptionLabel={(option) => {
+                                if (typeof option === 'string') {
+                                    return option;
+                                }
+                                return option?.display_name || option?.command || '';
+                                }}
+                                onInputChange={(event, value, reason) => {
+                                    setTargetInputValue(value);
+                                    if (reason === 'clear') {
+                                        setSelectedCatalogEntry(null);
+                                        dispatch(setMonitoredFormField({ field: 'displayName', value: '' }));
+                                        dispatch(setMonitoredFormField({ field: 'command', value: '' }));
                                         dispatch(setMonitoredFormError(''));
-                                        if (entry) {
-                                            dispatch(setMonitoredFormField({ field: 'displayName', value: entry.display_name || '' }));
-                                            dispatch(setMonitoredFormField({ field: 'command', value: entry.command || '' }));
-                                        }
-                                    }}
-                                >
-                                    {catalogEntries.map((entry) => (
-                                        <MenuItem key={entry.id} value={entry.id}>
-                                            <Stack spacing={0} sx={{ width: '100%' }}>
-                                                <Typography variant="body2">{entry.display_name}</Typography>
-                                                <Typography
-                                                    variant="caption"
-                                                    color="text.secondary"
-                                                    sx={{ fontFamily: 'monospace' }}
-                                                >
-                                                    {entry.command}{entry.agency ? ` · ${entry.agency}` : ''}
-                                                </Typography>
+                                        setAddFeedback('');
+                                        return;
+                                    }
+                                    if (reason === 'input') {
+                                        const typed = String(value || '');
+                                        setSelectedCatalogEntry(null);
+                                        dispatch(setMonitoredFormField({ field: 'displayName', value: typed }));
+                                        dispatch(setMonitoredFormField({ field: 'command', value: typed }));
+                                        dispatch(setMonitoredFormError(''));
+                                        setAddFeedback('');
+                                    }
+                                }}
+                                onChange={(event, value) => {
+                                    setAddFeedback('');
+                                    dispatch(setMonitoredFormError(''));
+
+                                    if (!value) {
+                                        setSelectedCatalogEntry(null);
+                                        return;
+                                    }
+
+                                    if (typeof value === 'string') {
+                                        setSelectedCatalogEntry(null);
+                                        setTargetInputValue(value);
+                                        dispatch(setMonitoredFormField({ field: 'displayName', value }));
+                                        dispatch(setMonitoredFormField({ field: 'command', value }));
+                                        return;
+                                    }
+
+                                    setSelectedCatalogEntry(value);
+                                    setTargetInputValue(value.display_name || value.command || '');
+                                    dispatch(setMonitoredFormField({ field: 'displayName', value: value.display_name || '' }));
+                                    dispatch(setMonitoredFormField({ field: 'command', value: value.command || '' }));
+                                }}
+                                renderOption={(props, option) => (
+                                    <Box component="li" {...props} key={option.id}>
+                                        <Stack spacing={0.35} sx={{ width: '100%' }}>
+                                            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                                                <Typography variant="body2">{option.display_name}</Typography>
+                                                <Stack direction="row" spacing={0.75} alignItems="center">
+                                                    {monitoredCommands.has(String(option?.command || '').trim().toLowerCase()) ? (
+                                                        <Chip
+                                                            size="small"
+                                                            variant="outlined"
+                                                            color="default"
+                                                            label="Already monitored"
+                                                        />
+                                                    ) : null}
+                                                    <Chip
+                                                        size="small"
+                                                        variant="outlined"
+                                                        color={getMissionStatusMeta(option.mission_status, option.status_label).color}
+                                                        label={getMissionStatusMeta(option.mission_status, option.status_label).label}
+                                                    />
+                                                </Stack>
                                             </Stack>
-                                        </MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                        ) : (
-                            <Typography variant="caption" color="text.secondary">
-                                Manual mode: provide exact Horizons command string.
+                                            <Typography
+                                                variant="caption"
+                                                color="text.secondary"
+                                                sx={{ fontFamily: 'monospace' }}
+                                            >
+                                                {option.command}{option.agency ? ` · ${option.agency}` : ''}
+                                            </Typography>
+                                        </Stack>
+                                    </Box>
+                                )}
+                                renderInput={(params) => (
+                                    <TextField
+                                        {...params}
+                                        label="Target"
+                                        placeholder="Type command or pick from catalog"
+                                        size="small"
+                                        helperText={
+                                            inferredSourceMode === 'catalog'
+                                                ? 'Using static catalog entry.'
+                                                : 'Using exact Horizons command.'
+                                        }
+                                    />
+                                )}
+                            />
+                        </Box>
+                        {selectedCatalogEntry && String(selectedCatalogEntry?.mission_status || '').toLowerCase() !== 'active' ? (
+                            <Typography variant="caption" color="warning.main">
+                                Selected mission is not active; Horizons data may be limited.
                             </Typography>
-                        )}
+                        ) : null}
                         {catalogLoading ? (
                             <Typography variant="caption" color="text.secondary">
                                 Loading spacecraft catalog...
                             </Typography>
                         ) : null}
-
-                        {addMode === 'catalog' ? (
-                            <TextField
-                                label="Display Name"
-                                value={form.displayName}
-                                disabled
-                                fullWidth
-                                size="small"
-                            />
-                        ) : null}
+                        <TextField
+                            label="Display Name"
+                            value={form.displayName}
+                            onChange={(event) =>
+                                dispatch(setMonitoredFormField({ field: 'displayName', value: event.target.value }))
+                            }
+                            fullWidth
+                            size="small"
+                        />
                         <TextField
                             label="Horizons Command"
                             value={form.command}
-                            disabled={addMode === 'catalog'}
                             onChange={(event) =>
                                 {
                                     const nextValue = event.target.value;
                                     dispatch(setMonitoredFormField({ field: 'command', value: nextValue }));
-                                    if (addMode === 'exact') {
+                                    if (!form.displayName || form.displayName === form.command) {
                                         dispatch(setMonitoredFormField({ field: 'displayName', value: nextValue }));
                                     }
+                                    setSelectedCatalogEntry(null);
+                                    setTargetInputValue(nextValue);
                                 }
                             }
                             fullWidth
@@ -525,9 +666,15 @@ const CelestialTopBar = ({
                         ) : null}
                     </Stack>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => dispatch(closeAddDialog())}>Cancel</Button>
-                    <Button onClick={handleAdd} variant="contained" disabled={saveLoading || !socket || celestialLoading}>
+                <DialogActions sx={DIALOG_ACTIONS_SX}>
+                    <Button
+                        onClick={() => dispatch(closeAddDialog())}
+                        variant="outlined"
+                        sx={DIALOG_CANCEL_BUTTON_SX}
+                    >
+                        Cancel
+                    </Button>
+                    <Button onClick={handleAdd} color="success" variant="contained" disabled={saveLoading || !socket || celestialLoading}>
                         Add
                     </Button>
                 </DialogActions>
@@ -538,109 +685,175 @@ const CelestialTopBar = ({
                 onClose={() => dispatch(closeManageDialog())}
                 maxWidth="lg"
                 fullWidth
+                PaperProps={{ sx: DIALOG_PAPER_SX }}
             >
-                <DialogTitle>Manage Monitored Celestial Targets</DialogTitle>
-                <DialogContent>
-                    <Table size="small">
-                        <TableHead>
-                            <TableRow>
-                                <TableCell>Display Name</TableCell>
-                                <TableCell>Horizons Command</TableCell>
-                                <TableCell>Status</TableCell>
-                                <TableCell>Last Refresh</TableCell>
-                                <TableCell>Enabled</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {monitored.length ? (
-                                monitored.map((entry) => {
-                                    const statusMeta = getStatusMeta(entry);
-                                    return (
-                                        <TableRow key={entry.id}>
-                                            <TableCell>{entry.displayName}</TableCell>
-                                            <TableCell>{entry.command}</TableCell>
-                                            <TableCell>
-                                                <Chip
-                                                    size="small"
-                                                    color={statusMeta.color}
-                                                    label={statusMeta.label}
-                                                    variant="outlined"
-                                                />
-                                            </TableCell>
-                                            <TableCell>
-                                                <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-                                                    {formatLastRefresh(entry.lastRefreshAt)}
-                                                </Typography>
-                                                {entry.lastError ? (
-                                                    <Typography variant="caption" color="error" sx={{ display: 'block' }}>
-                                                        {entry.lastError}
-                                                    </Typography>
-                                                ) : null}
-                                            </TableCell>
-                                            <TableCell>
-                                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                                                    <Button
-                                                        size="small"
-                                                        variant="text"
-                                                        onClick={() =>
-                                                            socket && dispatch(toggleMonitoredCelestialEnabled({
-                                                                socket,
-                                                                id: entry.id,
-                                                                enabled: !entry.enabled,
-                                                            }))
-                                                        }
-                                                        disabled={!socket || celestialLoading}
-                                                    >
-                                                        {entry.enabled ? 'Enabled' : 'Disabled'}
-                                                    </Button>
-                                                    <Button
-                                                        size="small"
-                                                        startIcon={<EditIcon />}
-                                                        onClick={() => handleOpenEdit(entry)}
-                                                        disabled={!socket || celestialLoading}
-                                                    >
-                                                        Edit
-                                                    </Button>
-                                                    <Button
-                                                        size="small"
-                                                        color="error"
-                                                        startIcon={<DeleteOutlineIcon />}
-                                                        onClick={() =>
-                                                            socket && dispatch(deleteMonitoredCelestial({
-                                                                socket,
-                                                                ids: [entry.id],
-                                                            }))
-                                                        }
-                                                        disabled={!socket || celestialLoading}
-                                                    >
-                                                        Delete
-                                                    </Button>
-                                                </Stack>
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })
-                            ) : (
+                <DialogTitle sx={DIALOG_TITLE_SX}>Manage Monitored Celestial Targets</DialogTitle>
+                <DialogContent sx={DIALOG_CONTENT_SX}>
+                    <TableContainer
+                        component={Paper}
+                        sx={{
+                            borderRadius: 0,
+                            mt: 2.5,
+                            maxHeight: 460,
+                        }}
+                    >
+                        <Table size="small" stickyHeader>
+                            <TableHead>
                                 <TableRow>
-                                    <TableCell colSpan={5}>
-                                        <Typography variant="body2" color="text.secondary">
-                                            No monitored celestial targets yet.
-                                        </Typography>
-                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Display Name</TableCell>
+                                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Horizons Command</TableCell>
+                                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Mission</TableCell>
+                                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Status</TableCell>
+                                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Last Refresh</TableCell>
+                                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Actions</TableCell>
                                 </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
+                            </TableHead>
+                            <TableBody>
+                                {monitored.length ? (
+                                    monitored.map((entry) => {
+                                        const statusMeta = getStatusMeta(entry);
+                                        const mission = catalogByCommand[String(entry.command || '').toLowerCase()] || null;
+                                        const missionStatusMeta = getMissionStatusMeta(
+                                            mission?.mission_status,
+                                            mission?.status_label,
+                                        );
+                                        return (
+                                            <TableRow
+                                                key={entry.id}
+                                                sx={{
+                                                    '&:nth-of-type(odd)': { bgcolor: 'action.hover' },
+                                                    '& td': { py: 1.15 },
+                                                }}
+                                            >
+                                                <TableCell>{entry.displayName}</TableCell>
+                                                <TableCell>
+                                                    <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                                                        {entry.command}
+                                                    </Typography>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Chip
+                                                        size="small"
+                                                        variant="outlined"
+                                                        color={missionStatusMeta.color}
+                                                        label={missionStatusMeta.label}
+                                                    />
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Chip
+                                                        size="small"
+                                                        color={statusMeta.color}
+                                                        label={statusMeta.label}
+                                                        variant="outlined"
+                                                    />
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                                                        {formatLastRefresh(entry.lastRefreshAt)}
+                                                    </Typography>
+                                                    {entry.lastError ? (
+                                                        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.25 }}>
+                                                            {entry.lastError}
+                                                        </Typography>
+                                                    ) : null}
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                                                        <Button
+                                                            size="small"
+                                                            variant="text"
+                                                            onClick={() =>
+                                                                socket && dispatch(toggleMonitoredCelestialEnabled({
+                                                                    socket,
+                                                                    id: entry.id,
+                                                                    enabled: !entry.enabled,
+                                                                }))
+                                                            }
+                                                            disabled={!socket || celestialLoading}
+                                                        >
+                                                            {entry.enabled ? 'Enabled' : 'Disabled'}
+                                                        </Button>
+                                                        <Button
+                                                            size="small"
+                                                            startIcon={<EditIcon />}
+                                                            onClick={() => handleOpenEdit(entry)}
+                                                            disabled={!socket || celestialLoading}
+                                                        >
+                                                            Edit
+                                                        </Button>
+                                                        <Button
+                                                            size="small"
+                                                            color="error"
+                                                            startIcon={<DeleteOutlineIcon />}
+                                                            onClick={() =>
+                                                                socket && dispatch(deleteMonitoredCelestial({
+                                                                    socket,
+                                                                    ids: [entry.id],
+                                                                }))
+                                                            }
+                                                            disabled={!socket || celestialLoading}
+                                                        >
+                                                            Delete
+                                                        </Button>
+                                                    </Stack>
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })
+                                ) : (
+                                    <TableRow>
+                                        <TableCell colSpan={6} sx={{ py: 4 }}>
+                                            <Typography variant="body2" color="text.secondary" textAlign="center">
+                                                No monitored celestial targets yet.
+                                            </Typography>
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => dispatch(closeManageDialog())}>Close</Button>
+                <DialogActions sx={DIALOG_ACTIONS_SX}>
+                    <Button
+                        onClick={handleRefreshAll}
+                        variant="outlined"
+                        startIcon={<RefreshIcon />}
+                        disabled={!socket || celestialLoading || enabledCount === 0}
+                        sx={DIALOG_CANCEL_BUTTON_SX}
+                    >
+                        Refresh
+                    </Button>
+                    <Button
+                        onClick={() => {
+                            dispatch(openAddDialog());
+                        }}
+                        color="success"
+                        variant="contained"
+                        startIcon={<AddIcon />}
+                        disabled={!socket || celestialLoading}
+                    >
+                        Add
+                    </Button>
+                    <Button
+                        onClick={() => dispatch(closeManageDialog())}
+                        variant="outlined"
+                        sx={DIALOG_CANCEL_BUTTON_SX}
+                    >
+                        Close
+                    </Button>
                 </DialogActions>
             </Dialog>
 
-            <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>Edit Monitored Celestial Target</DialogTitle>
-                <DialogContent>
-                    <Stack spacing={2} sx={{ pt: 1 }}>
+            <Dialog
+                open={editDialogOpen}
+                onClose={() => setEditDialogOpen(false)}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{ sx: DIALOG_PAPER_SX }}
+            >
+                <DialogTitle sx={DIALOG_TITLE_SX}>Edit Monitored Celestial Target</DialogTitle>
+                <DialogContent sx={DIALOG_CONTENT_SX}>
+                    <Stack spacing={2} sx={{ pt: 3 }}>
                         <TextField
                             label="Display Name"
                             value={editForm.displayName}
@@ -659,6 +872,40 @@ const CelestialTopBar = ({
                             fullWidth
                             size="small"
                         />
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                            <TextField
+                                label="Color"
+                                value={editForm.color}
+                                onChange={(event) =>
+                                    setEditForm((prev) => ({ ...prev, color: normalizeHexColor(event.target.value) }))
+                                }
+                                placeholder="#06D6A0"
+                                fullWidth
+                                size="small"
+                            />
+                            <input
+                                type="color"
+                                aria-label="Pick color"
+                                value={HEX_COLOR_PATTERN.test(normalizeHexColor(editForm.color)) ? normalizeHexColor(editForm.color) : '#06D6A0'}
+                                onChange={(event) =>
+                                    setEditForm((prev) => ({ ...prev, color: normalizeHexColor(event.target.value) }))
+                                }
+                                style={{
+                                    width: 46,
+                                    height: 36,
+                                    border: '1px solid rgba(120,120,120,0.35)',
+                                    borderRadius: 6,
+                                    padding: 2,
+                                    background: 'transparent',
+                                }}
+                            />
+                            <Button
+                                size="small"
+                                onClick={() => setEditForm((prev) => ({ ...prev, color: '' }))}
+                            >
+                                Clear
+                            </Button>
+                        </Stack>
                         {editError ? (
                             <Typography variant="body2" color="error">
                                 {editError}
@@ -666,10 +913,17 @@ const CelestialTopBar = ({
                         ) : null}
                     </Stack>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+                <DialogActions sx={DIALOG_ACTIONS_SX}>
+                    <Button
+                        onClick={() => setEditDialogOpen(false)}
+                        variant="outlined"
+                        sx={DIALOG_CANCEL_BUTTON_SX}
+                    >
+                        Cancel
+                    </Button>
                     <Button
                         onClick={handleSaveEdit}
+                        color="success"
                         variant="contained"
                         disabled={saveLoading || !socket || celestialLoading}
                     >
