@@ -300,7 +300,12 @@ const SettingsDialog = ({ open, onClose }) => {
     );
 };
 
-const MonitoredCelestialGridIsland = ({ rows = [], loading = false, onRowDoubleClick = null }) => {
+const MonitoredCelestialGridIsland = ({
+    rows = [],
+    loading = false,
+    onRowDoubleClick = null,
+    onTargetSelected = null,
+}) => {
     const dispatch = useDispatch();
     const tracks = useSelector((state) => state.celestial?.celestialTracks?.celestial || []);
     const {
@@ -543,7 +548,14 @@ const MonitoredCelestialGridIsland = ({ rows = [], loading = false, onRowDoubleC
                     rowSelectionModel={rowSelectionModel}
                     onRowSelectionModelChange={(nextSelection) => {
                         const selected = toSelectedIds(nextSelection);
-                        dispatch(setSelectedMonitoredIds(selected.length ? [selected[0]] : []));
+                        const selectedId = selected.length ? selected[0] : null;
+                        dispatch(setSelectedMonitoredIds(selectedId ? [selectedId] : []));
+                        if (selectedId && onTargetSelected) {
+                            const selectedRow = enrichedRows.find((row) => row.id === selectedId);
+                            if (selectedRow) {
+                                onTargetSelected(selectedRow);
+                            }
+                        }
                     }}
                     onRowDoubleClick={(params) => {
                         if (onRowDoubleClick) {

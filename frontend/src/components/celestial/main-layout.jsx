@@ -32,7 +32,7 @@ import {
     setCelestialMapSettings,
 } from './celestial-slice.jsx';
 import { fetchMonitoredCelestial } from './monitored-slice.jsx';
-import { setOpenGridSettingsDialog, setSelectedMonitoredIds } from './monitored-slice.jsx';
+import { setOpenGridSettingsDialog } from './monitored-slice.jsx';
 import CelestialToolbar from './celestial-toolbar.jsx';
 import CelestialStatusBar from './celestial-statusbar.jsx';
 import SolarSystemCanvas from './solarsystem-canvas.jsx';
@@ -407,9 +407,7 @@ const CelestialMainLayout = () => {
                     <MonitoredCelestialGridIsland
                         rows={monitoredState.monitored || []}
                         loading={Boolean(monitoredState.loading)}
-                        onRowDoubleClick={(row) => {
-                            if (!row?.id) return;
-                            dispatch(setSelectedMonitoredIds([row.id]));
+                        onTargetSelected={(row) => {
                             const type = String(row?.targetType || row?.target_type || 'mission').toLowerCase();
                             const key = String(row?.targetKey || '').trim()
                                 || (type === 'body'

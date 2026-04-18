@@ -26,6 +26,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 20000;
 const WHEEL_COMMIT_DELAY_MS = 180;
+const FOCUS_ANIMATION_DURATION_MS = 420;
 const DEFAULT_VIEWPORT = { zoom: 18, panX: 0, panY: 0 };
 const DEFAULT_DISPLAY_OPTIONS = {
     showGrid: true,
@@ -214,6 +215,7 @@ const SolarSystemCanvas = ({
     const containerRef = useRef(null);
     const canvasRef = useRef(null);
     const wheelCommitTimeoutRef = useRef(null);
+    const viewportAnimationRef = useRef(null);
     const lastFitSignalRef = useRef(fitAllSignal);
     const lastFocusTargetSignalRef = useRef(focusTargetSignal);
     const lastZoomInSignalRef = useRef(zoomInSignal);
@@ -257,6 +259,48 @@ const SolarSystemCanvas = ({
             onViewportCommit(normalizeViewport(nextViewport));
         }
     }, [onViewportCommit]);
+
+    const cancelViewportAnimation = useCallback(() => {
+        if (viewportAnimationRef.current !== null) {
+            window.cancelAnimationFrame(viewportAnimationRef.current);
+            viewportAnimationRef.current = null;
+        }
+    }, []);
+
+    const animateViewportTo = useCallback((nextViewport, durationMs = FOCUS_ANIMATION_DURATION_MS) => {
+        cancelViewportAnimation();
+        const target = normalizeViewport(nextViewport);
+        const start = viewportRef.current;
+        const duration = Math.max(80, Number(durationMs) || FOCUS_ANIMATION_DURATION_MS);
+        const startedAt = performance.now();
+        const easeInOutCubic = (t) =>
+            t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
+
+        const tick = (now) => {
+            const elapsed = now - startedAt;
+            const progress = Math.min(1, elapsed / duration);
+            const eased = easeInOutCubic(progress);
+            const interpolated = {
+                zoom: start.zoom + (target.zoom - start.zoom) * eased,
+                panX: start.panX + (target.panX - start.panX) * eased,
+                panY: start.panY + (target.panY - start.panY) * eased,
+            };
+            viewportRef.current = interpolated;
+            setViewport(interpolated);
+
+            if (progress < 1) {
+                viewportAnimationRef.current = window.requestAnimationFrame(tick);
+                return;
+            }
+
+            viewportAnimationRef.current = null;
+            viewportRef.current = target;
+            setViewport(target);
+            commitViewport(target);
+        };
+
+        viewportAnimationRef.current = window.requestAnimationFrame(tick);
+    }, [cancelViewportAnimation, commitViewport]);
 
     const fitAll = useCallback(() => {
         const container = containerRef.current;
@@ -374,10 +418,8 @@ const SolarSystemCanvas = ({
             panX: -worldCenterX * nextZoom,
             panY: worldCenterY * nextZoom,
         };
-        viewportRef.current = nextViewport;
-        setViewport(nextViewport);
-        commitViewport(nextViewport);
-    }, [tracked, commitViewport]);
+        animateViewportTo(nextViewport, FOCUS_ANIMATION_DURATION_MS);
+    }, [tracked, animateViewportTo]);
 
     const applyZoomAtScreenPoint = useCallback((zoomFactor, anchorX, anchorY) => {
         const container = containerRef.current;
@@ -445,6 +487,91 @@ const SolarSystemCanvas = ({
             const x = cx + (position?.[0] || 0) * scale;
             const y = cy - (position?.[1] || 0) * scale;
             return [x, y];
+        };
+        const solarBodyIds = new Set(
+            (Array.isArray(planets) ? planets : [])
+                .map((body) => String(body?.id || '').trim().toLowerCase())
+                .filter(Boolean),
+        );
+        const shouldHideTrackedLabelAsDuplicate = (body) => {
+            const bodyId = String(body?.body_id || '').trim().toLowerCase();
+            if (bodyId && solarBodyIds.has(bodyId)) return true;
+            const command = String(body?.command || '').trim().toLowerCase();
+            if (command && solarBodyIds.has(command)) return true;
+            const name = String(body?.name || '').trim().toLowerCase();
+            if (name && solarBodyIds.has(name)) return true;
+            return false;
+        };
+
+        const placedLabelBoxes = [];
+        const LABEL_FONT = '11px monospace';
+        const LABEL_LINE_HEIGHT = 10;
+        const LABEL_ROW_STEP = 8;
+        const LABEL_INDENT_STEP = 6;
+        const LABEL_PADDING = 1;
+
+        const boxesOverlap = (a, b) => !(
+            (a.x + a.w) < b.x
+            || (b.x + b.w) < a.x
+            || (a.y + a.h) < b.y
+            || (b.y + b.h) < a.y
+        );
+
+        const placeLabel = (text, baseX, baseY) => {
+            const label = String(text || '');
+            if (!label) return null;
+
+            ctx.save();
+            ctx.font = LABEL_FONT;
+            const width = Math.max(4, ctx.measureText(label).width);
+            ctx.restore();
+
+            const maxRows = 10;
+            for (let row = 0; row <= maxRows; row += 1) {
+                const y = baseY + row * LABEL_ROW_STEP;
+                const x = row > 0 ? baseX + LABEL_INDENT_STEP : baseX;
+                const box = {
+                    x: x - LABEL_PADDING,
+                    y: y - LABEL_PADDING,
+                    w: width + LABEL_PADDING * 2,
+                    h: LABEL_LINE_HEIGHT + LABEL_PADDING * 2,
+                };
+                if (!placedLabelBoxes.some((existing) => boxesOverlap(existing, box))) {
+                    return { x, y, row, box };
+                }
+            }
+
+            const y = baseY + maxRows * LABEL_ROW_STEP;
+            const x = maxRows > 0 ? baseX + LABEL_INDENT_STEP : baseX;
+            return {
+                x,
+                y,
+                row: maxRows,
+                box: {
+                    x: x - LABEL_PADDING,
+                    y: y - LABEL_PADDING,
+                    w: width + LABEL_PADDING * 2,
+                    h: LABEL_LINE_HEIGHT + LABEL_PADDING * 2,
+                },
+            };
+        };
+
+        const drawLabelWithAutoOffset = (text, anchorX, anchorY, color) => {
+            const label = String(text || '');
+            if (!label) return;
+
+            const placement = placeLabel(label, anchorX + 6, anchorY - 6);
+            if (!placement) return;
+
+            ctx.save();
+            ctx.font = LABEL_FONT;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = color;
+            ctx.fillText(label, placement.x, placement.y);
+            ctx.restore();
+
+            placedLabelBoxes.push(placement.box);
         };
 
         // World-space grid (moves with pan/zoom).
@@ -558,7 +685,6 @@ const SolarSystemCanvas = ({
 
         if (effectiveDisplayOptions.showPlanets) {
             // Planets.
-            ctx.font = '11px monospace';
             planets.forEach((planet) => {
                 const id = String(planet.id || '').toLowerCase();
                 const color = PLANET_COLORS[id] || '#bbbbbb';
@@ -570,8 +696,7 @@ const SolarSystemCanvas = ({
                 ctx.fill();
 
                 if (effectiveDisplayOptions.showPlanetLabels) {
-                    ctx.fillStyle = theme.palette.text.secondary;
-                    ctx.fillText(planet.name || id, sx + 7, sy - 6);
+                    drawLabelWithAutoOffset(planet.name || id, sx, sy, theme.palette.text.secondary);
                 }
             });
         }
@@ -627,7 +752,6 @@ const SolarSystemCanvas = ({
 
         // Tracked object markers from Horizons.
         if (effectiveDisplayOptions.showTrackedObjects) {
-            ctx.font = '11px monospace';
             tracked.forEach((body) => {
                 if (!hasFiniteXYZ(body.position_xyz_au)) return;
                 const [sx, sy] = toScreen(body.position_xyz_au);
@@ -646,12 +770,13 @@ const SolarSystemCanvas = ({
                 }
 
                 if (effectiveDisplayOptions.showTrackedLabels) {
-                    ctx.fillStyle = isSelected
+                    if (shouldHideTrackedLabelAsDuplicate(body)) return;
+                    const labelColor = isSelected
                         ? theme.palette.text.primary
                         : isDimmed
                             ? hexToRgba(theme.palette.text.secondary, 0.45)
                             : theme.palette.text.secondary;
-                    ctx.fillText(body.name || body.command || 'object', sx + 8, sy + 4);
+                    drawLabelWithAutoOffset(body.name || body.command || 'object', sx, sy, labelColor);
                 }
             });
         }
@@ -743,11 +868,12 @@ const SolarSystemCanvas = ({
 
     useEffect(() => {
         return () => {
+            cancelViewportAnimation();
             if (wheelCommitTimeoutRef.current) {
                 window.clearTimeout(wheelCommitTimeoutRef.current);
             }
         };
-    }, []);
+    }, [cancelViewportAnimation]);
 
     const handlePointerDown = (event) => {
         if (event.pointerType === 'touch') return;
