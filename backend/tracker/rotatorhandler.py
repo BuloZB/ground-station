@@ -466,6 +466,9 @@ class RotatorHandler:
                     state["settle_hits"] += 1
                     if state["settle_hits"] >= self.tracker.rotator_settle_hits_required:
                         self._reset_slew_state()
+                        # Command is complete; avoid running refresh/retarget checks below
+                        # with the reset timestamp (which would otherwise force a re-command).
+                        return
                 else:
                     state["settle_hits"] = 0
                     self.tracker.rotator_data["slewing"] = True

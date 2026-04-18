@@ -57,6 +57,7 @@ async def fetch_all_preferences(session: AsyncSession) -> dict:
         "locale": "browser",  # Locale for date/time/number formatting (e.g., en-US, en-GB, el-GR)
         "language": "en_US",
         "theme": "auto",
+        "celestial_enabled": "false",
         "stadia_maps_api_key": "",
         "toast_position": "bottom-center",
         "gemini_api_key": "",  # Google Gemini API key for transcription
@@ -320,10 +321,31 @@ async def set_map_settings(session: AsyncSession, data: dict) -> dict:
         now = datetime.now(timezone.utc)
         data["updated"] = now
 
-        existing_record = await session.execute(
+        existing_rows_result = await session.execute(
             select(TrackingState).where(TrackingState.name == data["name"])
         )
-        existing_record = existing_record.scalar_one_or_none()
+        existing_rows = existing_rows_result.scalars().all()
+        existing_record = None
+        duplicate_ids = []
+
+        if existing_rows:
+            # Keep the most recently updated row as canonical and remove duplicates.
+            ordered = sorted(
+                existing_rows,
+                key=lambda row: row.updated
+                or row.added
+                or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )
+            existing_record = ordered[0]
+            duplicate_ids = [row.id for row in ordered[1:]]
+            if duplicate_ids:
+                await session.execute(
+                    delete(TrackingState).where(TrackingState.id.in_(duplicate_ids))
+                )
+                logger.warning(
+                    f"Removed {len(duplicate_ids)} duplicate tracking_state rows for name='{data['name']}'"
+                )
 
         if existing_record:
             for key, value in data.items():
@@ -339,9 +361,9 @@ async def set_map_settings(session: AsyncSession, data: dict) -> dict:
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"Error storing satellite tracking state: {e}")
+        logger.error(f"Error storing map settings: {e}")
         logger.error(traceback.format_exc())
-        return {"success": False, "error": str(e)}
+        return {"success": False, "data": None, "error": str(e)}
 
 
 async def get_map_settings(session: AsyncSession, name: str) -> dict:
@@ -365,13 +387,29 @@ async def get_map_settings(session: AsyncSession, name: str) -> dict:
         map_settings = await session.execute(
             select(TrackingState).where(TrackingState.name == name)
         )
-        map_settings_row = map_settings.scalars().first()
+        map_settings_rows = map_settings.scalars().all()
 
-        if map_settings_row:
-            map_settings_row = serialize_object(map_settings_row)
-            return {"success": True, "data": map_settings_row}
-        else:
+        if not map_settings_rows:
             return {"success": True, "data": {}}
+
+        ordered = sorted(
+            map_settings_rows,
+            key=lambda row: row.updated or row.added or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        map_settings_row = ordered[0]
+
+        # Best-effort cleanup of duplicates for this key.
+        duplicate_ids = [row.id for row in ordered[1:]]
+        if duplicate_ids:
+            await session.execute(delete(TrackingState).where(TrackingState.id.in_(duplicate_ids)))
+            await session.commit()
+            logger.warning(
+                f"Removed {len(duplicate_ids)} duplicate tracking_state rows while reading name='{name}'"
+            )
+
+        map_settings_row = serialize_object(map_settings_row)
+        return {"success": True, "data": map_settings_row}
 
     except Exception as e:
         logger.error(f"Error retrieving map settings: {str(e)}")

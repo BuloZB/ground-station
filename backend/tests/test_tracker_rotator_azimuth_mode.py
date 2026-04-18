@@ -151,3 +151,37 @@ async def test_in_flight_marks_not_slewing_immediately_when_target_is_reached():
     assert tracker.rotator_command_state["in_flight"] is True
     assert tracker.rotator_command_state["settle_hits"] == 1
     assert tracker.rotator_data["slewing"] is False
+
+
+@pytest.mark.asyncio
+async def test_in_flight_settle_completion_does_not_reissue_due_to_refresh():
+    tracker = _DummyTracker("0_360")
+    handler = RotatorHandler(tracker)
+
+    tracker.rotator_data["az"] = 120.0
+    tracker.rotator_data["el"] = 35.0
+    tracker.rotator_data["slewing"] = True
+    tracker.rotator_command_state.update(
+        {
+            "in_flight": True,
+            "target_az": 120.0,
+            "target_el": 35.0,
+            "last_command_ts": time.time(),
+            "settle_hits": 1,
+        }
+    )
+    tracker.rotator_settle_hits_required = 2
+    tracker.rotator_command_refresh_sec = 6.0
+
+    issued = []
+
+    async def _capture_issue(target_az, target_el):
+        issued.append((target_az, target_el))
+
+    handler._issue_rotator_command = _capture_issue
+
+    await handler.control_rotator_position((120.0, 35.0))
+
+    assert issued == []
+    assert tracker.rotator_command_state["in_flight"] is False
+    assert tracker.rotator_data["slewing"] is False

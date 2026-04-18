@@ -107,15 +107,26 @@ async def set_map_settings(
     async with AsyncSessionLocal() as dbsession:
         logger.debug(f"Updating map settings, data: {data}")
         map_settings_reply = await crud.preferences.set_map_settings(dbsession, data)
+        if not map_settings_reply.get("success"):
+            return {
+                "success": False,
+                "data": map_settings_reply.get("data"),
+                "error": map_settings_reply.get("error"),
+            }
 
-        # Emit tracker data so all browsers are informed of the change
-        await emit_tracker_data(dbsession, sio, logger)
-        await emit_ui_tracker_values(dbsession, sio, logger)
+        # Tracker/UI tracker updates are only relevant for target-map-settings.
+        # Avoid unnecessary tracking-state DB load for unrelated map setting keys.
         if data and data.get("name") == "target-map-settings":
+            await emit_tracker_data(dbsession, sio, logger)
+            await emit_ui_tracker_values(dbsession, sio, logger)
             manager = get_tracker_manager()
             manager.notify_map_settings_changed(data.get("value", {}))
 
-        return {"success": map_settings_reply["success"], "data": map_settings_reply["data"]}
+        return {
+            "success": True,
+            "data": map_settings_reply.get("data"),
+            "error": map_settings_reply.get("error"),
+        }
 
 
 def register_handlers(registry):

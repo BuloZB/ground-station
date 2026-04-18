@@ -17,12 +17,14 @@
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 import psutil
+
+from common.iqsamples import require_complex64
 
 # Configure logging for the worker process
 logger = logging.getLogger("sigmf-playback")
@@ -162,6 +164,9 @@ def sigmf_playback_worker_process(
                 recording_start_datetime = datetime.fromisoformat(
                     datetime_str.replace("Z", "+00:00")
                 )
+                # Treat naive datetimes as UTC for backward compatibility.
+                if recording_start_datetime.tzinfo is None:
+                    recording_start_datetime = recording_start_datetime.replace(tzinfo=timezone.utc)
                 logger.info(f"Recording start datetime: {recording_start_datetime}")
             except Exception as e:
                 logger.warning(f"Could not parse recording datetime: {e}")
@@ -290,6 +295,7 @@ def sigmf_playback_worker_process(
 
                 # Convert bytes to complex64 samples
                 samples = parse_iq_samples(data, datatype)
+                samples = require_complex64(samples, source="sigmf-playback-worker")
                 samples_read = len(samples)
                 total_samples_read += samples_read
                 stats["samples_read"] += samples_read
@@ -323,12 +329,12 @@ def sigmf_playback_worker_process(
                             current_recording_datetime = recording_start_datetime + timedelta(
                                 seconds=playback_elapsed_seconds
                             )
-                            # Format as ISO string with Z suffix
+                            # Format as UTC ISO string with Z suffix.
                             recording_datetime = (
-                                current_recording_datetime.replace(
-                                    microsecond=0, tzinfo=None
-                                ).isoformat()
-                                + "Z"
+                                current_recording_datetime.astimezone(timezone.utc)
+                                .replace(microsecond=0)
+                                .isoformat()
+                                .replace("+00:00", "Z")
                             )
 
                         # Broadcast to FFT queue

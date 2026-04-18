@@ -848,7 +848,10 @@ export default function Layout() {
     const { t } = useTranslation();
     const [open, setOpen] = React.useState(false);
     const [mobileOpen, setMobileOpen] = React.useState(false);
-    const [navigation, setNavigation] = React.useState(getNavigation());
+    const preferences = useSelector((state) => state.preferences?.preferences || []);
+    const celestialEnabledPreference = preferences.find((pref) => pref.name === 'celestial_enabled');
+    const showCelestial = String(celestialEnabledPreference?.value ?? 'false').toLowerCase() === 'true';
+    const [navigation, setNavigation] = React.useState(getNavigation({ showCelestial }));
     const { timezone, locale } = useUserTimeSettings();
 
     const {
@@ -879,8 +882,8 @@ export default function Layout() {
 
     // Update navigation when language changes or state changes
     React.useEffect(() => {
-        setNavigation(getNavigation());
-    }, [t]);
+        setNavigation(getNavigation({ showCelestial }));
+    }, [t, showCelestial]);
 
     useEffect(() => {
         console.info('Initializing audio...');

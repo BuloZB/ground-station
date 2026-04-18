@@ -344,6 +344,26 @@ class Cameras(Base):
     )
 
 
+class MonitoredCelestial(Base):
+    """User-managed list of Horizons targets to track in the celestial page."""
+
+    __tablename__ = "monitored_celestial"
+
+    id = Column(String, primary_key=True, nullable=False)
+    display_name = Column(String, nullable=False)
+    command = Column(String, nullable=False, unique=True, index=True)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    last_refresh_at = Column(AwareDateTime, nullable=True)
+    last_error = Column(String, nullable=True)
+    created_at = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))
+    updated_at = Column(
+        AwareDateTime,
+        nullable=False,
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+    )
+
+
 class ObservationStatus(str, PyEnum):
     SCHEDULED = "scheduled"
     RUNNING = "running"

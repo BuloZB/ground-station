@@ -7,6 +7,7 @@ from db import AsyncSessionLocal
 
 # Import all entity modules to register their handlers
 from handlers.entities import (
+    celestial,
     decoderconfig,
     groups,
     hardware,
@@ -57,6 +58,7 @@ def _register_all_handlers():
     sessions.register_handlers(handler_registry)
     scheduler.register_handlers(handler_registry)
     decoderconfig.register_handlers(handler_registry)
+    celestial.register_handlers(handler_registry)
 
 
 # Register all handlers at module load time

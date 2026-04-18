@@ -22,6 +22,7 @@ run as expected.
 
 from . import tlesources  # noqa: F401
 from . import (
+    celestial,
     filebrowser,
     groups,
     hardware,
@@ -50,4 +51,5 @@ __all__ = [
     "vfo",
     "systeminfo",
     "sessions",
+    "celestial",
 ]

@@ -58,6 +58,7 @@ const EDITABLE_KEYS = [
     'locale',
     'language',
     'theme',
+    'celestial_enabled',
     'toast_position',
     'stadia_maps_api_key',
     'gemini_api_key',
@@ -424,12 +425,42 @@ const PreferencesForm = () => {
 
                         <Box>
                             <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
+                                {t('preferences.labs', { defaultValue: 'Labs' })}
+                            </Typography>
+                            <Divider sx={{ mb: 2 }} />
+
+                            <Grid container spacing={2} columns={12}>
+                                <Grid size={{ xs: 12, md: 6 }}>
+                                    <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
+                                        <InputLabel>{t('preferences.celestial_page')}</InputLabel>
+                                        <Select
+                                            value={draft.celestial_enabled || 'false'}
+                                            label={t('preferences.celestial_page')}
+                                            onChange={(event) => handleDraftChange('celestial_enabled', event.target.value)}
+                                        >
+                                            <MenuItem value="false">
+                                                {t('preferences.celestial_hidden', { defaultValue: 'Hidden (default)' })}
+                                            </MenuItem>
+                                            <MenuItem value="true">
+                                                {t('preferences.celestial_visible', { defaultValue: 'Visible' })}
+                                            </MenuItem>
+                                        </Select>
+                                        <FormHelperText>
+                                            {t('preferences.celestial_page_help', { defaultValue: 'Show or hide the Celestial page while it is under development.' })}
+                                        </FormHelperText>
+                                    </FormControl>
+                                </Grid>
+                            </Grid>
+                        </Box>
+
+                        <Box>
+                            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
                                 {t('preferences.api_configuration')}
                             </Typography>
                             <Divider sx={{ mb: 2 }} />
 
                             <Grid container spacing={2} columns={12}>
-                                <Grid size={{ xs: 12, md: 8 }}>
+                                <Grid size={{ xs: 12, md: 6 }}>
                                     <SecretsField
                                         fieldKey="stadia_maps_api_key"
                                         label={t('preferences.stadia_maps_api_key')}
@@ -454,161 +485,165 @@ const PreferencesForm = () => {
                             </Typography>
                             <Divider sx={{ mb: 2 }} />
 
-                            <Stack spacing={1.25}>
-                                <Accordion disableGutters>
-                                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                        <Stack direction="row" spacing={1} alignItems="center">
-                                            <Typography fontWeight={600}>{t('preferences.gemini_api_key', { defaultValue: 'Gemini API Key' })}</Typography>
-                                            <Chip
-                                                size="small"
-                                                color={draft.gemini_api_key ? 'success' : 'default'}
-                                                label={draft.gemini_api_key
-                                                    ? t('preferences.configured', { defaultValue: 'Configured' })
-                                                    : t('preferences.not_configured', { defaultValue: 'Not configured' })}
-                                            />
-                                        </Stack>
-                                    </AccordionSummary>
-                                    <AccordionDetails>
-                                        <Stack spacing={1.5}>
-                                            <SecretsField
-                                                fieldKey="gemini_api_key"
-                                                label={t('preferences.gemini_api_key', { defaultValue: 'Gemini API Key' })}
-                                                value={draft.gemini_api_key || ''}
-                                                placeholder="AIza..."
-                                                helperText={t('preferences.gemini_api_key_help', { defaultValue: 'Google Gemini API key for audio transcription. Get yours at ai.google.dev.' })}
-                                                statusLabel={draft.gemini_api_key
-                                                    ? t('preferences.configured', { defaultValue: 'Configured' })
-                                                    : t('preferences.not_configured', { defaultValue: 'Not configured' })}
-                                                visible={visibleSecrets.gemini_api_key}
-                                                onToggleVisibility={() => toggleSecretVisibility('gemini_api_key')}
-                                                onChange={(value) => handleDraftChange('gemini_api_key', value)}
-                                                disabled={isSaving || isLoading}
-                                            />
-                                            <Typography variant="caption" color="text.secondary">
-                                                {t('preferences.gemini_privacy_text', { defaultValue: 'When enabled, audio is sent to Google servers. You are responsible for associated usage costs.' })}
-                                            </Typography>
-                                            <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-                                                <a
-                                                    href="https://ai.google.dev/gemini-api/terms"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    aria-label={t('preferences.gemini_terms_link_aria', { defaultValue: 'Open Gemini Terms in a new tab' })}
-                                                >
-                                                    {t('preferences.gemini_terms_link', { defaultValue: 'Gemini Terms' })}
-                                                </a>
-                                                <a
-                                                    href="https://github.com/sgoudelis/ground-station/blob/main/TRANSCRIPTION_PRIVACY.md"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    aria-label={t('preferences.privacy_notice_link_aria', { defaultValue: 'Open privacy notice in a new tab' })}
-                                                >
-                                                    {t('preferences.privacy_notice_link', { defaultValue: 'Privacy Notice' })}
-                                                </a>
-                                            </Stack>
-                                        </Stack>
-                                    </AccordionDetails>
-                                </Accordion>
+                            <Grid container spacing={2} columns={12}>
+                                <Grid size={{ xs: 12, md: 6 }}>
+                                    <Stack spacing={1.25}>
+                                        <Accordion disableGutters>
+                                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                                <Stack direction="row" spacing={1} alignItems="center">
+                                                    <Typography fontWeight={600}>{t('preferences.gemini_api_key', { defaultValue: 'Gemini API Key' })}</Typography>
+                                                    <Chip
+                                                        size="small"
+                                                        color={draft.gemini_api_key ? 'success' : 'default'}
+                                                        label={draft.gemini_api_key
+                                                            ? t('preferences.configured', { defaultValue: 'Configured' })
+                                                            : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                    />
+                                                </Stack>
+                                            </AccordionSummary>
+                                            <AccordionDetails>
+                                                <Stack spacing={1.5}>
+                                                    <SecretsField
+                                                        fieldKey="gemini_api_key"
+                                                        label={t('preferences.gemini_api_key', { defaultValue: 'Gemini API Key' })}
+                                                        value={draft.gemini_api_key || ''}
+                                                        placeholder="AIza..."
+                                                        helperText={t('preferences.gemini_api_key_help', { defaultValue: 'Google Gemini API key for audio transcription. Get yours at ai.google.dev.' })}
+                                                        statusLabel={draft.gemini_api_key
+                                                            ? t('preferences.configured', { defaultValue: 'Configured' })
+                                                            : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                        visible={visibleSecrets.gemini_api_key}
+                                                        onToggleVisibility={() => toggleSecretVisibility('gemini_api_key')}
+                                                        onChange={(value) => handleDraftChange('gemini_api_key', value)}
+                                                        disabled={isSaving || isLoading}
+                                                    />
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {t('preferences.gemini_privacy_text', { defaultValue: 'When enabled, audio is sent to Google servers. You are responsible for associated usage costs.' })}
+                                                    </Typography>
+                                                    <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                                                        <a
+                                                            href="https://ai.google.dev/gemini-api/terms"
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            aria-label={t('preferences.gemini_terms_link_aria', { defaultValue: 'Open Gemini Terms in a new tab' })}
+                                                        >
+                                                            {t('preferences.gemini_terms_link', { defaultValue: 'Gemini Terms' })}
+                                                        </a>
+                                                        <a
+                                                            href="https://github.com/sgoudelis/ground-station/blob/main/TRANSCRIPTION_PRIVACY.md"
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            aria-label={t('preferences.privacy_notice_link_aria', { defaultValue: 'Open privacy notice in a new tab' })}
+                                                        >
+                                                            {t('preferences.privacy_notice_link', { defaultValue: 'Privacy Notice' })}
+                                                        </a>
+                                                    </Stack>
+                                                </Stack>
+                                            </AccordionDetails>
+                                        </Accordion>
 
-                                <Accordion disableGutters>
-                                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                        <Stack direction="row" spacing={1} alignItems="center">
-                                            <Typography fontWeight={600}>{t('preferences.deepgram_api_key', { defaultValue: 'Deepgram API Key' })}</Typography>
-                                            <Chip
-                                                size="small"
-                                                color={draft.deepgram_api_key ? 'success' : 'default'}
-                                                label={draft.deepgram_api_key
-                                                    ? t('preferences.configured', { defaultValue: 'Configured' })
-                                                    : t('preferences.not_configured', { defaultValue: 'Not configured' })}
-                                            />
-                                        </Stack>
-                                    </AccordionSummary>
-                                    <AccordionDetails>
-                                        <Stack spacing={1.5}>
-                                            <SecretsField
-                                                fieldKey="deepgram_api_key"
-                                                label={t('preferences.deepgram_api_key', { defaultValue: 'Deepgram API Key' })}
-                                                value={draft.deepgram_api_key || ''}
-                                                placeholder={t('preferences.api_key_placeholder', { defaultValue: 'Paste API key' })}
-                                                helperText={t('preferences.deepgram_api_key_help', { defaultValue: 'Deepgram API key for audio transcription. Get yours at deepgram.com.' })}
-                                                statusLabel={draft.deepgram_api_key
-                                                    ? t('preferences.configured', { defaultValue: 'Configured' })
-                                                    : t('preferences.not_configured', { defaultValue: 'Not configured' })}
-                                                visible={visibleSecrets.deepgram_api_key}
-                                                onToggleVisibility={() => toggleSecretVisibility('deepgram_api_key')}
-                                                onChange={(value) => handleDraftChange('deepgram_api_key', value)}
-                                                disabled={isSaving || isLoading}
-                                            />
-                                            <Typography variant="caption" color="text.secondary">
-                                                {t('preferences.deepgram_privacy_text', { defaultValue: 'When enabled, audio is sent to Deepgram servers. You are responsible for associated usage costs.' })}
-                                            </Typography>
-                                            <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-                                                <a
-                                                    href="https://deepgram.com/pricing"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    aria-label={t('preferences.deepgram_pricing_link_aria', { defaultValue: 'Open Deepgram pricing in a new tab' })}
-                                                >
-                                                    {t('preferences.deepgram_pricing_link', { defaultValue: 'Deepgram Pricing' })}
-                                                </a>
-                                                <a
-                                                    href="https://github.com/sgoudelis/ground-station/blob/main/TRANSCRIPTION_PRIVACY.md"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    aria-label={t('preferences.privacy_notice_link_aria', { defaultValue: 'Open privacy notice in a new tab' })}
-                                                >
-                                                    {t('preferences.privacy_notice_link', { defaultValue: 'Privacy Notice' })}
-                                                </a>
-                                            </Stack>
-                                        </Stack>
-                                    </AccordionDetails>
-                                </Accordion>
+                                        <Accordion disableGutters>
+                                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                                <Stack direction="row" spacing={1} alignItems="center">
+                                                    <Typography fontWeight={600}>{t('preferences.deepgram_api_key', { defaultValue: 'Deepgram API Key' })}</Typography>
+                                                    <Chip
+                                                        size="small"
+                                                        color={draft.deepgram_api_key ? 'success' : 'default'}
+                                                        label={draft.deepgram_api_key
+                                                            ? t('preferences.configured', { defaultValue: 'Configured' })
+                                                            : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                    />
+                                                </Stack>
+                                            </AccordionSummary>
+                                            <AccordionDetails>
+                                                <Stack spacing={1.5}>
+                                                    <SecretsField
+                                                        fieldKey="deepgram_api_key"
+                                                        label={t('preferences.deepgram_api_key', { defaultValue: 'Deepgram API Key' })}
+                                                        value={draft.deepgram_api_key || ''}
+                                                        placeholder={t('preferences.api_key_placeholder', { defaultValue: 'Paste API key' })}
+                                                        helperText={t('preferences.deepgram_api_key_help', { defaultValue: 'Deepgram API key for audio transcription. Get yours at deepgram.com.' })}
+                                                        statusLabel={draft.deepgram_api_key
+                                                            ? t('preferences.configured', { defaultValue: 'Configured' })
+                                                            : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                        visible={visibleSecrets.deepgram_api_key}
+                                                        onToggleVisibility={() => toggleSecretVisibility('deepgram_api_key')}
+                                                        onChange={(value) => handleDraftChange('deepgram_api_key', value)}
+                                                        disabled={isSaving || isLoading}
+                                                    />
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {t('preferences.deepgram_privacy_text', { defaultValue: 'When enabled, audio is sent to Deepgram servers. You are responsible for associated usage costs.' })}
+                                                    </Typography>
+                                                    <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                                                        <a
+                                                            href="https://deepgram.com/pricing"
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            aria-label={t('preferences.deepgram_pricing_link_aria', { defaultValue: 'Open Deepgram pricing in a new tab' })}
+                                                        >
+                                                            {t('preferences.deepgram_pricing_link', { defaultValue: 'Deepgram Pricing' })}
+                                                        </a>
+                                                        <a
+                                                            href="https://github.com/sgoudelis/ground-station/blob/main/TRANSCRIPTION_PRIVACY.md"
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            aria-label={t('preferences.privacy_notice_link_aria', { defaultValue: 'Open privacy notice in a new tab' })}
+                                                        >
+                                                            {t('preferences.privacy_notice_link', { defaultValue: 'Privacy Notice' })}
+                                                        </a>
+                                                    </Stack>
+                                                </Stack>
+                                            </AccordionDetails>
+                                        </Accordion>
 
-                                <Accordion disableGutters>
-                                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                        <Stack direction="row" spacing={1} alignItems="center">
-                                            <Typography fontWeight={600}>{t('preferences.google_translate_api_key', { defaultValue: 'Google Translate API Key' })}</Typography>
-                                            <Chip
-                                                size="small"
-                                                color={draft.google_translate_api_key ? 'success' : 'default'}
-                                                label={draft.google_translate_api_key
-                                                    ? t('preferences.configured', { defaultValue: 'Configured' })
-                                                    : t('preferences.not_configured', { defaultValue: 'Not configured' })}
-                                            />
-                                        </Stack>
-                                    </AccordionSummary>
-                                    <AccordionDetails>
-                                        <Stack spacing={1.5}>
-                                            <SecretsField
-                                                fieldKey="google_translate_api_key"
-                                                label={t('preferences.google_translate_api_key', { defaultValue: 'Google Translate API Key' })}
-                                                value={draft.google_translate_api_key || ''}
-                                                placeholder="AIza..."
-                                                helperText={t('preferences.google_translate_api_key_help', { defaultValue: 'Google Cloud Translation API key for translating Deepgram transcriptions.' })}
-                                                statusLabel={draft.google_translate_api_key
-                                                    ? t('preferences.configured', { defaultValue: 'Configured' })
-                                                    : t('preferences.not_configured', { defaultValue: 'Not configured' })}
-                                                visible={visibleSecrets.google_translate_api_key}
-                                                onToggleVisibility={() => toggleSecretVisibility('google_translate_api_key')}
-                                                onChange={(value) => handleDraftChange('google_translate_api_key', value)}
-                                                disabled={isSaving || isLoading}
-                                            />
-                                            <Typography variant="caption" color="text.secondary">
-                                                {t('preferences.google_translate_privacy_text', { defaultValue: 'Used for translation of transcript text through Google Cloud Translation.' })}
-                                            </Typography>
-                                            <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-                                                <a
-                                                    href="https://cloud.google.com/translate/pricing"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    aria-label={t('preferences.google_translate_pricing_link_aria', { defaultValue: 'Open Google Translate pricing in a new tab' })}
-                                                >
-                                                    {t('preferences.google_translate_pricing_link', { defaultValue: 'Google Translate Pricing' })}
-                                                </a>
-                                            </Stack>
-                                        </Stack>
-                                    </AccordionDetails>
-                                </Accordion>
-                            </Stack>
+                                        <Accordion disableGutters>
+                                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                                <Stack direction="row" spacing={1} alignItems="center">
+                                                    <Typography fontWeight={600}>{t('preferences.google_translate_api_key', { defaultValue: 'Google Translate API Key' })}</Typography>
+                                                    <Chip
+                                                        size="small"
+                                                        color={draft.google_translate_api_key ? 'success' : 'default'}
+                                                        label={draft.google_translate_api_key
+                                                            ? t('preferences.configured', { defaultValue: 'Configured' })
+                                                            : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                    />
+                                                </Stack>
+                                            </AccordionSummary>
+                                            <AccordionDetails>
+                                                <Stack spacing={1.5}>
+                                                    <SecretsField
+                                                        fieldKey="google_translate_api_key"
+                                                        label={t('preferences.google_translate_api_key', { defaultValue: 'Google Translate API Key' })}
+                                                        value={draft.google_translate_api_key || ''}
+                                                        placeholder="AIza..."
+                                                        helperText={t('preferences.google_translate_api_key_help', { defaultValue: 'Google Cloud Translation API key for translating Deepgram transcriptions.' })}
+                                                        statusLabel={draft.google_translate_api_key
+                                                            ? t('preferences.configured', { defaultValue: 'Configured' })
+                                                            : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                        visible={visibleSecrets.google_translate_api_key}
+                                                        onToggleVisibility={() => toggleSecretVisibility('google_translate_api_key')}
+                                                        onChange={(value) => handleDraftChange('google_translate_api_key', value)}
+                                                        disabled={isSaving || isLoading}
+                                                    />
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {t('preferences.google_translate_privacy_text', { defaultValue: 'Used for translation of transcript text through Google Cloud Translation.' })}
+                                                    </Typography>
+                                                    <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                                                        <a
+                                                            href="https://cloud.google.com/translate/pricing"
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            aria-label={t('preferences.google_translate_pricing_link_aria', { defaultValue: 'Open Google Translate pricing in a new tab' })}
+                                                        >
+                                                            {t('preferences.google_translate_pricing_link', { defaultValue: 'Google Translate Pricing' })}
+                                                        </a>
+                                                    </Stack>
+                                                </Stack>
+                                            </AccordionDetails>
+                                        </Accordion>
+                                    </Stack>
+                                </Grid>
+                            </Grid>
                         </Box>
                     </Stack>
 

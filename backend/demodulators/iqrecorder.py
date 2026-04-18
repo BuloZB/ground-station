@@ -26,6 +26,8 @@ from typing import Any, Dict
 import numpy as np
 from scipy.signal import resample_poly
 
+from common.iqsamples import require_complex64
+
 logger = logging.getLogger("iq-recorder")
 
 
@@ -118,11 +120,16 @@ class IQRecorder(threading.Thread):
                     self.stats["last_activity"] = time.time()
 
                 samples = iq_message.get("samples")
-                center_freq = iq_message.get("center_freq")
+                center_freq = iq_message.get(
+                    "logical_center_freq_hz", iq_message.get("center_freq")
+                )
                 sample_rate = iq_message.get("sample_rate")
                 timestamp = iq_message.get("timestamp")
 
-                if samples is None or len(samples) == 0:
+                if samples is None:
+                    continue
+                samples = require_complex64(samples, source="IQRecorder")
+                if len(samples) == 0:
                     continue
 
                 # Update sample count

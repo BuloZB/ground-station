@@ -50,6 +50,7 @@ import {WakeLockProvider} from "./components/dashboard/wake-lock-provider.jsx";
 import SatelliteInfoPage from "./components/satellites/satellite-info-page.jsx";
 import FilebrowserMain from "./components/filebrowser/filebrowser-main.jsx";
 import ScheduledObservationsLayout from "./components/scheduler/main-layout.jsx";
+import CelestialRouteGuard from "./components/celestial/celestial-route-guard.jsx";
 
 const enableStrictMode = import.meta.env.VITE_REACT_STRICT_MODE !== 'false';
 
@@ -82,6 +83,10 @@ const router = createBrowserRouter([
                     {
                         path: "scheduler",
                         Component: ScheduledObservationsLayout,
+                    },
+                    {
+                        path: "celestial",
+                        Component: CelestialRouteGuard,
                     },
                     {
                         path: "satellite/:noradId",

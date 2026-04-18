@@ -35,8 +35,13 @@ export default function App() {
     const { socket } = useSocket();
     const { i18n } = useTranslation();
     const preferences = useSelector((state) => state.preferences.preferences);
-    const [navigation, setNavigation] = React.useState(getNavigation());
+    const celestialEnabledPreference = preferences.find((pref) => pref.name === 'celestial_enabled');
+    const showCelestial = String(celestialEnabledPreference?.value ?? 'false').toLowerCase() === 'true';
     const [systemTheme, setSystemTheme] = React.useState('dark');
+    const navigation = React.useMemo(
+        () => getNavigation({ showCelestial }),
+        [showCelestial, i18n.language],
+    );
 
     // Get theme preference and create theme
     const themePreference = preferences.find(pref => pref.name === 'theme');
@@ -73,22 +78,7 @@ export default function App() {
                 i18n.changeLanguage(languageCode);
             }
         }
-        // Regenerate navigation after language is set
-        setNavigation(getNavigation());
-    }, [preferences, i18n]);
-
-    // Update navigation when language changes
-    React.useEffect(() => {
-        const handleLanguageChange = () => {
-            setNavigation(getNavigation());
-        };
-
-        i18n.on('languageChanged', handleLanguageChange);
-
-        return () => {
-            i18n.off('languageChanged', handleLanguageChange);
-        };
-    }, [i18n]);
+    }, [preferences, i18n, showCelestial]);
 
     useSocketEventHandlers(socket);
     usePassFetching(socket);
@@ -96,6 +86,7 @@ export default function App() {
     return (
         <AudioProvider>
             <ReactRouterAppProvider
+                key={`app-provider-${i18n.language}-${showCelestial ? 'celestial-on' : 'celestial-off'}`}
                 navigation={navigation}
                 theme={dashboardTheme}
                 branding={BRANDING}

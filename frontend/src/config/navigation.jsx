@@ -30,7 +30,7 @@ import WavesIcon from '@mui/icons-material/Waves';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import FolderIcon from '@mui/icons-material/Folder';
 import i18n from '../i18n/config.js';
-import { TleIcon } from '../components/common/custom-icons.jsx';
+import { CelestialSolarIcon, TleIcon } from '../components/common/custom-icons.jsx';
 import { Box, CircularProgress } from '@mui/material';
 import SyncIcon from '@mui/icons-material/Sync';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -246,21 +246,33 @@ const SchedulerIconWithStatus = () => {
     );
 };
 
-export const getNavigation = () => [
-    {
-        kind: 'header',
-        title: i18n.t('tracking', { ns: 'navigation' }),
-    },
-    {
-        segment: '',
-        title: i18n.t('birds_eye_view', { ns: 'navigation' }),
-        icon: <PublicIcon/>,
-    },
-    {
-        segment: 'track',
-        title: i18n.t('tracking_console', { ns: 'navigation' }),
-        icon: <GpsFixedIcon/>,
-    },
+export const getNavigation = ({ showCelestial = false } = {}) => {
+    const trackingSection = [
+        {
+            kind: 'header',
+            title: i18n.t('tracking', { ns: 'navigation' }),
+        },
+        {
+            segment: '',
+            title: i18n.t('birds_eye_view', { ns: 'navigation' }),
+            icon: <PublicIcon/>,
+        },
+        ...(showCelestial
+            ? [{
+                segment: 'celestial',
+                title: 'Celestial',
+                icon: <CelestialSolarIcon />,
+            }]
+            : []),
+        {
+            segment: 'track',
+            title: i18n.t('tracking_console', { ns: 'navigation' }),
+            icon: <GpsFixedIcon/>,
+        },
+    ];
+
+    return [
+        ...trackingSection,
     {
         segment: 'waterfall',
         title: i18n.t('waterfall_view', { ns: 'navigation' }),
@@ -352,7 +364,8 @@ export const getNavigation = () => [
         title: i18n.t('about', { ns: 'navigation' }),
         icon: <InfoIcon/>,
     },
-];
+    ];
+};
 
 // Keep NAVIGATION for backward compatibility but make it dynamic
 export const NAVIGATION = getNavigation();

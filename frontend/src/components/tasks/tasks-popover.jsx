@@ -215,12 +215,15 @@ const BackgroundTasksPopover = () => {
     // Determine if there are any tasks (running or completed)
     const hasTasks = runningTaskIds.length > 0 || completedTaskIds.length > 0;
 
-    // Only show icon if there are tasks and we're not in the hiding transition
-    const shouldShowIcon = connected && hasTasks;
+    // Show icon whenever there are tasks and we're not in the hiding transition
+    const shouldShowIcon = hasTasks;
 
     // Socket connection event handlers
     useEffect(() => {
         if (!socket) return;
+
+        // Initialize from current socket state in case the component mounts after connect.
+        setConnected(Boolean(socket.connected));
 
         const handleConnect = () => {
             setConnected(true);
@@ -289,7 +292,6 @@ const BackgroundTasksPopover = () => {
     }, [tasks]);
 
     const handleClick = (event) => {
-        if (!connected) return;
         setAnchorEl(event.currentTarget);
     };
 
@@ -574,7 +576,6 @@ const BackgroundTasksPopover = () => {
                 <IconButton
                     ref={buttonRef}
                     onClick={handleClick}
-                    disabled={!connected}
                     sx={{
                         color: getIconColor(),
                         position: 'relative',

@@ -70,6 +70,11 @@ const preferencesSlice = createSlice({
             },
             {
                 id: null,
+                name: 'celestial_enabled',
+                value: 'false',
+            },
+            {
+                id: null,
                 value: 'Europe/Athens',
                 name: 'timezone',
             },
