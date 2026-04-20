@@ -18,13 +18,10 @@
  */
 
 import React, { useCallback, useState, useEffect, useMemo } from "react";
-import { Box, Typography, Chip, Tooltip, Button } from "@mui/material";
+import { Box, Typography, Chip, Tooltip, Button, FormControl, InputLabel, Select, MenuItem } from "@mui/material";
 import { useDispatch, useSelector } from "react-redux";
 import { useSocket } from "../common/socket.jsx";
 import { useTranslation } from 'react-i18next';
-import SatelliteSearchAutocomplete from "./satellite-search.jsx";
-import GroupDropdown from "./group-dropdown.jsx";
-import SatelliteList from "./satellite-dropdown.jsx";
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
@@ -33,10 +30,15 @@ import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import GpsOffIcon from '@mui/icons-material/GpsOff';
 import StopIcon from '@mui/icons-material/Stop';
 import {
-    setSatelliteId,
-    setTrackingStateInBackend,
     setAvailableTransmitters,
+    setRotator,
+    setSatelliteId,
+    setTrackerId,
+    setTrackingStateInBackend,
 } from './target-slice.jsx';
+import { toast } from "../../utils/toast-with-timestamp.jsx";
+import SatelliteSearchAutocomplete from "./satellite-search.jsx";
+import { useTargetRotatorSelectionDialog } from "./use-target-rotator-selection-dialog.jsx";
 
 const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBar() {
     const { socket } = useSocket();
@@ -45,57 +47,99 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
 
     const {
         trackingState,
-        selectedRadioRig,
-        selectedRotator,
-        selectedTransmitter,
-        groupOfSats,
+        trackerId,
         satellitePasses,
         satelliteId,
         satelliteData,
+        selectedRadioRig,
+        selectedTransmitter,
         rigData,
         rotatorData,
     } = useSelector((state) => state.targetSatTrack);
+    const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
+    const activeTrackerInstance = useMemo(
+        () => trackerInstances.find((instance) => instance.tracker_id === trackerId) || null,
+        [trackerInstances, trackerId]
+    );
+    const activeTargetNumber = activeTrackerInstance?.target_number
+        || (trackerInstances.findIndex((instance) => instance.tracker_id === trackerId) + 1)
+        || null;
 
     const selectedSatellitePositions = useSelector(state => state.overviewSatTrack.selectedSatellitePositions);
+    const trackerViews = useSelector((state) => state.targetSatTrack?.trackerViews || {});
+    const { requestRotatorForTarget, dialog: rotatorSelectionDialog } = useTargetRotatorSelectionDialog();
 
     const [countdown, setCountdown] = useState('');
-
-    function getTransmittersForSatelliteId(satelliteId) {
-        if (satelliteId && groupOfSats.length > 0) {
-            const satellite = groupOfSats.find(s => s.norad_id === satelliteId);
-            if (satellite) {
-                return satellite.transmitters || [];
-            } else {
-                return [];
-            }
-        }
-        return [];
-    }
-
-    const handleSatelliteSelect = useCallback((satellite) => {
-        dispatch(setSatelliteId(satellite.norad_id));
-        dispatch(setAvailableTransmitters(getTransmittersForSatelliteId(satellite.norad_id)));
-
-        // set the tracking state in the backend to the new norad id and leave the state as is
-        const data = {
-            ...trackingState,
-            norad_id: satellite.norad_id,
-            group_id: satellite.groups[0].id,
-            rig_id: selectedRadioRig,
-            rotator_id: selectedRotator,
-            transmitter_id: selectedTransmitter,
-        };
-        dispatch(setTrackingStateInBackend({ socket, data: data}));
-    }, [dispatch, socket, trackingState, selectedRadioRig, selectedRotator, selectedTransmitter, groupOfSats]);
+    const [searchResetKey, setSearchResetKey] = useState(0);
 
     const handleTrackingStop = useCallback(() => {
         const newTrackingState = {
             ...trackingState,
+            tracker_id: trackerId,
             'rotator_state': "stopped",
             'rig_state': "stopped",
         };
         dispatch(setTrackingStateInBackend({socket, data: newTrackingState}));
-    }, [dispatch, socket, trackingState]);
+    }, [dispatch, socket, trackingState, trackerId]);
+
+    const handleTargetContextChange = useCallback((event) => {
+        dispatch(setTrackerId(event.target.value));
+    }, [dispatch]);
+
+    const getTransmittersFromSatellite = useCallback((satellite) => {
+        if (!satellite || typeof satellite !== 'object') {
+            return [];
+        }
+        if (Array.isArray(satellite.transmitters)) {
+            return satellite.transmitters;
+        }
+        return [];
+    }, []);
+
+    const handleRetargetSatelliteSelect = useCallback(async (satellite) => {
+        if (!satellite?.norad_id) {
+            return;
+        }
+
+        const selectedAssignment = await requestRotatorForTarget(satellite?.name);
+        if (!selectedAssignment) {
+            return;
+        }
+
+        const { rotatorId, trackerId: selectedTrackerId } = selectedAssignment;
+        const selectedGroupId = satellite?.groups?.[0]?.id || trackingState?.group_id || "";
+        const nextTransmitters = getTransmittersFromSatellite(satellite);
+
+        dispatch(setSatelliteId(satellite.norad_id));
+        dispatch(setRotator(rotatorId));
+        dispatch(setTrackerId(selectedTrackerId));
+        dispatch(setAvailableTransmitters(nextTransmitters));
+
+        const data = {
+            ...trackingState,
+            tracker_id: selectedTrackerId,
+            norad_id: satellite.norad_id,
+            group_id: selectedGroupId,
+            rig_id: selectedRadioRig,
+            rotator_id: rotatorId,
+            transmitter_id: selectedTransmitter,
+        };
+
+        try {
+            await dispatch(setTrackingStateInBackend({ socket, data })).unwrap();
+            setSearchResetKey((value) => value + 1);
+        } catch (error) {
+            toast.error(error?.message || 'Failed to set target');
+        }
+    }, [
+        dispatch,
+        getTransmittersFromSatellite,
+        requestRotatorForTarget,
+        selectedRadioRig,
+        selectedTransmitter,
+        socket,
+        trackingState,
+    ]);
 
     // Get current active pass or next upcoming pass
     const passInfo = useMemo(() => {
@@ -181,6 +225,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     }, [passInfo]);
 
     return (
+        <>
+        {rotatorSelectionDialog}
         <Box
             sx={{
                 // Mobile/Tablet: two-column grid (main area + narrow stop column)
@@ -201,41 +247,56 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                 maxHeight: { lg: '64px' },
             }}
         >
-            {/* Search field with autocomplete */}
             <Box
                 sx={{
                     gridColumn: { xs: '1 / 2', lg: 'auto' },
                     gridRow: { xs: '1 / 2', lg: 'auto' },
-                    width: { lg: '40%' },
-                    minWidth: { lg: 250 },
-                    maxWidth: { lg: 350 },
-                    flexShrink: { lg: 1 },
+                    display: 'flex',
+                    alignItems: 'center',
+                    flex: { lg: '0 0 420px' },
+                    minWidth: { xs: 0, lg: 320 },
+                    maxWidth: { lg: 420 },
                 }}
             >
-                <SatelliteSearchAutocomplete onSatelliteSelect={handleSatelliteSelect} />
+                <FormControl size="small" fullWidth>
+                    <InputLabel id="active-target-context-label">Active Target</InputLabel>
+                    <Select
+                        labelId="active-target-context-label"
+                        value={trackerId || ''}
+                        label="Active Target"
+                        onChange={handleTargetContextChange}
+                    >
+                        {trackerInstances.map((instance, index) => {
+                            const instanceTrackerId = instance?.tracker_id || '';
+                            const targetNumber = Number(instance?.target_number || (index + 1));
+                            const view = trackerViews?.[instanceTrackerId] || {};
+                            const satName = view?.satelliteData?.details?.name || 'No satellite';
+                            const satNorad = view?.trackingState?.norad_id || 'none';
+                            const rotatorId = view?.selectedRotator || instance?.rotator_id || 'none';
+                            return (
+                                <MenuItem key={instanceTrackerId} value={instanceTrackerId}>
+                                    {`Target ${targetNumber} • ${satName} • NORAD ${satNorad} • Rotator ${rotatorId}`}
+                                </MenuItem>
+                            );
+                        })}
+                    </Select>
+                </FormControl>
             </Box>
-
-            {/* Group + Satellite dropdowns (side-by-side) */}
             <Box
                 sx={{
                     gridColumn: { xs: '1 / 2', lg: 'auto' },
                     gridRow: { xs: '2 / 3', lg: 'auto' },
-                    display: { xs: 'grid', lg: 'flex' },
-                    gridTemplateColumns: { xs: '1fr 1fr' },
-                    gap: '16px',
-                    flex: { lg: 1 },
-                    minWidth: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    flex: { lg: '0 0 360px' },
+                    minWidth: { xs: 0, lg: 280 },
+                    maxWidth: { lg: 360 },
                 }}
             >
-                {/* Group selector dropdown */}
-                <Box sx={{ minWidth: { xs: 120, sm: 150 }, maxWidth: { lg: 200 }, flex: 1 }}>
-                    <GroupDropdown />
-                </Box>
-
-                {/* Satellite selector dropdown */}
-                <Box sx={{ minWidth: { xs: 120, sm: 180 }, maxWidth: { lg: 280 }, flex: 1 }}>
-                    <SatelliteList />
-                </Box>
+                <SatelliteSearchAutocomplete
+                    key={searchResetKey}
+                    onSatelliteSelect={handleRetargetSatelliteSelect}
+                />
             </Box>
 
             {/* Pills + Stop (desktop row) OR Stop only (mobile/tablet column) */}
@@ -271,6 +332,21 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                         />
                     </Tooltip>
                 )}
+
+                <Tooltip
+                    title={
+                        activeTrackerInstance
+                            ? `Target ${activeTargetNumber || '?'} | tracker ${activeTrackerInstance.tracker_id} | rotator ${activeTrackerInstance.rotator_id || 'none'}`
+                            : `Tracker ${trackerId || 'none'}`
+                    }
+                >
+                    <Chip
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                        label={activeTrackerInstance ? `Target ${activeTargetNumber || '?'}` : 'No target'}
+                    />
+                </Tooltip>
 
                 {/* Current elevation with trend */}
                 {satelliteId && satelliteData?.position && (
@@ -349,6 +425,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                 )}
             </Box>
         </Box>
+        </>
     );
 });
 

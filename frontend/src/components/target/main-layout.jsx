@@ -54,11 +54,12 @@ import {
     satellitePathsSelector,
     satelliteTransmittersSelector
 } from './state-selectors.jsx';
-import ControllerTabs from "../common/controller.jsx";
 import TargetSatelliteMapContainer from './satellite-map.jsx';
 import TargetSatelliteTransmittersIsland from "./satellite-transmitters.jsx";
 import SatellitePassTimeline from "./timeline-main.jsx";
 import TargetSatelliteSelectorBar from "./target-satellite-selector-bar.jsx";
+import RotatorControl from "../dashboard/rotator-control.jsx";
+import RigControl from "../dashboard/rig-control.jsx";
 
 
 // global leaflet map object
@@ -113,6 +114,22 @@ function normalizeLayoutsResizeHandles(layouts) {
                 }))
                 : items,
         ]),
+    );
+}
+
+function ensureLayoutsContainRequiredItems(layouts, defaultLayouts) {
+    if (!layouts || typeof layouts !== 'object') {
+        return layouts;
+    }
+
+    return Object.fromEntries(
+        Object.entries(layouts).map(([breakpoint, items]) => {
+            const currentItems = Array.isArray(items) ? [...items] : [];
+            const defaultItems = Array.isArray(defaultLayouts?.[breakpoint]) ? defaultLayouts[breakpoint] : [];
+            const currentKeys = new Set(currentItems.map((item) => item?.i).filter(Boolean));
+            const missingDefaults = defaultItems.filter((item) => item?.i && !currentKeys.has(item.i));
+            return [breakpoint, [...currentItems, ...missingDefaults]];
+        }),
     );
 }
 
@@ -287,6 +304,22 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
             "i": "timeline",
             "moved": false,
             "static": false
+        }, {
+            "w": 6,
+            "h": 9,
+            "x": 0,
+            "y": 26,
+            "i": "rotator-control",
+            "moved": false,
+            "static": false
+        }, {
+            "w": 6,
+            "h": 9,
+            "x": 6,
+            "y": 26,
+            "i": "rig-control",
+            "moved": false,
+            "static": false
         }],
         "md": [{
             "w": 4,
@@ -324,6 +357,22 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
             "i": "timeline",
             "moved": false,
             "static": false
+        }, {
+            "w": 5,
+            "h": 9,
+            "x": 0,
+            "y": 30,
+            "i": "rotator-control",
+            "moved": false,
+            "static": false
+        }, {
+            "w": 5,
+            "h": 9,
+            "x": 5,
+            "y": 30,
+            "i": "rig-control",
+            "moved": false,
+            "static": false
         }],
         "sm": [{
             "w": 6,
@@ -359,6 +408,22 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
             "x": 0,
             "y": 15,
             "i": "timeline",
+            "moved": false,
+            "static": false
+        }, {
+            "w": 3,
+            "h": 9,
+            "x": 0,
+            "y": 45,
+            "i": "rotator-control",
+            "moved": false,
+            "static": false
+        }, {
+            "w": 3,
+            "h": 9,
+            "x": 3,
+            "y": 45,
+            "i": "rig-control",
             "moved": false,
             "static": false
         }],
@@ -407,6 +472,22 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
             "i": "timeline",
             "moved": false,
             "static": false
+        }, {
+            "w": 2,
+            "h": 9,
+            "x": 0,
+            "y": 64,
+            "i": "rotator-control",
+            "moved": false,
+            "static": false
+        }, {
+            "w": 2,
+            "h": 9,
+            "x": 0,
+            "y": 73,
+            "i": "rig-control",
+            "moved": false,
+            "static": false
         }]
     };
 
@@ -428,11 +509,13 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     // we load any stored layouts from localStorage or fallback to default
     const [layouts, setLayouts] = useState(() => {
         const loaded = loadLayoutsFromLocalStorage();
-        return normalizeLayoutsResizeHandles(loaded ?? defaultLayouts);
+        const mergedLayouts = ensureLayoutsContainRequiredItems((loaded ?? defaultLayouts), defaultLayouts);
+        return normalizeLayoutsResizeHandles(mergedLayouts);
     });
 
     function handleLayoutsChange(currentLayout, allLayouts) {
-        const normalizedLayouts = normalizeLayoutsResizeHandles(allLayouts);
+        const mergedLayouts = ensureLayoutsContainRequiredItems(allLayouts, defaultLayouts);
+        const normalizedLayouts = normalizeLayoutsResizeHandles(mergedLayouts);
         setLayouts(normalizedLayouts);
         saveLayoutsToLocalStorage(normalizedLayouts);
     }
@@ -485,11 +568,14 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
                 showGeostationarySatellites={true}
             />
         </StyledIslandParentNoScrollbar>,
+        <StyledIslandParentScrollbar key="rotator-control">
+            <RotatorControl />
+        </StyledIslandParentScrollbar>,
+        <StyledIslandParentScrollbar key="rig-control">
+            <RigControl />
+        </StyledIslandParentScrollbar>,
         // <StyledIslandParentScrollbar key="video">
         //     <CameraView/>
-        // </StyledIslandParentScrollbar>,
-        // <StyledIslandParentScrollbar key="rotator-control">
-        //     <ControllerTabs />
         // </StyledIslandParentScrollbar>,
     ];
 

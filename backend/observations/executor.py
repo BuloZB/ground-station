@@ -21,7 +21,6 @@ import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
-from common.constants import TrackingStateNames
 from common.logger import logger
 from common.sdrconfig import SDRConfig
 from crud import trackingstate
@@ -49,6 +48,7 @@ from server import runtimestate
 from session.service import session_service
 from session.tracker import session_tracker
 from tasks.registry import get_task
+from tracker.contracts import get_tracking_state_name
 from vfos.state import INTERNAL_VFO_NUMBER, VFOManager
 
 KNOWN_SATDUMP_PIPELINES = {
@@ -183,9 +183,10 @@ class ObservationExecutor:
             # 3. If rotator is required and currently parked, either unpark or cancel
             rotator_config = observation.get("rotator", {})
             if rotator_config.get("tracking_enabled") and rotator_config.get("id"):
+                state_name = get_tracking_state_name(rotator_config.get("id"))
                 async with AsyncSessionLocal() as session:
                     tracking_state_reply = await trackingstate.get_tracking_state(
-                        session, TrackingStateNames.SATELLITE_TRACKING
+                        session, state_name
                     )
                 if tracking_state_reply.get("success"):
                     tracking_value = (tracking_state_reply.get("data") or {}).get("value", {})

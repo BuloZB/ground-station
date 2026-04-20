@@ -21,37 +21,31 @@
 import * as React from "react";
 import {
     Box,
+    Button,
     IconButton,
     Popover,
+    Stack,
     Typography,
-    Divider,
     Chip,
-    Grid,
-    Button,
-    Card,
-    Link,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { shallowEqual, useSelector } from "react-redux";
+import { shallowEqual, useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import Tooltip from "@mui/material/Tooltip";
 import { useTranslation } from 'react-i18next';
 import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
 import InfoIcon from '@mui/icons-material/Info';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import EditIcon from '@mui/icons-material/Edit';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
-import { humanizeFrequency, formatLegibleDateTime, betterStatusValue } from "../common/common.jsx";
-import SatSelectorIsland from "../target/satellite-selector.jsx";
-import { SatellitePassTimeline } from "../target/timeline-main.jsx";
-import TransmittersDialog from "../satellites/transmitters-dialog.jsx";
-import { calculateElevationCurve } from "../../utils/elevation-curve-calculator.js";
+import { formatLegibleDateTime } from "../common/common.jsx";
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDate as formatDateHelper } from '../../utils/date-time.js';
+import { setTrackerId } from "../target/target-slice.jsx";
+import FleetTargetRow from "../common/fleet-target-row.jsx";
 
 const EMPTY_OPEN_TARGET_DATA = Object.freeze({
     satelliteData: {
@@ -66,34 +60,49 @@ const EMPTY_OPEN_TARGET_DATA = Object.freeze({
 });
 
 const SatelliteInfoPopover = () => {
+    const dispatch = useDispatch();
     const theme = useTheme();
     const buttonRef = useRef(null);
     const [anchorEl, setAnchorEl] = useState(null);
-    const [transmittersDialogOpen, setTransmittersDialogOpen] = useState(false);
     const navigate = useNavigate();
     const { t } = useTranslation('dashboard');
     const { timezone, locale } = useUserTimeSettings();
 
     const open = Boolean(anchorEl);
+    const trackerId = useSelector((state) => state.targetSatTrack?.trackerId || "");
+    const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
+    const trackerViews = useSelector((state) => state.targetSatTrack?.trackerViews || {});
 
     // Keep closed-state subscriptions intentionally lightweight.
+    const selectedTrackerView = (trackerId && trackerViews?.[trackerId]) || null;
     const targetSummary = useSelector((state) => {
         const target = state.targetSatTrack || {};
-        const details = target.satelliteData?.details || {};
-        const position = target.satelliteData?.position || {};
+        const details = selectedTrackerView?.satelliteData?.details || target.satelliteData?.details || {};
+        const position = selectedTrackerView?.satelliteData?.position || target.satelliteData?.position || {};
+        const trackingState = selectedTrackerView?.trackingState || target.trackingState || {};
+        const rotatorData = selectedTrackerView?.rotatorData || target.rotatorData || {};
 
         return {
             noradId: details.norad_id ?? null,
             name: details.name ?? '',
             elevation: Number.isFinite(position.el) ? Math.round(position.el * 10) / 10 : position.el,
-            trackingNoradId: target.trackingState?.norad_id ?? null,
-            minElevation: target.rotatorData?.minel ?? 0,
+            trackingNoradId: trackingState?.norad_id ?? null,
+            minElevation: rotatorData?.minel ?? 0,
         };
     }, shallowEqual);
 
     const openTargetData = useSelector((state) => {
         if (!open) {
             return EMPTY_OPEN_TARGET_DATA;
+        }
+        if (selectedTrackerView) {
+            return {
+                satelliteData: selectedTrackerView?.satelliteData || EMPTY_OPEN_TARGET_DATA.satelliteData,
+                trackingState: selectedTrackerView?.trackingState || EMPTY_OPEN_TARGET_DATA.trackingState,
+                rotatorData: selectedTrackerView?.rotatorData || EMPTY_OPEN_TARGET_DATA.rotatorData,
+                satellitePasses: state.targetSatTrack?.satellitePasses || EMPTY_OPEN_TARGET_DATA.satellitePasses,
+                groundStationLocation: state.location?.location || EMPTY_OPEN_TARGET_DATA.groundStationLocation,
+            };
         }
         return {
             satelliteData: state.targetSatTrack?.satelliteData || EMPTY_OPEN_TARGET_DATA.satelliteData,
@@ -127,13 +136,25 @@ const SatelliteInfoPopover = () => {
         open ? openTargetData.rotatorData : { minel: targetSummary.minElevation }
     ), [open, openTargetData.rotatorData, targetSummary.minElevation]);
     const satellitePasses = open ? openTargetData.satellitePasses : EMPTY_OPEN_TARGET_DATA.satellitePasses;
-    const groundStationLocation = open ? openTargetData.groundStationLocation : EMPTY_OPEN_TARGET_DATA.groundStationLocation;
-
-    // Combine details and transmitters for the TransmittersTable component
-    const targetSatelliteData = satelliteData.details ? {
-        ...satelliteData.details,
-        transmitters: satelliteData.transmitters || []
-    } : null;
+    const fleetRows = useMemo(() => {
+        return trackerInstances.map((instance, index) => {
+            const instanceTrackerId = instance?.tracker_id || '';
+            const targetNumber = Number(instance?.target_number || (index + 1));
+            const view = trackerViews?.[instanceTrackerId] || {};
+            const satName = view?.satelliteData?.details?.name || 'No satellite';
+            const satNorad = view?.trackingState?.norad_id || 'none';
+            const elevation = view?.satelliteData?.position?.el;
+            const isActive = instanceTrackerId === trackerId;
+            return {
+                trackerId: instanceTrackerId,
+                targetNumber,
+                satName,
+                satNorad,
+                elevation,
+                isActive,
+            };
+        });
+    }, [trackerInstances, trackerViews, trackerId]);
 
     const handleClick = (event) => {
         setAnchorEl(event.currentTarget);
@@ -270,51 +291,6 @@ const SatelliteInfoPopover = () => {
     );
 
     const statusInfo = getSatelliteStatus(theme);
-
-    // Determine the current active pass
-    const getCurrentActivePass = () => {
-        if (!satellitePasses || satellitePasses.length === 0) return null;
-        if (!satelliteData.details?.norad_id) return null;
-
-        const now = new Date();
-        return satellitePasses.find(pass => {
-            if (pass.norad_id !== satelliteData.details.norad_id) {
-                return false;
-            }
-            const passStart = new Date(pass.event_start);
-            const passEnd = new Date(pass.event_end);
-            return now >= passStart && now <= passEnd;
-        });
-    };
-
-    const currentActivePass = useMemo(() => {
-        if (!open) return null;
-        return getCurrentActivePass();
-    }, [open, satellitePasses, satelliteData.details?.norad_id]);
-
-    // Calculate elevation curve for the active pass on-the-fly
-    const enhancedActivePass = useMemo(() => {
-        if (!open) return null;
-        if (!currentActivePass || !satelliteData.details.tle1 || !groundStationLocation) {
-            return currentActivePass;
-        }
-
-        // Calculate elevation curve for this single pass
-        const elevationCurve = calculateElevationCurve(
-            satelliteData.details, // Has tle1, tle2, norad_id
-            groundStationLocation,
-            currentActivePass.event_start,
-            currentActivePass.event_end,
-            30 // Extend start by 30 minutes for better curve display
-        );
-
-        return {
-            ...currentActivePass,
-            elevation_curve: elevationCurve
-        };
-    }, [currentActivePass, satelliteData.details.tle1, satelliteData.details.tle2, groundStationLocation]);
-
-    const showTimeline = satelliteData.details.norad_id && enhancedActivePass;
 
     // Memoize the next pass calculation to prevent unnecessary recalculations
     const nextPass = useMemo(() => {
@@ -567,6 +543,26 @@ const SatelliteInfoPopover = () => {
                     backgroundColor: 'background.paper',
                     color: 'text.primary',
                 }}>
+                    {trackerInstances.length > 1 && (
+                        <Stack spacing={0.6} sx={{ mb: 1 }}>
+                            {fleetRows.map((row) => (
+                                <FleetTargetRow
+                                    key={row.trackerId}
+                                    targetNumber={row.targetNumber}
+                                    satName={row.satName}
+                                    satNorad={row.satNorad}
+                                    elevation={row.elevation}
+                                    isActive={row.isActive}
+                                    onFocus={() => dispatch(setTrackerId(row.trackerId))}
+                                    onOpenConsole={() => {
+                                        dispatch(setTrackerId(row.trackerId));
+                                        navigate('/track');
+                                        handleClose();
+                                    }}
+                                />
+                            ))}
+                        </Stack>
+                    )}
                     {/* Status Banner with Satellite Name */}
                     <Box sx={{
                         mb: 1,
@@ -620,178 +616,56 @@ const SatelliteInfoPopover = () => {
                     </Box>
 
                     {satelliteData.details.norad_id ? (
-                        <>
-                            {/* Position Information */}
-                            <Box sx={{
-                                mb: 1,
-                                p: 1.5,
-                                borderRadius: 1,
-                                backgroundColor: 'action.hover'
-                            }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                                    <Typography variant="subtitle2" sx={{ color: 'info.light', fontWeight: 'bold' }}>
-                                        {t('target_popover.sections.current_position')}
-                                    </Typography>
-                                    <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                                        <Link
-                                            component="button"
-                                            onClick={handleNavigateToSatelliteInfo}
-                                            sx={{
-                                                color: 'text.disabled',
-                                                fontSize: '0.7rem',
-                                                textDecoration: 'none',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 0.3,
-                                                '&:hover': {
-                                                    color: 'info.light',
-                                                    textDecoration: 'underline',
-                                                },
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            View info
-                                            <OpenInNewIcon sx={{ fontSize: '0.75rem' }} />
-                                        </Link>
-                                        <Typography sx={{ color: 'text.disabled', fontSize: '0.7rem' }}>•</Typography>
-                                        <Link
-                                            component="button"
-                                            onClick={() => {
-                                                setTransmittersDialogOpen(true);
-                                                handleClose();
-                                            }}
-                                            sx={{
-                                                color: 'text.disabled',
-                                                fontSize: '0.7rem',
-                                                textDecoration: 'none',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 0.3,
-                                                '&:hover': {
-                                                    color: 'info.light',
-                                                    textDecoration: 'underline',
-                                                },
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            Edit transmitters
-                                            <EditIcon sx={{ fontSize: '0.75rem' }} />
-                                        </Link>
-                                    </Box>
-                                </Box>
-                                <Grid container spacing={1}>
-                                    <Grid size={4}>
-                                        <Typography variant="body2" component="div" sx={{color: 'text.secondary'}}>
-                                            <strong>{t('target_popover.latitude')}</strong>
-                                        </Typography>
-                                        <Typography variant="body2" component="div">
-                                            <NumericValue
-                                                color="info.light">{satelliteData.position.lat?.toFixed(4)}°</NumericValue>
-                                        </Typography>
-                                    </Grid>
-                                    <Grid size={4}>
-                                        <Typography variant="body2" component="div" sx={{color: 'text.secondary'}}>
-                                            <strong>{t('target_popover.longitude')}</strong>
-                                        </Typography>
-                                        <Typography variant="body2" component="div">
-                                            <NumericValue
-                                                color="info.light">{satelliteData.position.lon?.toFixed(4)}°</NumericValue>
-                                        </Typography>
-                                    </Grid>
-                                    <Grid size={4}>
-                                        <Typography variant="body2" component="div" sx={{color: 'text.secondary'}}>
-                                            <strong>{t('target_popover.azimuth')}</strong>
-                                        </Typography>
-                                        <Typography variant="body2" component="div">
-                                            <NumericValue
-                                                color="secondary.light">{satelliteData.position.az?.toFixed(2)}°</NumericValue>
-                                        </Typography>
-                                    </Grid>
-                                    <Grid size={4}>
-                                        <Typography variant="body2" component="div" sx={{color: 'text.secondary'}}>
-                                            <strong>{t('target_popover.altitude')}</strong>
-                                        </Typography>
-                                        <Typography variant="body2" component="div">
-                                            <NumericValue
-                                                color="success.light">{(satelliteData.position.alt / 1000)?.toFixed(2)} km</NumericValue>
-                                        </Typography>
-                                    </Grid>
-                                    <Grid size={4}>
-                                        <Typography variant="body2" component="div" sx={{color: 'text.secondary'}}>
-                                            <strong>{t('target_popover.velocity')}</strong>
-                                        </Typography>
-                                        <Typography variant="body2" component="div">
-                                            <NumericValue
-                                                color="warning.light">{satelliteData.position.vel?.toFixed(2)} km/s</NumericValue>
-                                        </Typography>
-                                    </Grid>
-                                    <Grid size={4}>
-                                        <Typography variant="body2" component="div" sx={{color: 'text.secondary'}}>
-                                            <strong>{t('target_popover.elevation')}</strong>
-                                        </Typography>
-                                        <Typography variant="body2" component="div">
-                                            <NumericValue
-                                                color={getElevationColor(satelliteData.position.el)}>{satelliteData.position.el?.toFixed(2)}°</NumericValue>
-                                        </Typography>
-                                    </Grid>
-                                </Grid>
+                        <Box sx={{ mb: 1, p: 1.2, borderRadius: 1, backgroundColor: 'action.hover' }}>
+                            <Stack direction="row" spacing={0.6} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+                                <Chip size="small" label={`NORAD ${satelliteData.details.norad_id}`} />
+                                <Chip size="small" label={`Az ${satelliteData.position.az?.toFixed(1)}°`} />
+                                <Chip size="small" label={`El ${satelliteData.position.el?.toFixed(1)}°`} />
+                                <Chip size="small" label={`Vel ${satelliteData.position.vel?.toFixed(2)} km/s`} />
+                            </Stack>
+                            <Box
+                                sx={{
+                                    minHeight: 92,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backgroundColor: 'background.paper',
+                                    borderRadius: 1,
+                                    border: '1px dashed',
+                                    borderColor: 'divider',
+                                    mb: 1,
+                                }}
+                            >
+                                <NextPassCountdown pass={nextPass} />
                             </Box>
-
-                        </>
-                    ) : null}
-
-                    {/* Active Pass Timeline - show when there's an active pass, otherwise show countdown */}
-                    {satelliteData.details.norad_id && (
-                        <Box sx={{ mb: 1, height: '150px' }}>
-                            {showTimeline ? (
-                                <SatellitePassTimeline
-                                    singlePassMode={true}
-                                    passId={enhancedActivePass.id}
-                                    passesOverride={[enhancedActivePass]}
-                                    showSunShading={false}
-                                    showSunMarkers={false}
-                                    satelliteName={satelliteData.details.name}
-                                    showTitleBar={false}
-                                    showGeostationarySatellites={true}
-                                />
-                            ) : (
-                                <Box
-                                    sx={{
-                                        height: '100%',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        backgroundColor: 'action.hover',
-                                        borderRadius: 1,
-                                        border: '1px dashed',
-                                        borderColor: 'divider',
+                            <Stack direction="row" spacing={1}>
+                                <Button
+                                    fullWidth
+                                    size="small"
+                                    variant="outlined"
+                                    endIcon={<OpenInNewIcon />}
+                                    onClick={handleNavigateToSatelliteInfo}
+                                >
+                                    View Satellite
+                                </Button>
+                                <Button
+                                    fullWidth
+                                    size="small"
+                                    variant="contained"
+                                    endIcon={<OpenInNewIcon />}
+                                    onClick={() => {
+                                        navigate('/track');
+                                        handleClose();
                                     }}
                                 >
-                                    <NextPassCountdown pass={nextPass} />
-                                </Box>
-                            )}
+                                    Open Tracking Console
+                                </Button>
+                            </Stack>
                         </Box>
-                    )}
-
-                    {/* Satellite Selector */}
-                    <Box sx={{ mb: 0 }}>
-                        <SatSelectorIsland
-                            initialNoradId={satelliteData.details.norad_id}
-                            initialGroupId={trackingState.group_id}
-                        />
-                    </Box>
+                    ) : null}
                 </Box>
                 )}
             </Popover>
-
-            {/* Transmitters Dialog */}
-            <TransmittersDialog
-                open={transmittersDialogOpen}
-                onClose={() => setTransmittersDialogOpen(false)}
-                title={`${satelliteData.details?.name || ''} - Transmitters`}
-                satelliteData={targetSatelliteData}
-                variant="elevated"
-            />
         </>
     );
 };
