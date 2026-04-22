@@ -621,14 +621,37 @@ const targetSatTrackSlice = createSlice({
                 }
 
             if (action.payload['satellite_data']) {
-                const normalizedSatelliteData = normalizeSatelliteData(action.payload['satellite_data']);
-                trackerView.satelliteData.details = normalizedSatelliteData.details;
-                trackerView.satelliteData.position = normalizedSatelliteData.position;
-                trackerView.satelliteData.paths = normalizedSatelliteData.paths;
-                trackerView.satelliteData.coverage = normalizedSatelliteData.coverage;
-                trackerView.satelliteData.transmitters = normalizedSatelliteData.transmitters;
-                trackerView.satelliteData.nextPass = action.payload['satellite_data']['nextPass'];
-                if (!action.payload['tracking_state'] && normalizedSatelliteData?.details?.norad_id != null) {
+                const rawSatelliteData = action.payload['satellite_data'] || {};
+                const normalizedSatelliteData = normalizeSatelliteData(rawSatelliteData);
+                const hasDetails = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'details') && rawSatelliteData.details != null;
+                const hasPosition = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'position');
+                const hasPaths = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'paths');
+                const hasCoverage = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'coverage');
+                const hasTransmitters = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'transmitters');
+                const hasNextPass = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'nextPass');
+
+                if (hasDetails) {
+                    trackerView.satelliteData.details = {
+                        ...(trackerView.satelliteData.details || {}),
+                        ...(normalizedSatelliteData.details || {}),
+                    };
+                }
+                if (hasPosition) {
+                    trackerView.satelliteData.position = normalizedSatelliteData.position;
+                }
+                if (hasPaths) {
+                    trackerView.satelliteData.paths = normalizedSatelliteData.paths;
+                }
+                if (hasCoverage) {
+                    trackerView.satelliteData.coverage = normalizedSatelliteData.coverage;
+                }
+                if (hasTransmitters) {
+                    trackerView.satelliteData.transmitters = normalizedSatelliteData.transmitters;
+                }
+                if (hasNextPass) {
+                    trackerView.satelliteData.nextPass = rawSatelliteData.nextPass;
+                }
+                if (!action.payload['tracking_state'] && hasDetails && normalizedSatelliteData?.details?.norad_id != null) {
                     trackerView.satelliteId = normalizedSatelliteData.details.norad_id;
                 }
             }
@@ -663,36 +686,63 @@ const targetSatTrackSlice = createSlice({
             }
 
             if (action.payload['satellite_data']) {
-                const normalizedSatelliteData = normalizeSatelliteData(action.payload['satellite_data']);
-                state.satelliteData.details = normalizedSatelliteData.details;
-                state.satelliteData.position = normalizedSatelliteData.position;
-                state.satelliteData.paths = normalizedSatelliteData.paths;
-                state.satelliteData.coverage = normalizedSatelliteData.coverage;
-                const incomingTransmitters = normalizedSatelliteData.transmitters;
-                const incomingNoradId = action.payload['satellite_data']?.details?.norad_id;
-                const lockMatchesSatellite = (
-                    state.transmitterSyncLock?.noradId != null
-                    && String(state.transmitterSyncLock.noradId) === String(incomingNoradId)
-                );
-                const lockActive = lockMatchesSatellite
-                    && Number(state.transmitterSyncLock.expiresAtMs || 0) > Date.now();
+                const rawSatelliteData = action.payload['satellite_data'] || {};
+                const normalizedSatelliteData = normalizeSatelliteData(rawSatelliteData);
+                const hasDetails = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'details') && rawSatelliteData.details != null;
+                const hasPosition = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'position');
+                const hasPaths = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'paths');
+                const hasCoverage = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'coverage');
+                const hasTransmitters = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'transmitters');
+                const hasNextPass = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'nextPass');
 
-                if (!lockActive) {
-                    state.satelliteData.transmitters = incomingTransmitters;
-                    if (lockMatchesSatellite) {
+                if (hasDetails) {
+                    state.satelliteData.details = {
+                        ...(state.satelliteData.details || {}),
+                        ...(normalizedSatelliteData.details || {}),
+                    };
+                }
+                if (hasPosition) {
+                    state.satelliteData.position = normalizedSatelliteData.position;
+                }
+                if (hasPaths) {
+                    state.satelliteData.paths = normalizedSatelliteData.paths;
+                }
+                if (hasCoverage) {
+                    state.satelliteData.coverage = normalizedSatelliteData.coverage;
+                }
+
+                if (hasTransmitters) {
+                    const incomingTransmitters = normalizedSatelliteData.transmitters;
+                    const incomingNoradId = hasDetails
+                        ? normalizedSatelliteData?.details?.norad_id
+                        : state.satelliteData?.details?.norad_id;
+                    const lockMatchesSatellite = (
+                        state.transmitterSyncLock?.noradId != null
+                        && String(state.transmitterSyncLock.noradId) === String(incomingNoradId)
+                    );
+                    const lockActive = lockMatchesSatellite
+                        && Number(state.transmitterSyncLock.expiresAtMs || 0) > Date.now();
+
+                    if (!lockActive) {
+                        state.satelliteData.transmitters = incomingTransmitters;
+                        if (lockMatchesSatellite) {
+                            state.transmitterSyncLock = { noradId: null, expiresAtMs: 0 };
+                        }
+                    } else if (
+                        sameTransmitterSet(incomingTransmitters, state.satelliteData.transmitters || [])
+                    ) {
+                        // Backend caught up with the latest manual edits; unlock and accept updates.
+                        state.satelliteData.transmitters = incomingTransmitters;
                         state.transmitterSyncLock = { noradId: null, expiresAtMs: 0 };
                     }
-                } else if (
-                    sameTransmitterSet(incomingTransmitters, state.satelliteData.transmitters || [])
-                ) {
-                    // Backend caught up with the latest manual edits; unlock and accept updates.
-                    state.satelliteData.transmitters = incomingTransmitters;
-                    state.transmitterSyncLock = { noradId: null, expiresAtMs: 0 };
                 }
-                state.satelliteData.nextPass = action.payload['satellite_data']['nextPass'];
+
+                if (hasNextPass) {
+                    state.satelliteData.nextPass = rawSatelliteData.nextPass;
+                }
 
                 // Fallback sync in case backend message omits tracking_state.
-                if (!action.payload['tracking_state'] && normalizedSatelliteData?.details?.norad_id != null) {
+                if (!action.payload['tracking_state'] && hasDetails && normalizedSatelliteData?.details?.norad_id != null) {
                     state.satelliteId = normalizedSatelliteData.details.norad_id;
                 }
             }

@@ -18,7 +18,21 @@
  */
 
 import React, { useCallback, useState, useEffect, useMemo } from "react";
-import { Box, Typography, Chip, Tooltip, Button, FormControl, InputLabel, Select, MenuItem } from "@mui/material";
+import {
+    Box,
+    Typography,
+    Chip,
+    Tooltip,
+    Button,
+    FormControl,
+    InputLabel,
+    Select,
+    MenuItem,
+    Tabs,
+    Tab,
+    useMediaQuery,
+    useTheme,
+} from "@mui/material";
 import { useDispatch, useSelector } from "react-redux";
 import { useSocket } from "../common/socket.jsx";
 import { useTranslation } from 'react-i18next';
@@ -68,6 +82,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     const selectedSatellitePositions = useSelector(state => state.overviewSatTrack.selectedSatellitePositions);
     const trackerViews = useSelector((state) => state.targetSatTrack?.trackerViews || {});
     const { requestRotatorForTarget, dialog: rotatorSelectionDialog } = useTargetRotatorSelectionDialog();
+    const theme = useTheme();
+    const useDropdownSelector = useMediaQuery(theme.breakpoints.down('sm'));
 
     const [countdown, setCountdown] = useState('');
     const [searchResetKey, setSearchResetKey] = useState(0);
@@ -84,6 +100,10 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
 
     const handleTargetContextChange = useCallback((event) => {
         dispatch(setTrackerId(event.target.value));
+    }, [dispatch]);
+    const handleTargetTabChange = useCallback((event, value) => {
+        if (!value) return;
+        dispatch(setTrackerId(value));
     }, [dispatch]);
 
     const getTransmittersFromSatellite = useCallback((satellite) => {
@@ -224,6 +244,28 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         return () => clearInterval(interval);
     }, [passInfo]);
 
+    const targetOptions = useMemo(() => trackerInstances.map((instance, index) => {
+        const instanceTrackerId = instance?.tracker_id || '';
+        const targetNumber = Number(instance?.target_number || (index + 1));
+        const view = trackerViews?.[instanceTrackerId] || {};
+        const satName = view?.satelliteData?.details?.name || 'No satellite';
+        const satNorad = view?.trackingState?.norad_id || 'none';
+        const rotatorId = view?.selectedRotator || instance?.rotator_id || 'none';
+        const isTracking = Boolean(view?.rigData?.tracking || view?.rotatorData?.tracking);
+        return {
+            trackerId: instanceTrackerId,
+            targetNumber,
+            satName,
+            satNorad,
+            rotatorId,
+            isTracking,
+        };
+    }), [trackerInstances, trackerViews]);
+
+    const tabValue = targetOptions.some((option) => option.trackerId === trackerId)
+        ? trackerId
+        : (targetOptions[0]?.trackerId || false);
+
     return (
         <>
         {rotatorSelectionDialog}
@@ -238,7 +280,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                 rowGap: { xs: 1.5 },
                 alignItems: { lg: 'center' },
                 gap: { lg: 2 },
-                padding: '8px 12px',
+                px: 1.5,
+                py: { xs: 1, lg: 0 },
                 bgcolor: 'background.paper',
                 borderBottom: '1px solid',
                 borderColor: 'border.main',
@@ -253,34 +296,120 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                     gridRow: { xs: '1 / 2', lg: 'auto' },
                     display: 'flex',
                     alignItems: 'center',
-                    flex: { lg: '0 0 420px' },
+                    flex: { lg: '1 1 auto' },
                     minWidth: { xs: 0, lg: 320 },
-                    maxWidth: { lg: 420 },
+                    maxWidth: { lg: 'none' },
+                    height: { lg: '100%' },
                 }}
             >
-                <FormControl size="small" fullWidth>
-                    <InputLabel id="active-target-context-label">Active Target</InputLabel>
-                    <Select
-                        labelId="active-target-context-label"
-                        value={trackerId || ''}
-                        label="Active Target"
-                        onChange={handleTargetContextChange}
-                    >
-                        {trackerInstances.map((instance, index) => {
-                            const instanceTrackerId = instance?.tracker_id || '';
-                            const targetNumber = Number(instance?.target_number || (index + 1));
-                            const view = trackerViews?.[instanceTrackerId] || {};
-                            const satName = view?.satelliteData?.details?.name || 'No satellite';
-                            const satNorad = view?.trackingState?.norad_id || 'none';
-                            const rotatorId = view?.selectedRotator || instance?.rotator_id || 'none';
-                            return (
-                                <MenuItem key={instanceTrackerId} value={instanceTrackerId}>
-                                    {`Target ${targetNumber} • ${satName} • NORAD ${satNorad} • Rotator ${rotatorId}`}
+                {useDropdownSelector ? (
+                    <FormControl size="small" fullWidth>
+                        <InputLabel id="active-target-context-label">Active Target</InputLabel>
+                        <Select
+                            labelId="active-target-context-label"
+                            value={trackerId || ''}
+                            label="Active Target"
+                            onChange={handleTargetContextChange}
+                        >
+                            {targetOptions.map((option) => (
+                                <MenuItem key={option.trackerId} value={option.trackerId}>
+                                    {`Target ${option.targetNumber} • ${option.satName} • NORAD ${option.satNorad} • Rotator ${option.rotatorId}`}
                                 </MenuItem>
-                            );
-                        })}
-                    </Select>
-                </FormControl>
+                            ))}
+                        </Select>
+                    </FormControl>
+                ) : (
+                    <Box
+                        sx={{
+                            width: '100%',
+                            height: '100%',
+                            display: 'flex',
+                            alignItems: 'stretch',
+                        }}
+                    >
+                        <Tabs
+                            value={tabValue}
+                            onChange={handleTargetTabChange}
+                            variant="scrollable"
+                            scrollButtons="auto"
+                            allowScrollButtonsMobile
+                            sx={{
+                                width: '100%',
+                                minHeight: '100%',
+                                height: '100%',
+                                '& .MuiTabs-scroller': {
+                                    display: 'flex',
+                                    alignItems: 'stretch',
+                                },
+                                '& .MuiTabs-flexContainer': {
+                                    minHeight: '100%',
+                                    height: '100%',
+                                    alignItems: 'stretch',
+                                },
+                                '& .MuiTabs-indicator': { display: 'none' },
+                                '& .MuiTab-root': {
+                                    minHeight: '100%',
+                                    height: '100%',
+                                    textTransform: 'none',
+                                    px: 1.5,
+                                    py: 0,
+                                    mr: 0.25,
+                                    minWidth: 120,
+                                    borderRadius: 0,
+                                    border: '1px solid transparent',
+                                    borderColor: 'transparent',
+                                    color: 'text.secondary',
+                                    fontWeight: 600,
+                                    '&.Mui-selected': {
+                                        color: 'primary.contrastText',
+                                        backgroundColor: 'primary.main',
+                                        borderColor: 'primary.dark',
+                                    }
+                                },
+                            }}
+                        >
+                            {targetOptions.map((option) => {
+                                const shortName = option.satName.length > 20
+                                    ? `${option.satName.slice(0, 20)}...`
+                                    : option.satName;
+                                return (
+                                    <Tab
+                                        key={option.trackerId}
+                                        value={option.trackerId}
+                                        label={
+                                            <Tooltip
+                                                title={`Target ${option.targetNumber} | ${option.satName} | NORAD ${option.satNorad} | Rotator ${option.rotatorId}`}
+                                                arrow
+                                            >
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7, maxWidth: 220 }}>
+                                                    <Box
+                                                        sx={{
+                                                            width: 7,
+                                                            height: 7,
+                                                            borderRadius: '50%',
+                                                            bgcolor: option.isTracking ? 'success.light' : 'action.disabled',
+                                                            flexShrink: 0,
+                                                        }}
+                                                    />
+                                                    <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.72rem' }}>
+                                                        T{option.targetNumber}
+                                                    </Typography>
+                                                    <Typography
+                                                        variant="caption"
+                                                        noWrap
+                                                        sx={{ fontSize: '0.72rem', maxWidth: 150 }}
+                                                    >
+                                                        {shortName}
+                                                    </Typography>
+                                                </Box>
+                                            </Tooltip>
+                                        }
+                                    />
+                                );
+                            })}
+                        </Tabs>
+                    </Box>
+                )}
             </Box>
             <Box
                 sx={{
