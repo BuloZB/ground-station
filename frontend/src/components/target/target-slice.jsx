@@ -461,6 +461,39 @@ export const fetchNextPasses = createAsyncThunk(
     }
 );
 
+export const fetchFleetPassSummaries = createAsyncThunk(
+    'targetSatTrack/fetchFleetPassSummaries',
+    async ({ socket, trackers = [], hours = 24.0 }, { rejectWithValue }) => {
+        const normalizedTrackers = Array.isArray(trackers)
+            ? trackers
+                .filter((tracker) => tracker && typeof tracker === 'object')
+                .map((tracker) => ({
+                    tracker_id: tracker.tracker_id,
+                    norad_id: tracker.norad_id,
+                    min_elevation: tracker.min_elevation ?? 0,
+                }))
+            : [];
+
+        return new Promise((resolve, reject) => {
+            socket.emit(
+                'data_request',
+                'fetch-next-pass-summary-for-trackers',
+                {
+                    trackers: normalizedTrackers,
+                    hours,
+                },
+                (response) => {
+                    if (response?.success) {
+                        resolve(response?.data || { summaries: {}, computed_at_ms: Date.now() });
+                    } else {
+                        reject(rejectWithValue(response?.message || "Failed getting fleet pass summaries"));
+                    }
+                }
+            );
+        });
+    }
+);
+
 
 export const fetchSatelliteGroups = createAsyncThunk(
     'targetSatTrack/fetchSatelliteGroups',
@@ -533,6 +566,10 @@ const targetSatTrackSlice = createSlice({
         trackingState: cloneDefaultTrackingState(),
         satelliteData: cloneDefaultSatelliteData(),
         satellitePasses: [],
+        fleetPassSummaryByTrackerId: {},
+        fleetPassSummaryComputedAtMs: 0,
+        fleetPassSummaryLoading: false,
+        fleetPassSummaryError: null,
         activePass: {},
         passesLoading: false,
         passesError: null,
@@ -1256,6 +1293,23 @@ const targetSatTrackSlice = createSlice({
             .addCase(fetchNextPasses.rejected, (state, action) => {
                 state.passesLoading = false;
                 state.passesError = action.payload;
+            })
+            .addCase(fetchFleetPassSummaries.pending, (state) => {
+                state.fleetPassSummaryLoading = true;
+                state.fleetPassSummaryError = null;
+            })
+            .addCase(fetchFleetPassSummaries.fulfilled, (state, action) => {
+                state.fleetPassSummaryLoading = false;
+                state.fleetPassSummaryByTrackerId = action.payload?.summaries || {};
+                const computedAtMs = Number(action.payload?.computed_at_ms);
+                if (Number.isFinite(computedAtMs) && computedAtMs > 0) {
+                    state.fleetPassSummaryComputedAtMs = computedAtMs;
+                }
+                state.fleetPassSummaryError = null;
+            })
+            .addCase(fetchFleetPassSummaries.rejected, (state, action) => {
+                state.fleetPassSummaryLoading = false;
+                state.fleetPassSummaryError = action.payload;
             })
             .addCase(fetchSatelliteGroups.pending, (state) => {
                 state.loading = true;

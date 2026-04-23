@@ -26,10 +26,9 @@ import {
     Popover,
     Stack,
     Typography,
-    Chip,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { shallowEqual, useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import Tooltip from "@mui/material/Tooltip";
@@ -45,6 +44,8 @@ import { formatLegibleDateTime } from "../common/common.jsx";
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDate as formatDateHelper } from '../../utils/date-time.js';
 import TargetBadge from "../common/target-badge.jsx";
+import { fetchFleetPassSummaries } from "../target/target-slice.jsx";
+import { useSocket } from "../common/socket.jsx";
 
 const EMPTY_OPEN_TARGET_DATA = Object.freeze({
     satelliteData: {
@@ -58,6 +59,26 @@ const EMPTY_OPEN_TARGET_DATA = Object.freeze({
     groundStationLocation: null,
 });
 
+const formatDurationCompact = (milliseconds) => {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return '0s';
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+};
+
+const toTimestampMs = (value) => {
+    if (!value) return null;
+    const ts = new Date(value).getTime();
+    return Number.isFinite(ts) ? ts : null;
+};
+
 const SatelliteInfoPopover = () => {
     const dispatch = useDispatch();
     const theme = useTheme();
@@ -66,11 +87,20 @@ const SatelliteInfoPopover = () => {
     const navigate = useNavigate();
     const { t } = useTranslation('dashboard');
     const { timezone, locale } = useUserTimeSettings();
+    const { socket } = useSocket();
+    const fleetSummaryFetchInFlightRef = useRef(false);
+    const lastFleetSummaryFetchAtMsRef = useRef(0);
+    const lastFleetSummarySignatureRef = useRef('');
+    const currentFleetSummaryRequestTrackersRef = useRef([]);
+    const currentFleetSummarySignatureRef = useRef('');
+    const [nowMs, setNowMs] = useState(() => Date.now());
 
     const open = Boolean(anchorEl);
     const trackerId = useSelector((state) => state.targetSatTrack?.trackerId || "");
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const trackerViews = useSelector((state) => state.targetSatTrack?.trackerViews || {});
+    const nextPassesHours = useSelector((state) => state.targetSatTrack?.nextPassesHours || 24.0);
+    const fleetPassSummaryByTrackerId = useSelector((state) => state.targetSatTrack?.fleetPassSummaryByTrackerId || {});
 
     // Keep closed-state subscriptions intentionally lightweight.
     const selectedTrackerView = (trackerId && trackerViews?.[trackerId]) || null;
@@ -148,6 +178,11 @@ const SatelliteInfoPopover = () => {
             const satName = details?.name || 'No satellite';
             const satNorad = noradId ?? 'none';
             const elevation = position?.el;
+            const latitude = position?.lat;
+            const longitude = position?.lng ?? position?.lon;
+            const altitude = position?.alt;
+            const velocity = position?.vel;
+            const azimuth = position?.az;
             const isActive = instanceTrackerId === trackerId;
             const minElevation = rotator?.minel ?? 0;
             const isTracking = noradId != null && tracking?.norad_id === noradId;
@@ -158,6 +193,11 @@ const SatelliteInfoPopover = () => {
                 satName,
                 satNorad,
                 elevation,
+                latitude,
+                longitude,
+                altitude,
+                velocity,
+                azimuth,
                 isActive,
                 minElevation,
                 isTracking,
@@ -165,6 +205,157 @@ const SatelliteInfoPopover = () => {
             };
         });
     }, [trackerInstances, trackerViews, trackerId]);
+
+    const fleetSummaryRequestTrackers = useMemo(() => {
+        return trackerInstances
+            .map((instance, index) => {
+                const instanceTrackerId = instance?.tracker_id || '';
+                if (!instanceTrackerId) return null;
+                const view = trackerViews?.[instanceTrackerId] || {};
+                const tracking = view?.trackingState || {};
+                const rotator = view?.rotatorData || {};
+                const noradId = tracking?.norad_id ?? null;
+                return {
+                    tracker_id: instanceTrackerId,
+                    norad_id: noradId == null ? null : Number(noradId),
+                    min_elevation: Number.isFinite(Number(rotator?.minel)) ? Number(rotator.minel) : 0,
+                };
+            })
+            .filter(Boolean);
+    }, [trackerInstances, trackerViews]);
+
+    const fleetSummaryRequestSignature = useMemo(() => {
+        const normalized = [...fleetSummaryRequestTrackers]
+            .sort((a, b) => String(a.tracker_id).localeCompare(String(b.tracker_id)))
+            .map((item) => ({
+                tracker_id: item.tracker_id,
+                norad_id: item.norad_id,
+                min_elevation: item.min_elevation,
+            }));
+        return JSON.stringify({ hours: nextPassesHours, trackers: normalized });
+    }, [fleetSummaryRequestTrackers, nextPassesHours]);
+
+    useEffect(() => {
+        currentFleetSummaryRequestTrackersRef.current = fleetSummaryRequestTrackers;
+        currentFleetSummarySignatureRef.current = fleetSummaryRequestSignature;
+    }, [fleetSummaryRequestSignature, fleetSummaryRequestTrackers]);
+
+    const requestFleetPassSummaries = useCallback(async ({ force = false } = {}) => {
+        const requestTrackers = currentFleetSummaryRequestTrackersRef.current;
+        const requestSignature = currentFleetSummarySignatureRef.current;
+        if (!open || requestTrackers.length === 0) return;
+        if (!socket?.connected || fleetSummaryFetchInFlightRef.current) return;
+
+        const minRequestIntervalMs = 30 * 1000;
+        const now = Date.now();
+        const signatureUnchanged = lastFleetSummarySignatureRef.current === requestSignature;
+        const elapsedSinceLast = now - lastFleetSummaryFetchAtMsRef.current;
+        if (!force && signatureUnchanged && elapsedSinceLast < minRequestIntervalMs) {
+            return;
+        }
+
+        fleetSummaryFetchInFlightRef.current = true;
+        try {
+            await dispatch(fetchFleetPassSummaries({
+                socket,
+                trackers: requestTrackers,
+                hours: nextPassesHours,
+            }));
+            lastFleetSummaryFetchAtMsRef.current = Date.now();
+            lastFleetSummarySignatureRef.current = requestSignature;
+        } finally {
+            fleetSummaryFetchInFlightRef.current = false;
+        }
+    }, [dispatch, nextPassesHours, open, socket]);
+
+    const fleetSummaryRefreshMs = useMemo(() => {
+        if (!open || fleetSummaryRequestTrackers.length === 0) return 0;
+        const urgentThresholdMs = 20 * 60 * 1000;
+        const currentNowMs = Date.now();
+        let urgent = false;
+        for (const tracker of fleetSummaryRequestTrackers) {
+            const summary = fleetPassSummaryByTrackerId?.[tracker.tracker_id];
+            if (!summary) continue;
+            if (summary.mode === 'live') {
+                urgent = true;
+                break;
+            }
+            if (summary.mode === 'upcoming') {
+                const aosMs = toTimestampMs(summary.aos_ts);
+                if (aosMs != null && aosMs - currentNowMs <= urgentThresholdMs) {
+                    urgent = true;
+                    break;
+                }
+            }
+        }
+        return urgent ? 60 * 1000 : 5 * 60 * 1000;
+    }, [fleetPassSummaryByTrackerId, fleetSummaryRequestTrackers, open]);
+
+    useEffect(() => {
+        if (!open) return;
+        requestFleetPassSummaries({ force: true });
+    }, [open, requestFleetPassSummaries]);
+
+    useEffect(() => {
+        if (!open) return;
+        requestFleetPassSummaries({ force: false });
+    }, [open, fleetSummaryRequestSignature, requestFleetPassSummaries]);
+
+    useEffect(() => {
+        if (!open || fleetSummaryRefreshMs <= 0) return undefined;
+        let cancelled = false;
+        let timerId = null;
+
+        const scheduleNext = () => {
+            if (cancelled) return;
+            timerId = setTimeout(async () => {
+                if (document.visibilityState === 'visible') {
+                    await requestFleetPassSummaries({ force: false });
+                }
+                scheduleNext();
+            }, fleetSummaryRefreshMs + Math.floor(Math.random() * 4000));
+        };
+        scheduleNext();
+
+        return () => {
+            cancelled = true;
+            if (timerId) clearTimeout(timerId);
+        };
+    }, [fleetSummaryRefreshMs, open, requestFleetPassSummaries]);
+
+    useEffect(() => {
+        if (!open) return undefined;
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                requestFleetPassSummaries({ force: true });
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [open, requestFleetPassSummaries]);
+
+    useEffect(() => {
+        if (!open) return undefined;
+        const interval = setInterval(() => setNowMs(Date.now()), 1000);
+        return () => clearInterval(interval);
+    }, [open]);
+
+    const formatFleetPassCountdown = useCallback((summary) => {
+        if (!summary || !summary.mode) return 'AOS N/A';
+        if (summary.mode === 'live') {
+            const losMs = toTimestampMs(summary.los_ts);
+            if (losMs == null) return 'LOS N/A';
+            return `LOS ${formatDurationCompact(Math.max(0, losMs - nowMs))}`;
+        }
+        if (summary.mode === 'upcoming') {
+            const aosMs = toTimestampMs(summary.aos_ts);
+            if (aosMs == null) return 'AOS N/A';
+            return `AOS ${formatDurationCompact(Math.max(0, aosMs - nowMs))}`;
+        }
+        return 'AOS N/A';
+    }, [nowMs]);
 
     const handleClick = (event) => {
         setAnchorEl(event.currentTarget);
@@ -615,6 +806,8 @@ const SatelliteInfoPopover = () => {
                             {fleetRows.map((row) => {
                                 const rowStatus = getFleetStatus(row);
                                 const hasElevation = Number.isFinite(Number(row.elevation));
+                                const summary = fleetPassSummaryByTrackerId?.[row.trackerId];
+                                const aosLos = formatFleetPassCountdown(summary);
 
                                 return (
                                     <Box
@@ -631,23 +824,56 @@ const SatelliteInfoPopover = () => {
                                                 targetNumber={row.targetNumber}
                                                 tracking={row.isTrackingActive}
                                             />
-                                            <Chip
-                                                size="small"
-                                                label={`NORAD ${row.satNorad}`}
-                                                variant="outlined"
-                                            />
+                                            <Typography
+                                                variant="body2"
+                                                sx={{
+                                                    fontWeight: 'bold',
+                                                    minWidth: 0,
+                                                    whiteSpace: 'nowrap',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                }}
+                                            >
+                                                {`${row.satName} (NORAD ${row.satNorad})`}
+                                            </Typography>
                                         </Stack>
 
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                                                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.2 }}>
-                                                    {row.satName}
-                                                </Typography>
                                                 <Typography
                                                     variant="caption"
                                                     sx={{ color: rowStatus.color, fontWeight: 'bold' }}
                                                 >
                                                     {rowStatus.status}
+                                                </Typography>
+                                                <Typography
+                                                    variant="caption"
+                                                    sx={{
+                                                        color: 'text.secondary',
+                                                        display: 'block',
+                                                        mt: 0.2,
+                                                        fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                                                    }}
+                                                >
+                                                    {`Lat ${Number.isFinite(Number(row.latitude)) ? Number(row.latitude).toFixed(2) : 'N/A'}°, `}
+                                                    {`Lon ${Number.isFinite(Number(row.longitude)) ? Number(row.longitude).toFixed(2) : 'N/A'}°`}
+                                                    {'  •  '}
+                                                    {`Alt ${Number.isFinite(Number(row.altitude)) ? Number(row.altitude).toFixed(1) : 'N/A'} km`}
+                                                    {'  •  '}
+                                                    {`Speed ${Number.isFinite(Number(row.velocity)) ? Number(row.velocity).toFixed(2) : 'N/A'} km/s`}
+                                                    {'  •  '}
+                                                    {`Az ${Number.isFinite(Number(row.azimuth)) ? Number(row.azimuth).toFixed(1) : 'N/A'}°`}
+                                                </Typography>
+                                                <Typography
+                                                    variant="caption"
+                                                    sx={{
+                                                        color: 'text.secondary',
+                                                        display: 'block',
+                                                        mt: 0.2,
+                                                        fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                                                    }}
+                                                >
+                                                    {aosLos}
                                                 </Typography>
                                             </Box>
                                             {hasElevation && (

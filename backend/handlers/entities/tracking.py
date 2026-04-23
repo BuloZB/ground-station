@@ -15,6 +15,8 @@
 
 """Tracking state handlers and emission functions."""
 
+import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
 import crud
@@ -494,6 +496,203 @@ async def fetch_next_passes(
     }
 
 
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_iso_to_ms(value: Any) -> Optional[int]:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except (TypeError, ValueError):
+        return None
+
+
+async def fetch_next_pass_summaries_for_trackers(
+    sio: Any, data: Optional[Dict], logger: Any, sid: str
+) -> Dict[str, Union[bool, dict, str]]:
+    """
+    Fetch lightweight next-pass summaries for multiple trackers in one request.
+
+    Request shape:
+      {
+        "hours": 24.0,
+        "trackers": [
+          {"tracker_id": "target-1", "norad_id": 25544, "min_elevation": 10},
+          ...
+        ]
+      }
+
+    Response shape:
+      {
+        "success": true,
+        "data": {
+          "computed_at_ms": 1713880000000,
+          "summaries": {
+            "target-1": {
+              "tracker_id": "target-1",
+              "norad_id": 25544,
+              "mode": "live|upcoming|none",
+              "aos_ts": "...",
+              "los_ts": "...",
+              "cached": true
+            }
+          }
+        }
+      }
+    """
+    payload = data or {}
+    hours = _coerce_float(payload.get("hours"), 24.0)
+    tracker_requests = payload.get("trackers") or []
+    if not isinstance(tracker_requests, list):
+        return {
+            "success": False,
+            "error": "invalid_payload",
+            "message": "trackers must be a list",
+        }
+
+    normalized_trackers = []
+    for raw in tracker_requests:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            tracker_id = require_tracker_id(raw.get("tracker_id"))
+        except InvalidTrackerIdError:
+            continue
+        normalized_trackers.append(
+            {
+                "tracker_id": tracker_id,
+                "norad_id": _coerce_int(raw.get("norad_id")),
+                "min_elevation": _coerce_float(raw.get("min_elevation"), 0.0),
+            }
+        )
+
+    if not normalized_trackers:
+        return {
+            "success": True,
+            "data": {
+                "computed_at_ms": int(time.time() * 1000),
+                "summaries": {},
+            },
+        }
+
+    now_ms = int(time.time() * 1000)
+
+    unique_norad_ids = sorted(
+        {
+            tracker["norad_id"]
+            for tracker in normalized_trackers
+            if isinstance(tracker.get("norad_id"), int)
+        }
+    )
+
+    passes_by_norad: Dict[int, list[Dict[str, Any]]] = {}
+    cache_by_norad: Dict[int, bool] = {}
+    for norad_id in unique_norad_ids:
+        passes_reply = await fetch_next_events_for_satellite(
+            norad_id=norad_id,
+            hours=hours,
+            above_el=0,
+            force_recalculate=False,
+        )
+        if not passes_reply.get("success"):
+            logger.warning(
+                "Failed fetching pass summary source for norad_id=%s (sid=%s)",
+                norad_id,
+                sid,
+            )
+            passes_by_norad[norad_id] = []
+            cache_by_norad[norad_id] = False
+            continue
+
+        passes_by_norad[norad_id] = passes_reply.get("data", []) or []
+        cache_by_norad[norad_id] = bool(passes_reply.get("cached", False))
+
+    summaries_by_tracker_id: Dict[str, Dict[str, Any]] = {}
+    for tracker in normalized_trackers:
+        tracker_id = tracker["tracker_id"]
+        norad_id = tracker["norad_id"]
+        min_elevation = tracker["min_elevation"]
+
+        summary = {
+            "tracker_id": tracker_id,
+            "norad_id": norad_id,
+            "mode": "none",
+            "aos_ts": None,
+            "los_ts": None,
+            "cached": False,
+        }
+
+        if norad_id is None:
+            summaries_by_tracker_id[tracker_id] = summary
+            continue
+
+        candidate_passes: list[Dict[str, Any]] = passes_by_norad.get(norad_id, [])
+        filtered_passes = [
+            p
+            for p in candidate_passes
+            if _coerce_float(p.get("peak_altitude"), 0.0) >= min_elevation
+        ]
+
+        active_pass: Optional[Dict[str, Any]] = None
+        next_pass: Optional[Dict[str, Any]] = None
+        next_start_ms: Optional[int] = None
+        for entry in filtered_passes:
+            start_ms = _parse_iso_to_ms(entry.get("event_start"))
+            end_ms = _parse_iso_to_ms(entry.get("event_end"))
+            if start_ms is None or end_ms is None:
+                continue
+            if start_ms <= now_ms < end_ms:
+                active_end_ms = (
+                    _parse_iso_to_ms(active_pass["event_end"])
+                    if active_pass is not None and "event_end" in active_pass
+                    else None
+                )
+                if active_pass is None or active_end_ms is None or end_ms < active_end_ms:
+                    active_pass = entry
+                continue
+            if start_ms > now_ms and (next_start_ms is None or start_ms < next_start_ms):
+                next_pass = entry
+                next_start_ms = start_ms
+
+        summary["cached"] = bool(cache_by_norad.get(norad_id, False))
+        if active_pass:
+            summary["mode"] = "live"
+            summary["aos_ts"] = active_pass.get("event_start")
+            summary["los_ts"] = active_pass.get("event_end")
+        elif next_pass:
+            summary["mode"] = "upcoming"
+            summary["aos_ts"] = next_pass.get("event_start")
+            summary["los_ts"] = next_pass.get("event_end")
+
+        summaries_by_tracker_id[tracker_id] = summary
+
+    return {
+        "success": True,
+        "data": {
+            "computed_at_ms": now_ms,
+            "summaries": summaries_by_tracker_id,
+        },
+    }
+
+
 def register_handlers(registry):
     """Register tracking handlers with the command registry."""
     registry.register_batch(
@@ -503,5 +702,9 @@ def register_handlers(registry):
             "swap-target-rotators": (swap_target_rotators, "data_submission"),
             "get-tracker-instances": (get_tracker_instances, "data_request"),
             "fetch-next-passes": (fetch_next_passes, "data_request"),
+            "fetch-next-pass-summary-for-trackers": (
+                fetch_next_pass_summaries_for_trackers,
+                "data_request",
+            ),
         }
     )
