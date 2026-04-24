@@ -130,16 +130,6 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     const [createSelectedSatellite, setCreateSelectedSatellite] = useState(null);
     const [createSelectedRigId, setCreateSelectedRigId] = useState('none');
     const [createSelectedRotatorId, setCreateSelectedRotatorId] = useState('none');
-    const targetNoradUsage = useMemo(() => {
-        return trackerInstances.reduce((acc, instance) => {
-            const instanceTrackerId = String(instance?.tracker_id || '');
-            const view = trackerViews?.[instanceTrackerId] || {};
-            const norad = String(view?.trackingState?.norad_id || instance?.tracking_state?.norad_id || 'none');
-            if (norad === 'none') return acc;
-            acc[norad] = (acc[norad] || 0) + 1;
-            return acc;
-        }, {});
-    }, [trackerInstances, trackerViews]);
 
     const handleTrackingStop = useCallback(() => {
         if (!trackerId) {
@@ -469,11 +459,6 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         const satName = view?.satelliteData?.details?.name || 'No satellite';
         const satNorad = view?.trackingState?.norad_id || 'none';
         const rotatorId = view?.selectedRotator || instance?.rotator_id || 'none';
-        const canUseNoradFallback = (
-            String(rotatorId) === 'none'
-            && String(satNorad) !== 'none'
-            && (targetNoradUsage[String(satNorad)] || 0) === 1
-        );
         const isTracking = Boolean(view?.rigData?.tracking || view?.rotatorData?.tracking);
         const satAz = Number.isFinite(view?.satelliteData?.position?.az) ? view.satelliteData.position.az : null;
         const satEl = Number.isFinite(view?.satelliteData?.position?.el) ? view.satelliteData.position.el : null;
@@ -485,10 +470,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                 if (obsRotatorId !== 'none' && String(rotatorId) !== 'none') {
                     return obsRotatorId === String(rotatorId);
                 }
-                if (obsRotatorId !== 'none' || String(rotatorId) !== 'none') {
-                    return false;
-                }
-                if (canUseNoradFallback && obsNorad !== 'none') {
+                if (obsNorad !== 'none' && String(satNorad) !== 'none') {
                     return obsNorad === String(satNorad);
                 }
                 return false;
@@ -510,7 +492,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
             hasScheduledObservation: upcomingObs.length > 0,
             linkedObservations,
         };
-    }), [trackerInstances, trackerViews, schedulerObservations, targetNoradUsage]);
+    }), [trackerInstances, trackerViews, schedulerObservations]);
 
     const tabValue = targetOptions.some((option) => option.trackerId === trackerId)
         ? trackerId
