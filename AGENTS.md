@@ -31,9 +31,9 @@
   - `cd backend && ./venv/bin/mypy ...`
   - `cd backend && ./venv/bin/isort ...`
   - `cd backend && ./venv/bin/pytest ...`
-- Default backend DB path is relative to backend cwd (`data/db/gs.db` -> `/home/sgoudelis/projects/ground-station/backend/data/db/gs.db`).
+- Default backend DB path is relative to backend cwd (`data/db/gs.db` -> `<repo>/backend/data/db/gs.db`).
 - If running backend DB checks from repo root, set:
-  - `GS_DB=/home/sgoudelis/projects/ground-station/backend/data/db/gs.db`
+  - `GS_DB=backend/data/db/gs.db`
 
 ## GitHub Safety
 - Never post/comment/create/update/delete on GitHub (issues/PRs/comments/labels/assignees/milestones/releases) unless the user explicitly asks for that exact write action in the current turn.
