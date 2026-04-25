@@ -321,6 +321,17 @@ async def set_tracking_state(
 async def swap_target_rotators(
     sio: Any, data: Optional[Dict], logger: Any, sid: str
 ) -> Dict[str, Any]:
+    def _normalize_rotator_id(rotator_id: Any) -> Optional[str]:
+        if rotator_id is None:
+            return None
+        normalized = str(rotator_id).strip()
+        if not normalized or normalized.lower() == "none":
+            return None
+        return normalized
+
+    def _rotator_for_tracking_state(rotator_id: Optional[str]) -> str:
+        return rotator_id if rotator_id is not None else "none"
+
     payload = data or {}
     try:
         tracker_a_id = require_tracker_id(payload.get("tracker_a_id"))
@@ -348,26 +359,21 @@ async def swap_target_rotators(
     state_b_rotator = state_b.get("rotator_id")
     assigned_rotator_a = get_assigned_rotator_for_tracker(tracker_a_id)
     assigned_rotator_b = get_assigned_rotator_for_tracker(tracker_b_id)
-    effective_rotator_a = assigned_rotator_a or state_a_rotator
-    effective_rotator_b = assigned_rotator_b or state_b_rotator
+    effective_rotator_a = _normalize_rotator_id(assigned_rotator_a or state_a_rotator)
+    effective_rotator_b = _normalize_rotator_id(assigned_rotator_b or state_b_rotator)
 
-    if not effective_rotator_a or effective_rotator_a == "none":
+    if not effective_rotator_a and not effective_rotator_b:
         return {
             "success": False,
             "error": "swap_requires_assigned_rotators",
-            "message": f"Tracker '{tracker_a_id}' has no rotator assigned",
-            "data": {"tracker_id": tracker_a_id},
+            "message": "At least one tracker must have a rotator assigned",
+            "data": {
+                "tracker_a_id": tracker_a_id,
+                "tracker_b_id": tracker_b_id,
+            },
         }
 
-    if not effective_rotator_b or effective_rotator_b == "none":
-        return {
-            "success": False,
-            "error": "swap_requires_assigned_rotators",
-            "message": f"Tracker '{tracker_b_id}' has no rotator assigned",
-            "data": {"tracker_id": tracker_b_id},
-        }
-
-    if effective_rotator_a == effective_rotator_b:
+    if effective_rotator_a and effective_rotator_b and effective_rotator_a == effective_rotator_b:
         return {
             "success": False,
             "error": "swap_requires_distinct_rotators",
@@ -420,7 +426,13 @@ async def swap_target_rotators(
             "data": swap_result,
         }
 
-    update_a_result = await manager_a.update_tracking_state(rotator_id=effective_rotator_b)
+    next_rotator_a = _normalize_rotator_id(swap_result.get("tracker_a_rotator_id"))
+    next_rotator_b = _normalize_rotator_id(swap_result.get("tracker_b_rotator_id"))
+    previous_rotator_a = _rotator_for_tracking_state(effective_rotator_a)
+    next_rotator_a_for_state = _rotator_for_tracking_state(next_rotator_a)
+    next_rotator_b_for_state = _rotator_for_tracking_state(next_rotator_b)
+
+    update_a_result = await manager_a.update_tracking_state(rotator_id=next_rotator_a_for_state)
     if not update_a_result.get("success"):
         logger.error(
             "Failed persisting swapped rotator for tracker '%s'; rolling back ownership maps",
@@ -437,13 +449,13 @@ async def swap_target_rotators(
             },
         }
 
-    update_b_result = await manager_b.update_tracking_state(rotator_id=effective_rotator_a)
+    update_b_result = await manager_b.update_tracking_state(rotator_id=next_rotator_b_for_state)
     if not update_b_result.get("success"):
         logger.error(
             "Failed persisting swapped rotator for tracker '%s'; reverting both tracker updates",
             tracker_b_id,
         )
-        await manager_a.update_tracking_state(rotator_id=effective_rotator_a)
+        await manager_a.update_tracking_state(rotator_id=previous_rotator_a)
         swap_rotators_between_trackers(tracker_a_id, tracker_b_id)
         return {
             "success": False,
@@ -467,8 +479,8 @@ async def swap_target_rotators(
         "data": {
             "tracker_a_id": tracker_a_id,
             "tracker_b_id": tracker_b_id,
-            "tracker_a_rotator_id": effective_rotator_b,
-            "tracker_b_rotator_id": effective_rotator_a,
+            "tracker_a_rotator_id": next_rotator_a_for_state,
+            "tracker_b_rotator_id": next_rotator_b_for_state,
         },
     }
 

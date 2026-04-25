@@ -252,6 +252,122 @@ async def test_start_tracker_emits_tracker_instances_snapshot(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_tracker_without_rotator_starts_ephemeral_context_tracker(monkeypatch):
+    manager = _DummyTrackerManager({"rotator_state": "disconnected"})
+    update_calls = []
+
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.create_tracker_slot",
+        lambda: {"success": True, "tracker_id": "target-77", "created": True},
+    )
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.get_tracker_manager",
+        lambda _tracker_id: manager,
+    )
+
+    async def _mock_update(tracker_id, value, requester_sid=None):
+        update_calls.append(
+            {"tracker_id": tracker_id, "value": value, "requester_sid": requester_sid}
+        )
+        return {"success": True}
+
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.update_tracking_state_with_ownership",
+        _mock_update,
+    )
+
+    handler = TrackerHandler()
+    result = await handler.start_tracker_task(
+        observation_id="obs-no-rotator",
+        satellite={"norad_id": 25338, "group_id": "grp-no-rotator", "name": "NOAA-15"},
+        rotator_config={"tracking_enabled": False},
+        tasks=[{"type": "decoder", "config": {"transmitter_id": "tx-1"}}],
+    )
+
+    assert result["success"] is True
+    assert result["tracker_id"] == "target-77"
+    assert result["ephemeral"] is True
+    assert result["created"] is True
+    assert len(update_calls) == 1
+    assert update_calls[0]["value"]["rotator_state"] == "disconnected"
+    assert update_calls[0]["value"]["rotator_id"] == "none"
+    assert update_calls[0]["value"]["transmitter_id"] == "tx-1"
+
+
+@pytest.mark.asyncio
+async def test_start_tracker_reuses_existing_rotator_slot_when_tracking_disabled(monkeypatch):
+    manager = _DummyTrackerManager({"rotator_state": "connected"})
+    update_calls = []
+
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.ensure_tracker_for_rotator",
+        lambda _rotator_id: {"success": True, "tracker_id": "target-9", "created": False},
+    )
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.get_tracker_manager",
+        lambda _tracker_id: manager,
+    )
+
+    async def _mock_update(tracker_id, value, requester_sid=None):
+        update_calls.append({"tracker_id": tracker_id, "value": value})
+        return {"success": True}
+
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.update_tracking_state_with_ownership",
+        _mock_update,
+    )
+
+    handler = TrackerHandler()
+    result = await handler.start_tracker_task(
+        observation_id="obs-reuse-slot",
+        satellite={"norad_id": 25544, "group_id": "grp-1", "name": "ISS"},
+        rotator_config={"id": "rot-reused", "tracking_enabled": False},
+        tasks=[],
+    )
+
+    assert result["success"] is True
+    assert result["tracker_id"] == "target-9"
+    assert result["ephemeral"] is False
+    assert result["created"] is False
+    assert result["reused_existing"] is True
+    assert len(update_calls) == 1
+    assert update_calls[0]["value"]["rotator_state"] == "disconnected"
+    assert update_calls[0]["value"]["rotator_id"] == "rot-reused"
+
+
+@pytest.mark.asyncio
+async def test_stop_tracker_removes_ephemeral_tracker_instance(monkeypatch):
+    remove_calls = []
+
+    async def _mock_remove(self, tracker_id):
+        remove_calls.append(tracker_id)
+        return True
+
+    async def _unexpected_update(_tracker_id, _value, requester_sid=None):
+        raise AssertionError("update_tracking_state_with_ownership should not be called")
+
+    monkeypatch.setattr(
+        TrackerHandler,
+        "_remove_observation_tracker_instance",
+        _mock_remove,
+    )
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.update_tracking_state_with_ownership",
+        _unexpected_update,
+    )
+
+    handler = TrackerHandler()
+    ok = await handler.stop_tracker_task(
+        observation_id="obs-ephemeral-stop",
+        rotator_config={},
+        tracker_context={"tracker_id": "target-11", "ephemeral": True},
+    )
+
+    assert ok is True
+    assert remove_calls == ["target-11"]
+
+
+@pytest.mark.asyncio
 async def test_stop_tracker_returns_true_when_tracker_id_missing_and_no_owner(monkeypatch):
     called = {"update": False}
 

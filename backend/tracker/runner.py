@@ -74,6 +74,15 @@ class TrackerSupervisor:
             self._ensure_target_number(candidate)
             return candidate
 
+    def create_tracker_slot(self) -> Dict[str, Any]:
+        """Create a new tracker slot id without assigning a rotator."""
+        tracker_id = self._allocate_tracker_id()
+        return {
+            "success": True,
+            "tracker_id": tracker_id,
+            "created": True,
+        }
+
     @staticmethod
     def _normalize_rotator_id(candidate: Optional[str]) -> Optional[str]:
         if candidate is None:
@@ -439,6 +448,10 @@ def get_assigned_tracker_for_rotator(rotator_id: Optional[str]) -> Optional[str]
 
 def ensure_tracker_for_rotator(rotator_id: Optional[str]) -> Dict[str, Any]:
     return _tracker_supervisor.ensure_tracker_for_rotator(rotator_id)
+
+
+def create_tracker_slot() -> Dict[str, Any]:
+    return _tracker_supervisor.create_tracker_slot()
 
 
 def swap_rotators_between_trackers(tracker_a_id: str, tracker_b_id: str) -> Dict[str, Any]:
