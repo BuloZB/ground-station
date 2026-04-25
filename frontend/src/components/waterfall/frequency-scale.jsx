@@ -22,7 +22,16 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTheme } from '@mui/material';
 import {humanizeFrequency, preciseHumanizeFrequency} from "../common/common.jsx";
 
-const FrequencyScale = ({ centerFrequency, sampleRate, containerWidth, transformTick = 0, interactionActive = false, canvasHeight = 20 }) => {
+const FrequencyScale = ({
+    centerFrequency,
+    sampleRate,
+    containerWidth,
+    transformTick = 0,
+    interactionActive = false,
+    allowInteractionMeasure = false,
+    interactionMeasureTick = 0,
+    canvasHeight = 20
+}) => {
     const theme = useTheme();
     const canvasRef = useRef(null);
     const frequencyScaleContainerRef = useRef(null);
@@ -52,6 +61,13 @@ const FrequencyScale = ({ centerFrequency, sampleRate, containerWidth, transform
         }
         updateActualWidth();
     }, [containerWidth, transformTick, interactionActive, updateActualWidth]);
+
+    useEffect(() => {
+        if (!interactionActive || !allowInteractionMeasure) {
+            return;
+        }
+        updateActualWidth();
+    }, [interactionActive, allowInteractionMeasure, interactionMeasureTick, updateActualWidth]);
 
     // Resize backing store only when dimensions actually change.
     useEffect(() => {

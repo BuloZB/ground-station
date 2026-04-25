@@ -33,6 +33,7 @@ import {useDopplerNeighbors} from '../../hooks/useDopplerNeighbors.jsx';
 
 const PLAYBACK_COUNTDOWN_UPDATE_MS = 250;
 const INTERACTION_IDLE_MS = 120;
+const TOUCH_INTERACTION_MEASURE_MS = 200;
 
 const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                                               bandscopeCanvasRef,
@@ -63,6 +64,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
     const bookmarkMeasureRafRef = useRef(null);
     const interactionIdleTimerRef = useRef(null);
     const interactionActiveRef = useRef(false);
+    const touchMeasureIntervalRef = useRef(null);
     const dispatch = useDispatch();
 
     // Activate doppler neighbor calculation hook
@@ -93,6 +95,8 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
     const [playbackCountdown, setPlaybackCountdown] = useState(0);
     const [bookmarkTransformTick, setBookmarkTransformTick] = useState(0);
     const [isTransformInteracting, setIsTransformInteracting] = useState(false);
+    const [touchInteractionMeasureTick, setTouchInteractionMeasureTick] = useState(0);
+    const [isTouchMeasuring, setIsTouchMeasuring] = useState(false);
 
     // Update playback countdown from ref
     useEffect(() => {
@@ -216,6 +220,29 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
         }, INTERACTION_IDLE_MS);
     }, []);
 
+    const startTouchMeasureLoop = useCallback(() => {
+        if (!isTouchMeasuring) {
+            setIsTouchMeasuring(true);
+        }
+        setTouchInteractionMeasureTick((value) => value + 1);
+        if (touchMeasureIntervalRef.current !== null) {
+            return;
+        }
+        touchMeasureIntervalRef.current = setInterval(() => {
+            setTouchInteractionMeasureTick((value) => value + 1);
+        }, TOUCH_INTERACTION_MEASURE_MS);
+    }, [isTouchMeasuring]);
+
+    const stopTouchMeasureLoop = useCallback(() => {
+        if (touchMeasureIntervalRef.current !== null) {
+            clearInterval(touchMeasureIntervalRef.current);
+            touchMeasureIntervalRef.current = null;
+        }
+        if (isTouchMeasuring) {
+            setIsTouchMeasuring(false);
+        }
+    }, [isTouchMeasuring]);
+
     // Apply a transform directly to a DOM element
     const applyTransform = useCallback(() => {
         if (containerRef.current) {
@@ -262,6 +289,10 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
             if (interactionIdleTimerRef.current) {
                 clearTimeout(interactionIdleTimerRef.current);
                 interactionIdleTimerRef.current = null;
+            }
+            if (touchMeasureIntervalRef.current !== null) {
+                clearInterval(touchMeasureIntervalRef.current);
+                touchMeasureIntervalRef.current = null;
             }
         }
     }, []);
@@ -420,6 +451,9 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
 
         // Touch events
         const handleTouchStart = (e) => {
+            if (e.touches.length > 0) {
+                startTouchMeasureLoop();
+            }
             if (e.touches.length === 1) {
                 isDraggingRef.current = true;
                 lastXRef.current = e.touches[0].clientX;
@@ -465,9 +499,18 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
             }
         };
 
-        const handleTouchEnd = () => {
+        const handleTouchEnd = (e) => {
             isDraggingRef.current = false;
+            if (!e.touches || e.touches.length === 0) {
+                stopTouchMeasureLoop();
+            }
             // Persist after touch interaction ends
+            persistToRedux();
+        };
+
+        const handleTouchCancel = () => {
+            isDraggingRef.current = false;
+            stopTouchMeasureLoop();
             persistToRedux();
         };
 
@@ -484,6 +527,7 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
         container.addEventListener('touchstart', handleTouchStart, {passive: false});
         container.addEventListener('touchmove', handleTouchMove, {passive: false});
         window.addEventListener('touchend', handleTouchEnd);
+        window.addEventListener('touchcancel', handleTouchCancel);
 
         // Cleanup
         return () => {
@@ -495,8 +539,9 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
             container.removeEventListener('touchstart', handleTouchStart);
             container.removeEventListener('touchmove', handleTouchMove);
             window.removeEventListener('touchend', handleTouchEnd);
+            window.removeEventListener('touchcancel', handleTouchCancel);
         };
-    }, [persistToRedux]);
+    }, [persistToRedux, startTouchMeasureLoop, stopTouchMeasureLoop]);
 
     // Expose functions to parent component
     useImperativeHandle(ref, () => ({
@@ -647,6 +692,8 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                         containerWidth={waterFallCanvasWidth}
                         transformTick={bookmarkTransformTick}
                         interactionActive={isTransformInteracting}
+                        allowInteractionMeasure={isTouchMeasuring}
+                        interactionMeasureTick={touchInteractionMeasureTick}
                         height={bandScopeHeight + bandscopeTopPadding}
                         topPadding={bandscopeTopPadding}
                         bands={frequencyBands}
@@ -660,6 +707,8 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                         containerWidth={waterFallCanvasWidth}
                         transformTick={bookmarkTransformTick}
                         interactionActive={isTransformInteracting}
+                        allowInteractionMeasure={isTouchMeasuring}
+                        interactionMeasureTick={touchInteractionMeasureTick}
                         height={bandScopeHeight + bandscopeTopPadding}
                         bandOverlayHeight={20}
                         topPadding={bandscopeTopPadding}
@@ -674,6 +723,8 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                         containerWidth={containerWidthRef.current}
                         transformTick={bookmarkTransformTick}
                         interactionActive={isTransformInteracting}
+                        allowInteractionMeasure={isTouchMeasuring}
+                        interactionMeasureTick={touchInteractionMeasureTick}
                         zoomScale={scaleRef.current}
                         currentPositionX={positionXRef.current}
                     />
@@ -685,6 +736,8 @@ const WaterfallAndBandscope = forwardRef(function WaterfallAndBandscope({
                     sampleRate={sampleRate}
                     transformTick={bookmarkTransformTick}
                     interactionActive={isTransformInteracting}
+                    allowInteractionMeasure={isTouchMeasuring}
+                    interactionMeasureTick={touchInteractionMeasureTick}
                 />
 
                 {waterfallRendererMode === 'dom-tiles' ? (

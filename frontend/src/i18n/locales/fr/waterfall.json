@@ -59,7 +59,8 @@
     "enable_bias_t": "Activer Bias T",
     "enable_tuner_agc": "Activer AGC du tuner",
     "enable_agc": "Activer AGC",
-    "enable_rtl_agc": "Activer RTL AGC"
+    "enable_rtl_agc": "Activer RTL AGC",
+    "refresh_params": "Refresh SDR params"
   },
   "fft": {
     "title": "FFT",

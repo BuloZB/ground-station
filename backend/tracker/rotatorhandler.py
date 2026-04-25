@@ -38,6 +38,10 @@ class RotatorHandler:
         """
         self.tracker = tracker
 
+    @staticmethod
+    def _fmt_state_value(value):
+        return "none" if value is None else value
+
     def _reset_slew_state(self):
         """Reset in-flight rotator command tracking."""
         self.tracker.rotator_command_state.update(
@@ -134,7 +138,11 @@ class RotatorHandler:
 
     async def connect_to_rotator(self):
         """Connect to the rotator hardware."""
-        if self.tracker.current_rotator_id is not None and self.tracker.rotator_controller is None:
+        has_rotator_id = (
+            self.tracker.current_rotator_id is not None
+            and str(self.tracker.current_rotator_id).strip().lower() != "none"
+        )
+        if has_rotator_id and self.tracker.rotator_controller is None:
             try:
                 rotator_details = self.tracker.rotator_details
                 if not rotator_details:
@@ -219,7 +227,11 @@ class RotatorHandler:
 
     async def handle_rotator_state_change(self, old, new):
         """Handle rotator state changes."""
-        logger.info(f"Rotator state change detected from '{old}' to '{new}'")
+        logger.info(
+            "Rotator state change detected from '%s' to '%s'",
+            self._fmt_state_value(old),
+            self._fmt_state_value(new),
+        )
 
         self.tracker.rotator_data["minelevation"] = False
         self.tracker.rotator_data["maxelevation"] = False
@@ -229,15 +241,21 @@ class RotatorHandler:
         if new == "connected":
             self._reset_slew_state()
             await self.connect_to_rotator()
-            self.tracker.rotator_data["connected"] = True
-            self.tracker.rotator_data["stopped"] = True
-            self.tracker.rotator_data["parked"] = False
+            if self.tracker.rotator_controller is not None and self.tracker.rotator_data.get(
+                "connected"
+            ):
+                self.tracker.rotator_data["connected"] = True
+                self.tracker.rotator_data["stopped"] = True
+                self.tracker.rotator_data["parked"] = False
         elif new == "tracking":
             self._reset_slew_state()
             await self.connect_to_rotator()
-            self.tracker.rotator_data["tracking"] = True
-            self.tracker.rotator_data["stopped"] = False
-            self.tracker.rotator_data["parked"] = False
+            if self.tracker.rotator_controller is not None and self.tracker.rotator_data.get(
+                "connected"
+            ):
+                self.tracker.rotator_data["tracking"] = True
+                self.tracker.rotator_data["stopped"] = False
+                self.tracker.rotator_data["parked"] = False
         elif new == "stopped":
             self._reset_slew_state()
             self.tracker.rotator_data["tracking"] = False

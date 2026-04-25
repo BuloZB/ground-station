@@ -6,17 +6,27 @@ const PLANET_COLORS = {
     mercury: '#c2b280',
     venus: '#d6b57d',
     earth: '#4f8cff',
+    moon: '#cfd8dc',
     mars: '#c04f3d',
     jupiter: '#d2a679',
+    io: '#f4e6b3',
+    europa: '#d8d8cf',
+    ganymede: '#bfae95',
+    callisto: '#a89f91',
     saturn: '#d9c188',
+    enceladus: '#dbe9f4',
+    rhea: '#c9c1b6',
+    titan: '#d8b078',
+    iapetus: '#b8b0a2',
     uranus: '#76c7c0',
     neptune: '#5a7bd8',
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 1200;
+const MAX_ZOOM = 20000;
 const WHEEL_COMMIT_DELAY_MS = 180;
+const FOCUS_ANIMATION_DURATION_MS = 420;
 const DEFAULT_VIEWPORT = { zoom: 18, panX: 0, panY: 0 };
 const DEFAULT_DISPLAY_OPTIONS = {
     showGrid: true,
@@ -49,6 +59,13 @@ const hexToRgba = (hex, alpha) => {
     const g = Number.parseInt(value.slice(2, 4), 16);
     const b = Number.parseInt(value.slice(4, 6), 16);
     return `rgba(${r},${g},${b},${alpha})`;
+};
+const resolveTrackedColor = (body, fallbackHex) => {
+    const value = String(body?.color || '').trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+        return value;
+    }
+    return fallbackHex;
 };
 const ASTEROID_ZONE_FALLBACK_COLORS = {
     imb: '#4F8CFF',
@@ -93,6 +110,30 @@ const getTwoPointerGesture = (pointerMap) => {
         centerY,
         distance,
     };
+};
+const hasFiniteXYZ = (position) =>
+    Array.isArray(position)
+    && position.length >= 3
+    && Number.isFinite(Number(position[0]))
+    && Number.isFinite(Number(position[1]))
+    && Number.isFinite(Number(position[2]));
+
+const hasFiniteXY = (position) =>
+    Array.isArray(position)
+    && position.length >= 2
+    && Number.isFinite(Number(position[0]))
+    && Number.isFinite(Number(position[1]));
+
+const resolveTargetKey = (body) => {
+    const explicit = String(body?.target_key || '').trim();
+    if (explicit) return explicit;
+    const type = String(body?.target_type || 'mission').toLowerCase();
+    if (type === 'body') {
+        const bodyId = String(body?.body_id || body?.command || '').toLowerCase();
+        return bodyId ? `body:${bodyId}` : '';
+    }
+    const command = String(body?.command || '').trim();
+    return command ? `mission:${command}` : '';
 };
 
 const drawArrowHead = (ctx, fromX, fromY, toX, toY, color) => {
@@ -159,7 +200,10 @@ const drawTextOnArc = (ctx, text, cx, cy, radius, centerAngle, style = {}) => {
 
 const SolarSystemCanvas = ({
     scene,
+    selectedTargetKeys = [],
     fitAllSignal = 0,
+    focusTargetSignal = 0,
+    focusTargetKey = '',
     zoomInSignal = 0,
     zoomOutSignal = 0,
     resetZoomSignal = 0,
@@ -171,7 +215,9 @@ const SolarSystemCanvas = ({
     const containerRef = useRef(null);
     const canvasRef = useRef(null);
     const wheelCommitTimeoutRef = useRef(null);
+    const viewportAnimationRef = useRef(null);
     const lastFitSignalRef = useRef(fitAllSignal);
+    const lastFocusTargetSignalRef = useRef(focusTargetSignal);
     const lastZoomInSignalRef = useRef(zoomInSignal);
     const lastZoomOutSignalRef = useRef(zoomOutSignal);
     const lastResetZoomSignalRef = useRef(resetZoomSignal);
@@ -195,6 +241,11 @@ const SolarSystemCanvas = ({
 
     const planets = scene?.planets || [];
     const tracked = scene?.celestial || [];
+    const selectedTargetKeySet = useMemo(
+        () => new Set((selectedTargetKeys || []).map((value) => String(value || '').trim()).filter(Boolean)),
+        [selectedTargetKeys],
+    );
+    const hasTrackedSelection = selectedTargetKeySet.size > 0;
     const asteroidZones = scene?.asteroid_zones || [];
     const asteroidResonanceGaps = scene?.asteroid_resonance_gaps || [];
     const effectiveDisplayOptions = {
@@ -208,6 +259,48 @@ const SolarSystemCanvas = ({
             onViewportCommit(normalizeViewport(nextViewport));
         }
     }, [onViewportCommit]);
+
+    const cancelViewportAnimation = useCallback(() => {
+        if (viewportAnimationRef.current !== null) {
+            window.cancelAnimationFrame(viewportAnimationRef.current);
+            viewportAnimationRef.current = null;
+        }
+    }, []);
+
+    const animateViewportTo = useCallback((nextViewport, durationMs = FOCUS_ANIMATION_DURATION_MS) => {
+        cancelViewportAnimation();
+        const target = normalizeViewport(nextViewport);
+        const start = viewportRef.current;
+        const duration = Math.max(80, Number(durationMs) || FOCUS_ANIMATION_DURATION_MS);
+        const startedAt = performance.now();
+        const easeInOutCubic = (t) =>
+            t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
+
+        const tick = (now) => {
+            const elapsed = now - startedAt;
+            const progress = Math.min(1, elapsed / duration);
+            const eased = easeInOutCubic(progress);
+            const interpolated = {
+                zoom: start.zoom + (target.zoom - start.zoom) * eased,
+                panX: start.panX + (target.panX - start.panX) * eased,
+                panY: start.panY + (target.panY - start.panY) * eased,
+            };
+            viewportRef.current = interpolated;
+            setViewport(interpolated);
+
+            if (progress < 1) {
+                viewportAnimationRef.current = window.requestAnimationFrame(tick);
+                return;
+            }
+
+            viewportAnimationRef.current = null;
+            viewportRef.current = target;
+            setViewport(target);
+            commitViewport(target);
+        };
+
+        viewportAnimationRef.current = window.requestAnimationFrame(tick);
+    }, [cancelViewportAnimation, commitViewport]);
 
     const fitAll = useCallback(() => {
         const container = containerRef.current;
@@ -227,12 +320,12 @@ const SolarSystemCanvas = ({
             });
         });
         tracked.forEach((body) => {
-            if (Array.isArray(body.position_xyz_au)) {
+            if (hasFiniteXYZ(body.position_xyz_au)) {
                 points.push(body.position_xyz_au);
             }
             const samples = body.orbit_samples_xyz_au || [];
             samples.forEach((sample) => {
-                if (Array.isArray(sample)) points.push(sample);
+                if (hasFiniteXY(sample)) points.push(sample);
             });
         });
 
@@ -274,6 +367,59 @@ const SolarSystemCanvas = ({
         setViewport(nextViewport);
         commitViewport(nextViewport);
     }, [planets, tracked, commitViewport]);
+
+    const fitTarget = useCallback((targetKey) => {
+        const key = String(targetKey || '').trim();
+        if (!key) return;
+        const container = containerRef.current;
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+
+        const selectedBody = tracked.find((body) => resolveTargetKey(body) === key);
+        if (!selectedBody) return;
+
+        const points = [];
+        if (hasFiniteXYZ(selectedBody.position_xyz_au)) {
+            points.push(selectedBody.position_xyz_au);
+        }
+        const samples = Array.isArray(selectedBody.orbit_samples_xyz_au)
+            ? selectedBody.orbit_samples_xyz_au
+            : [];
+        samples.forEach((sample) => {
+            if (hasFiniteXY(sample)) points.push(sample);
+        });
+        if (!points.length) return;
+
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
+        points.forEach((point) => {
+            const x = Number(point[0] || 0);
+            const y = Number(point[1] || 0);
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        });
+
+        const spanX = Math.max(0.02, maxX - minX);
+        const spanY = Math.max(0.02, maxY - minY);
+        const padding = 0.78;
+        const zoomX = (rect.width * padding) / spanX;
+        const zoomY = (rect.height * padding) / spanY;
+        const nextZoom = clamp(Math.min(zoomX, zoomY), MIN_ZOOM, MAX_ZOOM);
+
+        const worldCenterX = (minX + maxX) / 2;
+        const worldCenterY = (minY + maxY) / 2;
+        const nextViewport = {
+            zoom: nextZoom,
+            panX: -worldCenterX * nextZoom,
+            panY: worldCenterY * nextZoom,
+        };
+        animateViewportTo(nextViewport, FOCUS_ANIMATION_DURATION_MS);
+    }, [tracked, animateViewportTo]);
 
     const applyZoomAtScreenPoint = useCallback((zoomFactor, anchorX, anchorY) => {
         const container = containerRef.current;
@@ -341,6 +487,91 @@ const SolarSystemCanvas = ({
             const x = cx + (position?.[0] || 0) * scale;
             const y = cy - (position?.[1] || 0) * scale;
             return [x, y];
+        };
+        const solarBodyIds = new Set(
+            (Array.isArray(planets) ? planets : [])
+                .map((body) => String(body?.id || '').trim().toLowerCase())
+                .filter(Boolean),
+        );
+        const shouldHideTrackedLabelAsDuplicate = (body) => {
+            const bodyId = String(body?.body_id || '').trim().toLowerCase();
+            if (bodyId && solarBodyIds.has(bodyId)) return true;
+            const command = String(body?.command || '').trim().toLowerCase();
+            if (command && solarBodyIds.has(command)) return true;
+            const name = String(body?.name || '').trim().toLowerCase();
+            if (name && solarBodyIds.has(name)) return true;
+            return false;
+        };
+
+        const placedLabelBoxes = [];
+        const LABEL_FONT = '11px monospace';
+        const LABEL_LINE_HEIGHT = 10;
+        const LABEL_ROW_STEP = 8;
+        const LABEL_INDENT_STEP = 6;
+        const LABEL_PADDING = 1;
+
+        const boxesOverlap = (a, b) => !(
+            (a.x + a.w) < b.x
+            || (b.x + b.w) < a.x
+            || (a.y + a.h) < b.y
+            || (b.y + b.h) < a.y
+        );
+
+        const placeLabel = (text, baseX, baseY) => {
+            const label = String(text || '');
+            if (!label) return null;
+
+            ctx.save();
+            ctx.font = LABEL_FONT;
+            const width = Math.max(4, ctx.measureText(label).width);
+            ctx.restore();
+
+            const maxRows = 10;
+            for (let row = 0; row <= maxRows; row += 1) {
+                const y = baseY + row * LABEL_ROW_STEP;
+                const x = row > 0 ? baseX + LABEL_INDENT_STEP : baseX;
+                const box = {
+                    x: x - LABEL_PADDING,
+                    y: y - LABEL_PADDING,
+                    w: width + LABEL_PADDING * 2,
+                    h: LABEL_LINE_HEIGHT + LABEL_PADDING * 2,
+                };
+                if (!placedLabelBoxes.some((existing) => boxesOverlap(existing, box))) {
+                    return { x, y, row, box };
+                }
+            }
+
+            const y = baseY + maxRows * LABEL_ROW_STEP;
+            const x = maxRows > 0 ? baseX + LABEL_INDENT_STEP : baseX;
+            return {
+                x,
+                y,
+                row: maxRows,
+                box: {
+                    x: x - LABEL_PADDING,
+                    y: y - LABEL_PADDING,
+                    w: width + LABEL_PADDING * 2,
+                    h: LABEL_LINE_HEIGHT + LABEL_PADDING * 2,
+                },
+            };
+        };
+
+        const drawLabelWithAutoOffset = (text, anchorX, anchorY, color) => {
+            const label = String(text || '');
+            if (!label) return;
+
+            const placement = placeLabel(label, anchorX + 6, anchorY - 6);
+            if (!placement) return;
+
+            ctx.save();
+            ctx.font = LABEL_FONT;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = color;
+            ctx.fillText(label, placement.x, placement.y);
+            ctx.restore();
+
+            placedLabelBoxes.push(placement.box);
         };
 
         // World-space grid (moves with pan/zoom).
@@ -454,7 +685,6 @@ const SolarSystemCanvas = ({
 
         if (effectiveDisplayOptions.showPlanets) {
             // Planets.
-            ctx.font = '11px monospace';
             planets.forEach((planet) => {
                 const id = String(planet.id || '').toLowerCase();
                 const color = PLANET_COLORS[id] || '#bbbbbb';
@@ -466,28 +696,34 @@ const SolarSystemCanvas = ({
                 ctx.fill();
 
                 if (effectiveDisplayOptions.showPlanetLabels) {
-                    ctx.fillStyle = theme.palette.text.secondary;
-                    ctx.fillText(planet.name || id, sx + 7, sy - 6);
+                    drawLabelWithAutoOffset(planet.name || id, sx, sy, theme.palette.text.secondary);
                 }
             });
         }
 
         // Tracked objects from Horizons.
         if (effectiveDisplayOptions.showTrackedObjects) tracked.forEach((body) => {
+            if (!hasFiniteXYZ(body.position_xyz_au)) return;
             const samples = body.orbit_samples_xyz_au || [];
             if (!samples.length || !effectiveDisplayOptions.showTrackedOrbits) return;
+            const targetKey = resolveTargetKey(body);
+            const isSelected = hasTrackedSelection && selectedTargetKeySet.has(targetKey);
+            const isDimmed = hasTrackedSelection && !isSelected;
 
-            const strokeColor = body.stale
-                ? (theme.palette.mode === 'dark' ? 'rgba(239,71,111,0.45)' : 'rgba(196,47,89,0.45)')
-                : (theme.palette.mode === 'dark' ? 'rgba(6,214,160,0.42)' : 'rgba(0,130,96,0.42)');
+            const trackedHexColor = resolveTrackedColor(body, body.stale ? '#EF476F' : '#06D6A0');
+            const trackedStrokeColor = isSelected
+                ? hexToRgba(trackedHexColor, 0.95)
+                : isDimmed
+                    ? hexToRgba(trackedHexColor, 0.16)
+                    : hexToRgba(trackedHexColor, body.stale ? 0.35 : 0.45);
             ctx.beginPath();
             samples.forEach((sample, index) => {
                 const [sx, sy] = toScreen(sample);
                 if (index === 0) ctx.moveTo(sx, sy);
                 else ctx.lineTo(sx, sy);
             });
-            ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = trackedStrokeColor;
+            ctx.lineWidth = isSelected ? 2.2 : 1;
             ctx.setLineDash([3, 4]);
             ctx.stroke();
             ctx.setLineDash([]);
@@ -496,27 +732,51 @@ const SolarSystemCanvas = ({
             if (samples.length >= 2) {
                 const [startX, startY] = toScreen(samples[0]);
                 const [startNextX, startNextY] = toScreen(samples[1]);
-                drawArrowHead(ctx, startX, startY, startNextX, startNextY, strokeColor);
+                drawArrowHead(ctx, startX, startY, startNextX, startNextY, trackedStrokeColor);
 
                 const lastIndex = samples.length - 1;
                 const [endPrevX, endPrevY] = toScreen(samples[lastIndex - 1]);
                 const [endX, endY] = toScreen(samples[lastIndex]);
-                drawArrowHead(ctx, endPrevX, endPrevY, endX, endY, strokeColor);
+                const dirX = endX - endPrevX;
+                const dirY = endY - endPrevY;
+                const dirLen = Math.hypot(dirX, dirY);
+                if (dirLen > 0.001) {
+                    const ux = dirX / dirLen;
+                    const uy = dirY / dirLen;
+                    const arrowTipX = endX + ux * 8;
+                    const arrowTipY = endY + uy * 8;
+                    drawArrowHead(ctx, endX, endY, arrowTipX, arrowTipY, trackedStrokeColor);
+                }
             }
         });
 
         // Tracked object markers from Horizons.
         if (effectiveDisplayOptions.showTrackedObjects) {
-            ctx.font = '11px monospace';
             tracked.forEach((body) => {
+                if (!hasFiniteXYZ(body.position_xyz_au)) return;
                 const [sx, sy] = toScreen(body.position_xyz_au);
+                const targetKey = resolveTargetKey(body);
+                const isSelected = hasTrackedSelection && selectedTargetKeySet.has(targetKey);
+                const isDimmed = hasTrackedSelection && !isSelected;
+                const trackedHexColor = resolveTrackedColor(body, body.stale ? '#EF476F' : '#06D6A0');
 
-                ctx.fillStyle = body.stale ? '#ef476f' : '#06d6a0';
-                ctx.fillRect(sx - 3, sy - 3, 6, 6);
+                ctx.fillStyle = isDimmed ? hexToRgba(trackedHexColor, 0.28) : trackedHexColor;
+                const markerSize = isSelected ? 8 : 6;
+                ctx.fillRect(sx - markerSize / 2, sy - markerSize / 2, markerSize, markerSize);
+                if (isSelected) {
+                    ctx.strokeStyle = hexToRgba('#ffffff', theme.palette.mode === 'dark' ? 0.9 : 0.75);
+                    ctx.lineWidth = 1.25;
+                    ctx.strokeRect(sx - markerSize / 2 - 1, sy - markerSize / 2 - 1, markerSize + 2, markerSize + 2);
+                }
 
                 if (effectiveDisplayOptions.showTrackedLabels) {
-                    ctx.fillStyle = theme.palette.text.secondary;
-                    ctx.fillText(body.name || body.command || 'object', sx + 8, sy + 4);
+                    if (shouldHideTrackedLabelAsDuplicate(body)) return;
+                    const labelColor = isSelected
+                        ? theme.palette.text.primary
+                        : isDimmed
+                            ? hexToRgba(theme.palette.text.secondary, 0.45)
+                            : theme.palette.text.secondary;
+                    drawLabelWithAutoOffset(body.name || body.command || 'object', sx, sy, labelColor);
                 }
             });
         }
@@ -526,8 +786,11 @@ const SolarSystemCanvas = ({
         displayOptions,
         planets,
         tracked,
+        selectedTargetKeySet,
+        hasTrackedSelection,
         theme.palette.background.default,
         theme.palette.mode,
+        theme.palette.text.primary,
         theme.palette.text.secondary,
         viewport.panX,
         viewport.panY,
@@ -547,6 +810,12 @@ const SolarSystemCanvas = ({
         lastFitSignalRef.current = fitAllSignal;
         fitAll();
     }, [fitAllSignal, fitAll]);
+
+    useEffect(() => {
+        if (focusTargetSignal === lastFocusTargetSignalRef.current) return;
+        lastFocusTargetSignalRef.current = focusTargetSignal;
+        fitTarget(focusTargetKey);
+    }, [focusTargetSignal, focusTargetKey, fitTarget]);
 
     useEffect(() => {
         if (zoomInSignal === lastZoomInSignalRef.current) return;
@@ -599,11 +868,12 @@ const SolarSystemCanvas = ({
 
     useEffect(() => {
         return () => {
+            cancelViewportAnimation();
             if (wheelCommitTimeoutRef.current) {
                 window.clearTimeout(wheelCommitTimeoutRef.current);
             }
         };
-    }, []);
+    }, [cancelViewportAnimation]);
 
     const handlePointerDown = (event) => {
         if (event.pointerType === 'touch') return;

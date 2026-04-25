@@ -6,8 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:prod-mode": "vite --mode production",
     "dev:profile": "VITE_REACT_STRICT_MODE=false vite",
     "build": "vite build",
+    "serve:prod": "vite build --mode production && vite preview --host --port 5173 --strictPort",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
@@ -62,7 +64,7 @@
     "socket.io-client": "^4.8.3",
     "suncalc": "^1.9.0",
     "ua-parser-js": "^2.0.9",
-    "uuid": "^13.0.0"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

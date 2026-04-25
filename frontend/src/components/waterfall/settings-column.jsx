@@ -28,6 +28,8 @@ import {
 import { shallowEqual, useSelector, useDispatch } from 'react-redux';
 
 import {
+    applySDRConfigParameters,
+    getCachedSDRConfigParameters,
     getSDRConfigParameters,
     setErrorDialogOpen,
     setGridEditable,
@@ -347,6 +349,98 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         ]
     );
 
+    const applyLoadedSDRParameters = useCallback((selectedValue, response) => {
+        const caps = response?.capabilities || {};
+        const rxGainElements = Array.isArray(caps?.gain_elements?.rx)
+            ? caps.gain_elements.rx
+            : [];
+        const hasBitpackSetting = Array.isArray(caps?.settings)
+            ? caps.settings.some((setting) => {
+                const key = (setting?.key || '').toLowerCase();
+                const name = (setting?.name || '').toLowerCase();
+                return key === 'bitpack' || name.includes('bit pack');
+            })
+            : false;
+
+        const existingSettings = sdrSettingsById?.[selectedValue]?.draft || {};
+        const nextSdrSettings = {
+            ...(existingSettings || {}),
+            gains: {
+                ...(existingSettings?.gains || {}),
+            },
+        };
+
+        if (rxGainElements.length > 0) {
+            const filteredGains = {};
+            rxGainElements.forEach((name) => {
+                if (Object.prototype.hasOwnProperty.call(nextSdrSettings.gains, name)) {
+                    filteredGains[name] = nextSdrSettings.gains[name];
+                } else {
+                    filteredGains[name] = null;
+                }
+            });
+            nextSdrSettings.gains = filteredGains;
+        }
+
+        if (hasBitpackSetting && nextSdrSettings.bitpack == null) {
+            const bitpackSetting = (caps.settings || []).find((setting) => {
+                const key = (setting?.key || '').toLowerCase();
+                const name = (setting?.name || '').toLowerCase();
+                return key === 'bitpack' || name.includes('bit pack');
+            });
+            nextSdrSettings.bitpack = Boolean(bitpackSetting?.value);
+        }
+
+        if (nextSdrSettings.biasT == null && caps?.bias_t?.supported) {
+            nextSdrSettings.biasT = Boolean(caps?.bias_t?.value);
+        }
+
+        if (nextSdrSettings.tunerAgc == null) {
+            nextSdrSettings.tunerAgc = false;
+        }
+        if (nextSdrSettings.rtlAgc == null) {
+            nextSdrSettings.rtlAgc = false;
+        }
+        if (nextSdrSettings.soapyAgc == null) {
+            nextSdrSettings.soapyAgc = false;
+        }
+
+        if (Array.isArray(caps?.clock_sources) && caps.clock_sources.length > 0) {
+            if (!nextSdrSettings.clockSource) {
+                nextSdrSettings.clockSource = caps.clock_source ?? caps.clock_sources[0] ?? null;
+            }
+        }
+
+        if (Array.isArray(caps?.time_sources) && caps.time_sources.length > 0) {
+            if (!nextSdrSettings.timeSource) {
+                nextSdrSettings.timeSource = caps.time_source ?? caps.time_sources[0] ?? null;
+            }
+        }
+
+        dispatch(setSdrSettings({ sdrId: selectedValue, settings: nextSdrSettings }));
+        dispatch(setSdrSettingsApplied({ sdrId: selectedValue, settings: nextSdrSettings }));
+        sendSDRConfigToBackend({
+            selectedSDRId: selectedValue,
+            sdrSettings: nextSdrSettings,
+        });
+    }, [dispatch, sdrSettingsById, sendSDRConfigToBackend]);
+
+    const loadSDRParameters = useCallback((selectedValue, { forceRefresh = false } = {}) => {
+        if (!forceRefresh) {
+            const cached = getCachedSDRConfigParameters(selectedValue);
+            if (cached) {
+                dispatch(applySDRConfigParameters({ selectedSDRId: selectedValue, data: cached }));
+                return Promise.resolve(cached);
+            }
+        }
+
+        return dispatch(getSDRConfigParameters({
+            socket,
+            selectedSDRId: selectedValue,
+            forceRefresh,
+        })).unwrap();
+    }, [dispatch, socket]);
+
     // Convert to useCallback to ensure stability of the function reference
     const handleSDRChange = useCallback((event) => {
         // Check what was selected
@@ -360,84 +454,9 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             dispatch(setGain("none"));
 
         } else {
-            // Call the backend
-            console.info(`Getting SDR parameters for SDR ${selectedValue} from the backend`);
-            dispatch(getSDRConfigParameters({socket, selectedSDRId: selectedValue}))
-                .unwrap()
-                .then(response => {
-                    const caps = response?.capabilities || {};
-                    const rxGainElements = Array.isArray(caps?.gain_elements?.rx)
-                        ? caps.gain_elements.rx
-                        : [];
-                    const hasBitpackSetting = Array.isArray(caps?.settings)
-                        ? caps.settings.some((setting) => {
-                            const key = (setting?.key || '').toLowerCase();
-                            const name = (setting?.name || '').toLowerCase();
-                            return key === 'bitpack' || name.includes('bit pack');
-                        })
-                        : false;
-
-                    const existingSettings = sdrSettingsById?.[selectedValue]?.draft || {};
-                    const nextSdrSettings = {
-                        ...(existingSettings || {}),
-                        gains: {
-                            ...(existingSettings?.gains || {}),
-                        },
-                    };
-
-                    if (rxGainElements.length > 0) {
-                        const filteredGains = {};
-                        rxGainElements.forEach((name) => {
-                            if (Object.prototype.hasOwnProperty.call(nextSdrSettings.gains, name)) {
-                                filteredGains[name] = nextSdrSettings.gains[name];
-                            } else {
-                                filteredGains[name] = null;
-                            }
-                        });
-                        nextSdrSettings.gains = filteredGains;
-                    }
-
-                    if (hasBitpackSetting && nextSdrSettings.bitpack == null) {
-                        const bitpackSetting = (caps.settings || []).find((setting) => {
-                            const key = (setting?.key || '').toLowerCase();
-                            const name = (setting?.name || '').toLowerCase();
-                            return key === 'bitpack' || name.includes('bit pack');
-                        });
-                        nextSdrSettings.bitpack = Boolean(bitpackSetting?.value);
-                    }
-
-                    if (nextSdrSettings.biasT == null && caps?.bias_t?.supported) {
-                        nextSdrSettings.biasT = Boolean(caps?.bias_t?.value);
-                    }
-
-                    if (nextSdrSettings.tunerAgc == null) {
-                        nextSdrSettings.tunerAgc = false;
-                    }
-                    if (nextSdrSettings.rtlAgc == null) {
-                        nextSdrSettings.rtlAgc = false;
-                    }
-                    if (nextSdrSettings.soapyAgc == null) {
-                        nextSdrSettings.soapyAgc = false;
-                    }
-
-                    if (Array.isArray(caps?.clock_sources) && caps.clock_sources.length > 0) {
-                        if (!nextSdrSettings.clockSource) {
-                            nextSdrSettings.clockSource = caps.clock_source ?? caps.clock_sources[0] ?? null;
-                        }
-                    }
-
-                    if (Array.isArray(caps?.time_sources) && caps.time_sources.length > 0) {
-                        if (!nextSdrSettings.timeSource) {
-                            nextSdrSettings.timeSource = caps.time_source ?? caps.time_sources[0] ?? null;
-                        }
-                    }
-
-                    dispatch(setSdrSettings({ sdrId: selectedValue, settings: nextSdrSettings }));
-                    dispatch(setSdrSettingsApplied({ sdrId: selectedValue, settings: nextSdrSettings }));
-                    sendSDRConfigToBackend({
-                        selectedSDRId: selectedValue,
-                        sdrSettings: nextSdrSettings,
-                    });
+            loadSDRParameters(selectedValue)
+                .then((response) => {
+                    applyLoadedSDRParameters(selectedValue, response);
                 })
                 .catch(error => {
                     // Error occurred while getting SDR parameters
@@ -445,7 +464,22 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     dispatch(setErrorDialogOpen(true));
                 });
         }
-    }, [dispatch, getSDRConfigParameters, sendSDRConfigToBackend, sdrSettingsById, setErrorDialogOpen, setErrorMessage, setIsStreaming, setSelectedSDRId, socket]);
+    }, [dispatch, loadSDRParameters, applyLoadedSDRParameters]);
+
+    const handleRefreshSDRParameters = useCallback(() => {
+        if (!selectedSDRId || selectedSDRId === "none") {
+            return;
+        }
+
+        loadSDRParameters(selectedSDRId, { forceRefresh: true })
+            .then((response) => {
+                applyLoadedSDRParameters(selectedSDRId, response);
+            })
+            .catch((error) => {
+                dispatch(setErrorMessage(error));
+                dispatch(setErrorDialogOpen(true));
+            });
+    }, [selectedSDRId, loadSDRParameters, applyLoadedSDRParameters, dispatch]);
 
     // Expose the function to parent components
     useImperativeHandle(ref, () => ({
@@ -1138,6 +1172,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     sdrs={sdrs}
                     selectedSDRId={selectedSDRId}
                     onSDRChange={handleSDRChange}
+                    onRefreshParameters={handleRefreshSDRParameters}
                     gainValues={gainValues}
                     localGain={localGain}
                     onGainChange={handleGainChange}

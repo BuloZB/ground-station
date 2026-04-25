@@ -17,7 +17,7 @@
  *
  */
 
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
     MapContainer,
     TileLayer,
@@ -71,6 +71,7 @@ import {
     humanizeAltitude,
     humanizeVelocity,
 } from "../common/common.jsx";
+import TargetNumberIcon from '../common/target-number-icon.jsx';
 import MapSettingsIslandDialog from './map-settings-dialog.jsx';
 import CoordinateGrid from "../common/mercator-grid.jsx";
 import createTerminatorLine from "../common/terminator-line.jsx";
@@ -86,6 +87,7 @@ import {
 import {useSocket} from "../common/socket.jsx";
 
 const storageMapZoomValueKey = "target-map-zoom-level";
+const TARGET_SLOT_ID_PATTERN = /^target-(\d+)$/;
 
 // Match overview tracked-satellite tooltip style.
 const TrackedSatelliteTooltip = styled(LeafletTooltip)(({ theme }) => ({
@@ -114,6 +116,15 @@ const isValidLatLonObjectPoint = (point) =>
     && isValidLatLon(point.lat, point.lon);
 const isValidCoveragePoint = (point) =>
     isValidLatLonPoint(point) || isValidLatLonObjectPoint(point);
+const normalizeCoveragePoint = (point) => {
+    if (isValidLatLonPoint(point)) {
+        return [Number(point[0]), Number(point[1])];
+    }
+    if (isValidLatLonObjectPoint(point)) {
+        return [Number(point.lat), Number(point.lon)];
+    }
+    return null;
+};
 
 const MapSlider = function ({handleSliderChange}) {
     const marks = [
@@ -261,6 +272,7 @@ const TargetSatelliteMapContainer = ({}) => {
     const theme = useTheme();
     const {
         groupId,
+        trackerId,
         satelliteId: noradId,
         showPastOrbitPath,
         showFutureOrbitPath,
@@ -284,6 +296,22 @@ const TargetSatelliteMapContainer = ({}) => {
         openMapSettingsDialog,
         showGrid,
     } = useSelector(state => state.targetSatTrack);
+    const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
+    const targetNumber = useMemo(() => {
+        const activeTrackerInstance = trackerInstances.find((instance) => instance?.tracker_id === trackerId) || null;
+        const instanceTargetNumber = Number(activeTrackerInstance?.target_number);
+        if (Number.isFinite(instanceTargetNumber) && instanceTargetNumber > 0) {
+            return instanceTargetNumber;
+        }
+        const trackerSlotMatch = String(trackerId || '').match(TARGET_SLOT_ID_PATTERN);
+        if (trackerSlotMatch) {
+            const parsedTargetNumber = Number(trackerSlotMatch[1]);
+            if (Number.isFinite(parsedTargetNumber) && parsedTargetNumber > 0) {
+                return parsedTargetNumber;
+            }
+        }
+        return null;
+    }, [trackerId, trackerInstances]);
 
     const satellitePosition = useSelector(satellitePositionSelector);
     const satelliteCoverage = useSelector(satelliteCoverageSelector);
@@ -297,6 +325,13 @@ const TargetSatelliteMapContainer = ({}) => {
     const [currentSatellitesPosition, setCurrentSatellitesPosition] = useState([]);
     const [currentSatellitesCoverage, setCurrentSatellitesCoverage] = useState([]);
     const [currentCrosshairs, setCurrentCrosshairs] = useState([]);
+    const clearRenderedSatelliteLayers = useCallback(() => {
+        setCurrentPastSatellitesPaths([]);
+        setCurrentFutureSatellitesPaths([]);
+        setCurrentSatellitesPosition([]);
+        setCurrentSatellitesCoverage([]);
+        setCurrentCrosshairs([]);
+    }, []);
     const handleSetMapZoomLevel = useCallback((zoomLevel) => {
         dispatch(setMapZoomLevel(zoomLevel));
     }, [dispatch]);
@@ -324,7 +359,18 @@ const TargetSatelliteMapContainer = ({}) => {
         showSunIcon, showMoonIcon, showTerminatorLine, pastOrbitLineColor, futureOrbitLineColor,
         satelliteCoverageColor]);
 
+    useEffect(() => {
+        if (trackerInstances.length > 0 && noradId) {
+            return;
+        }
+        clearRenderedSatelliteLayers();
+    }, [trackerInstances.length, noradId, clearRenderedSatelliteLayers]);
+
     const satelliteUpdate = function (now) {
+        if (trackerInstances.length === 0 || !noradId) {
+            clearRenderedSatelliteLayers();
+            return;
+        }
         if (Object.keys(satelliteDetails['name']).length !== 0) {
 
             const satelliteName = satelliteDetails['name'];
@@ -336,6 +382,13 @@ const TargetSatelliteMapContainer = ({}) => {
             const paths = satellitePaths;
             const coverage = satelliteCoverage;
             const hasValidSatellitePoint = isValidLatLon(latitude, longitude);
+            const humanizedAltitude = humanizeAltitude(altitude, 0);
+            const altitudeLabel = humanizedAltitude === "Invalid altitude"
+                ? "-- km"
+                : `${humanizedAltitude} km`;
+            const velocityLabel = Number.isFinite(Number(velocity))
+                ? `${Number(velocity).toFixed(2)} km/s`
+                : "-- km/s";
 
             // generate current positions for the group of satellites
             let currentPos = [];
@@ -431,8 +484,18 @@ const TargetSatelliteMapContainer = ({}) => {
                         interactive={true}
                     >
                         <strong>
-                            <span>{'◎ '}</span>
-                            {satelliteName} - {parseInt(altitude) + " km, " + velocity.toFixed(2) + " km/s"}
+                            {targetNumber != null && (
+                                <TargetNumberIcon
+                                    targetNumber={targetNumber}
+                                    prefix="T"
+                                    size={15}
+                                    sx={{ mr: 0.7, verticalAlign: 'middle', position: 'relative', top: -1 }}
+                                    iconColor="common.white"
+                                    badgeBgColor="warning.main"
+                                    badgeTextColor="common.black"
+                                />
+                            )}
+                            {satelliteName} - {`${altitudeLabel}, ${velocityLabel}`}
                         </strong>
                     </TrackedSatelliteTooltip>
                 </Marker>);
@@ -466,7 +529,7 @@ const TargetSatelliteMapContainer = ({}) => {
 
         } else {
             //console.warn("No satellite data found for norad id: ", noradId, satelliteDetails);
-            setCurrentCrosshairs([]);
+            clearRenderedSatelliteLayers();
         }
 
         // Day/night boundary
@@ -489,7 +552,8 @@ const TargetSatelliteMapContainer = ({}) => {
         MapObject = map.target;
     };
 
-    // Keep target map locked to the selected satellite on every position update.
+    // Keep target map focused on the selected satellite.
+    // If coverage is shown, auto-fit to coverage bounds (legacy behavior).
     useEffect(() => {
         if (!MapObject) return;
 
@@ -500,8 +564,31 @@ const TargetSatelliteMapContainer = ({}) => {
         if (!isValidLatLon(lat, lon)) return;
         if (loadedNoradId !== selectedNoradId) return;
 
+        const coveragePoints = Array.isArray(satelliteCoverage)
+            ? satelliteCoverage
+                .map(normalizeCoveragePoint)
+                .filter((point) => Array.isArray(point) && point.length === 2)
+            : [];
+        if (showSatelliteCoverage && coveragePoints.length > 1) {
+            const coverageBounds = L.latLngBounds(coveragePoints);
+            if (coverageBounds.isValid()) {
+                MapObject.fitBounds(coverageBounds, {
+                    padding: [1, 1],
+                    animate: false,
+                });
+                return;
+            }
+        }
+
         MapObject.setView([lat, lon], MapObject.getZoom(), { animate: false });
-    }, [noradId, satelliteDetails?.norad_id, satellitePosition?.lat, satellitePosition?.lon]);
+    }, [
+        noradId,
+        satelliteDetails?.norad_id,
+        satellitePosition?.lat,
+        satellitePosition?.lon,
+        satelliteCoverage,
+        showSatelliteCoverage,
+    ]);
 
     useEffect(() => {
         const intervalId = setInterval(() => {

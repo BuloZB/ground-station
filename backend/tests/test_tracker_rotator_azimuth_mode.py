@@ -185,3 +185,31 @@ async def test_in_flight_settle_completion_does_not_reissue_due_to_refresh():
     assert issued == []
     assert tracker.rotator_command_state["in_flight"] is False
     assert tracker.rotator_data["slewing"] is False
+
+
+@pytest.mark.asyncio
+async def test_state_change_to_tracking_does_not_force_connected_flags_on_connect_failure():
+    tracker = _DummyTracker("0_360")
+    tracker.rotator_controller = None
+    tracker.rotator_data.update(
+        {
+            "connected": False,
+            "tracking": False,
+            "stopped": True,
+            "parked": False,
+            "error": True,
+        }
+    )
+    handler = RotatorHandler(tracker)
+
+    async def _failed_connect():
+        tracker.rotator_controller = None
+        tracker.rotator_data["connected"] = False
+        tracker.rotator_data["error"] = True
+
+    handler.connect_to_rotator = _failed_connect
+
+    await handler.handle_rotator_state_change("disconnected", "tracking")
+
+    assert tracker.rotator_data["connected"] is False
+    assert tracker.rotator_data["tracking"] is False

@@ -26,6 +26,7 @@ import { setAutoDBRange, setDbRange } from './waterfall-slice.jsx';
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 20;
 const ZOOM_STEP = 0.1;
+const SIDEBAR_SLIDER_MIN_HEIGHT = 72;
 
 const WaterfallRightSidebar = ({ workerRef, waterfallControlRef, dimensions }) => {
     const theme = useTheme();
@@ -147,8 +148,9 @@ const WaterfallRightSidebar = ({ workerRef, waterfallControlRef, dimensions }) =
                     sx={{
                         width: '24px',
                         margin: '0 auto',
+                        my: 0.75,
                         flex: 1,
-                        minHeight: 90,
+                        minHeight: SIDEBAR_SLIDER_MIN_HEIGHT,
                         color: 'primary.main',
                         '& .MuiSlider-thumb': {
                             width: 22,
@@ -265,8 +267,9 @@ const WaterfallRightSidebar = ({ workerRef, waterfallControlRef, dimensions }) =
                     sx={{
                         width: '24px',
                         margin: '0 auto',
+                        my: 0.75,
                         flex: 1,
-                        minHeight: 90,
+                        minHeight: SIDEBAR_SLIDER_MIN_HEIGHT,
                         color: 'primary.main',
                         '& .MuiSlider-thumb': {
                             width: 22,

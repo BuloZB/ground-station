@@ -83,7 +83,6 @@ import BackgroundTasksPopover from "../tasks/tasks-popover.jsx";
 import MenuIcon from '@mui/icons-material/Menu';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import {getNavigation} from "../../config/navigation.jsx";
-import { getFlattenedTasks, getSessionSdrs } from "../scheduler/session-utils.js";
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatTime } from '../../utils/date-time.js';
 
@@ -213,59 +212,25 @@ const MemoToolbarActions = React.memo(ToolbarActions);
 function ActiveObservationIndicator() {
     const observations = useSelector((state) => state.scheduler?.observations || []);
     const { timezone, locale } = useUserTimeSettings();
-    const [remainingText, setRemainingText] = React.useState('');
+    const [nowMs, setNowMs] = React.useState(() => Date.now());
 
-    const runningObservation = React.useMemo(
-        () => observations.find((obs) => obs.status === 'running' && obs.enabled),
+    const runningObservations = React.useMemo(
+        () => observations.filter((obs) => obs.status === 'running' && obs.enabled),
         [observations]
     );
 
     React.useEffect(() => {
-        if (!runningObservation) {
-            setRemainingText('');
-            return;
-        }
-
-        const updateRemaining = () => {
-            const endIso = runningObservation.task_end || runningObservation.pass?.event_end;
-            if (!endIso) {
-                setRemainingText('ending time unavailable');
-                return;
-            }
-
-            const now = new Date();
-            const endTime = new Date(endIso);
-            const remainingMs = endTime - now;
-
-            if (remainingMs <= 0) {
-                setRemainingText('ending soon');
-                return;
-            }
-
-            const hours = Math.floor(remainingMs / 3600000);
-            const minutes = Math.floor((remainingMs % 3600000) / 60000);
-            const seconds = Math.floor((remainingMs % 60000) / 1000);
-
-            if (hours > 0) {
-                setRemainingText(`${hours}h ${minutes}m ${seconds}s left`);
-            } else if (minutes > 0) {
-                setRemainingText(`${minutes}m ${seconds}s left`);
-            } else {
-                setRemainingText(`${seconds}s left`);
-            }
-        };
-
-        updateRemaining();
-        const interval = setInterval(updateRemaining, 1000);
+        const interval = setInterval(() => setNowMs(Date.now()), 1000);
         return () => clearInterval(interval);
-    }, [runningObservation]);
+    }, []);
 
-    if (!runningObservation) {
+    if (!runningObservations.length) {
         return null;
     }
 
-    const endTimeIso = runningObservation.task_end || runningObservation.pass?.event_end;
-    const startTimeIso = runningObservation.task_start || runningObservation.pass?.event_start;
+    const primaryObservation = runningObservations[0];
+    const endTimeIso = primaryObservation.task_end || primaryObservation.pass?.event_end;
+    const startTimeIso = primaryObservation.task_start || primaryObservation.pass?.event_start;
     const formattedEndTime = endTimeIso
         ? formatTime(endTimeIso, {
             timezone,
@@ -280,9 +245,25 @@ function ActiveObservationIndicator() {
             options: { hour: '2-digit', minute: '2-digit', hour12: false },
         })
         : null;
-    const peakAltitude = runningObservation.pass?.peak_altitude;
-    const taskCount = getFlattenedTasks(runningObservation).length;
-    const sdrCount = getSessionSdrs(runningObservation).length;
+    const peakAltitude = primaryObservation.pass?.peak_altitude;
+
+    const getRemainingText = (observation) => {
+        const endIso = observation.task_end || observation.pass?.event_end;
+        if (!endIso) {
+            return 'ending time unavailable';
+        }
+        const endTime = new Date(endIso);
+        const remainingMs = endTime.getTime() - nowMs;
+        if (remainingMs <= 0) {
+            return 'ending soon';
+        }
+        const hours = Math.floor(remainingMs / 3600000);
+        const minutes = Math.floor((remainingMs % 3600000) / 60000);
+        const seconds = Math.floor((remainingMs % 60000) / 1000);
+        if (hours > 0) return `${hours}h ${minutes}m ${seconds}s left`;
+        if (minutes > 0) return `${minutes}m ${seconds}s left`;
+        return `${seconds}s left`;
+    };
 
     return (
         <Box
@@ -331,9 +312,11 @@ function ActiveObservationIndicator() {
                     textOverflow: 'ellipsis',
                 }}
             >
-                Observing: {runningObservation.satellite?.name || 'Unknown'}
+                {runningObservations.length > 1
+                    ? `Observing ${runningObservations.length}: ${primaryObservation.satellite?.name || 'Unknown'} +${runningObservations.length - 1}`
+                    : `Observing: ${primaryObservation.satellite?.name || 'Unknown'}`}
             </Typography>
-            {runningObservation.satellite?.norad_id && (
+            {primaryObservation.satellite?.norad_id && (
                 <Typography
                     variant="caption"
                     sx={{
@@ -343,10 +326,10 @@ function ActiveObservationIndicator() {
                         textOverflow: 'ellipsis',
                     }}
                 >
-                    ({runningObservation.satellite.norad_id})
+                    ({primaryObservation.satellite.norad_id})
                 </Typography>
             )}
-            {(formattedEndTime || remainingText) && (
+            {(formattedEndTime || runningObservations.length > 0) && (
                 <Typography
                     variant="caption"
                     sx={{
@@ -356,10 +339,10 @@ function ActiveObservationIndicator() {
                         textOverflow: 'ellipsis',
                     }}
                 >
-                    • {formattedEndTime ? `ends ${formattedEndTime}` : ''}{formattedEndTime && remainingText ? ' • ' : ''}{remainingText}
+                    • {formattedEndTime ? `ends ${formattedEndTime}` : ''}{formattedEndTime ? ' • ' : ''}{getRemainingText(primaryObservation)}
                 </Typography>
             )}
-            {formattedStartTime && (
+            {formattedStartTime && runningObservations.length === 1 && (
                 <Typography
                     variant="caption"
                     sx={{
@@ -385,32 +368,6 @@ function ActiveObservationIndicator() {
                     • peak {peakAltitude.toFixed(0)}°
                 </Typography>
             )}
-            {sdrCount > 0 && (
-                <Typography
-                    variant="caption"
-                    sx={{
-                        color: 'text.secondary',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                    }}
-                >
-                    • {sdrCount} SDR{sdrCount > 1 ? 's' : ''}
-                </Typography>
-            )}
-            {taskCount > 0 && (
-                <Typography
-                    variant="caption"
-                    sx={{
-                        color: 'text.secondary',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                    }}
-                >
-                    • {taskCount} task{taskCount > 1 ? 's' : ''}
-                </Typography>
-            )}
         </Box>
     );
 }
@@ -425,9 +382,9 @@ function UpcomingObservationIndicator() {
         return () => clearInterval(interval);
     }, []);
 
-    const { runningObservation, nextObservation, timeUntilStartMs } = React.useMemo(() => {
+    const { runningCount, nextObservation, timeUntilStartMs } = React.useMemo(() => {
         const now = new Date(nowMs);
-        const running = observations.find((obs) => obs.status === 'running' && obs.enabled);
+        const running = observations.filter((obs) => obs.status === 'running' && obs.enabled);
         const upcoming = observations
             .filter((obs) => {
                 if (!obs.enabled || obs.status !== 'scheduled') return false;
@@ -442,10 +399,10 @@ function UpcomingObservationIndicator() {
             .sort((a, b) => a.startTime - b.startTime)[0];
 
         const timeUntil = upcoming ? upcoming.startTime - now : null;
-        return { runningObservation: running, nextObservation: upcoming, timeUntilStartMs: timeUntil };
+        return { runningCount: running.length, nextObservation: upcoming, timeUntilStartMs: timeUntil };
     }, [observations, nowMs]);
 
-    if (runningObservation || !nextObservation || !timeUntilStartMs || timeUntilStartMs > 60000 || timeUntilStartMs <= 0) {
+    if (runningCount > 0 || !nextObservation || !timeUntilStartMs || timeUntilStartMs > 60000 || timeUntilStartMs <= 0) {
         return null;
     }
 
@@ -458,9 +415,6 @@ function UpcomingObservationIndicator() {
         })
         : null;
     const peakAltitude = nextObservation.pass?.peak_altitude;
-    const taskCount = getFlattenedTasks(nextObservation).length;
-    const sdrCount = getSessionSdrs(nextObservation).length;
-
     const totalSeconds = Math.ceil(timeUntilStartMs / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
@@ -562,32 +516,6 @@ function UpcomingObservationIndicator() {
                     }}
                 >
                     • peak {peakAltitude.toFixed(0)}°
-                </Typography>
-            )}
-            {sdrCount > 0 && (
-                <Typography
-                    variant="caption"
-                    sx={{
-                        color: 'text.secondary',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                    }}
-                >
-                    • {sdrCount} SDR{sdrCount > 1 ? 's' : ''}
-                </Typography>
-            )}
-            {taskCount > 0 && (
-                <Typography
-                    variant="caption"
-                    sx={{
-                        color: 'text.secondary',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                    }}
-                >
-                    • {taskCount} task{taskCount > 1 ? 's' : ''}
                 </Typography>
             )}
         </Box>
@@ -985,25 +913,25 @@ export default function Layout() {
     const getSchedulerObservationInfo = () => {
         const now = new Date();
 
-        // Find running observation
-        const runningObservation = schedulerObservations.find(
+        // Find running observations
+        const runningObservations = schedulerObservations.filter(
             obs => obs.status === 'running' && obs.enabled
         );
 
         // Find next enabled scheduled observation
         const nextObservation = schedulerObservations
-            .filter(obs => obs.status === 'scheduled' && obs.enabled && obs.pass?.event_start)
+            .filter(obs => obs.status === 'scheduled' && obs.enabled && (obs.task_start || obs.pass?.event_start))
             .map(obs => ({
                 ...obs,
-                startTime: new Date(obs.pass.event_start),
+                startTime: new Date(obs.task_start || obs.pass.event_start),
             }))
             .filter(obs => obs.startTime > now)
             .sort((a, b) => a.startTime - b.startTime)[0];
 
-        return { runningObservation, nextObservation };
+        return { runningObservations, nextObservation };
     };
 
-    const { runningObservation, nextObservation } = getSchedulerObservationInfo();
+    const { runningObservations, nextObservation } = getSchedulerObservationInfo();
 
     // Helper function to format time remaining/until
     const formatTimeUntil = (targetDate) => {
@@ -1029,37 +957,39 @@ export default function Layout() {
             if (item.segment === 'scheduler') {
                 const parts = [];
 
-                // Show running observation
-                if (runningObservation) {
-                    const satelliteName = runningObservation.satellite?.name || 'Unknown';
-                    const endTime = runningObservation.pass?.event_end
-                        ? formatTime(runningObservation.pass.event_end, {
+                // Show running observations (up to 3 lines)
+                if (runningObservations.length > 0) {
+                    const primary = runningObservations[0];
+                    const satelliteName = primary.satellite?.name || 'Unknown';
+                    const endTime = primary.task_end || primary.pass?.event_end;
+                    const endLabel = endTime
+                        ? formatTime(endTime, {
                             timezone,
                             locale,
                             options: { hour: '2-digit', minute: '2-digit', hour12: false },
-                          })
+                        })
                         : 'N/A';
-                    const remainingTime = runningObservation.pass?.event_end
-                        ? formatTimeUntil(new Date(runningObservation.pass.event_end))
-                        : 'N/A';
-                    parts.push(`⚫ Active: ${satelliteName} (${remainingTime} left, ends ${endTime})`);
+                    const remainingTime = endTime ? formatTimeUntil(new Date(endTime)) : 'N/A';
+                    const extras = runningObservations.length > 1 ? ` +${runningObservations.length - 1}` : '';
+                    parts.push(`⚫ Active: ${satelliteName}${extras} (${remainingTime} left, ends ${endLabel})`);
                 }
 
                 // Show next observation
                 if (nextObservation) {
                     const satelliteName = nextObservation.satellite?.name || 'Unknown';
-                    const startTime = nextObservation.pass?.event_start
-                        ? formatTime(nextObservation.pass.event_start, {
+                    const nextStart = nextObservation.task_start || nextObservation.pass?.event_start;
+                    const correctedStartTime = nextStart
+                        ? formatTime(nextStart, {
                             timezone,
                             locale,
                             options: { hour: '2-digit', minute: '2-digit', hour12: false },
                           })
                         : 'N/A';
-                    const timeUntil = nextObservation.pass?.event_start
-                        ? formatTimeUntil(new Date(nextObservation.pass.event_start))
+                    const timeUntil = nextStart
+                        ? formatTimeUntil(new Date(nextStart))
                         : 'N/A';
-                    const prefix = runningObservation ? '\n⏱ Next: ' : '⏱ Next: ';
-                    parts.push(`${prefix}${satelliteName} (in ${timeUntil}, starts ${startTime})`);
+                    const prefix = runningObservations.length > 0 ? '\n⏱ Next: ' : '⏱ Next: ';
+                    parts.push(`${prefix}${satelliteName} (in ${timeUntil}, starts ${correctedStartTime})`);
                 }
 
                 // If we have info to show, return it; otherwise fall back to title

@@ -32,12 +32,74 @@ const getDefaultWaterfallRendererMode = () => {
     return 'worker';
 };
 
+const SDR_PARAMS_CACHE_KEY = 'ground-station.waterfall.sdr-params.v1';
+const SDR_PARAMS_CACHE_VERSION = 1;
+
+function canCacheSDRParams(selectedSDRId) {
+    return Boolean(selectedSDRId) && selectedSDRId !== 'none' && selectedSDRId !== 'sigmf-playback';
+}
+
+function readSDRParamsCacheMap() {
+    try {
+        const raw = localStorage.getItem(SDR_PARAMS_CACHE_KEY);
+        if (!raw) {
+            return {};
+        }
+        const parsed = JSON.parse(raw);
+        if (parsed?.version !== SDR_PARAMS_CACHE_VERSION || typeof parsed?.items !== 'object' || parsed.items === null) {
+            return {};
+        }
+        return parsed.items;
+    } catch (error) {
+        console.warn('Failed to read SDR params cache from localStorage:', error);
+        return {};
+    }
+}
+
+function writeSDRParamsCacheMap(items) {
+    try {
+        localStorage.setItem(
+            SDR_PARAMS_CACHE_KEY,
+            JSON.stringify({
+                version: SDR_PARAMS_CACHE_VERSION,
+                items,
+            })
+        );
+    } catch (error) {
+        console.warn('Failed to write SDR params cache to localStorage:', error);
+    }
+}
+
+export function getCachedSDRConfigParameters(selectedSDRId) {
+    if (!canCacheSDRParams(selectedSDRId)) {
+        return null;
+    }
+    const items = readSDRParamsCacheMap();
+    return items?.[selectedSDRId] ?? null;
+}
+
+function setCachedSDRConfigParameters(selectedSDRId, data) {
+    if (!canCacheSDRParams(selectedSDRId) || !data) {
+        return;
+    }
+    const items = readSDRParamsCacheMap();
+    items[selectedSDRId] = data;
+    writeSDRParamsCacheMap(items);
+}
+
 export const getSDRConfigParameters = createAsyncThunk(
     'waterfall/getSDRConfigParameters',
-    async ({socket, selectedSDRId}, {rejectWithValue}) => {
+    async ({socket, selectedSDRId, forceRefresh = false}, {rejectWithValue}) => {
+        if (!forceRefresh) {
+            const cached = getCachedSDRConfigParameters(selectedSDRId);
+            if (cached) {
+                return cached;
+            }
+        }
         return new Promise((resolve, reject) => {
             socket.emit('data_request', 'get-sdr-parameters', selectedSDRId, (response) => {
                 if (response.success) {
+                    setCachedSDRConfigParameters(selectedSDRId, response.data);
                     resolve(response.data);
                 } else {
                     reject(rejectWithValue(response.error));
@@ -46,6 +108,21 @@ export const getSDRConfigParameters = createAsyncThunk(
         });
     }
 );
+
+function applySDRConfigParametersToState(state, payload, sdrId) {
+    state.gainValues = payload['gain_values'];
+    state.sampleRateValues = payload['sample_rate_values'];
+    if (sdrId) {
+        state.sdrCapabilities[sdrId] = payload['capabilities'] || {};
+    }
+    state.hasBiasT = payload['has_bias_t'];
+    state.hasTunerAgc = payload['has_tuner_agc'];
+    state.hasRtlAgc = payload['has_rtl_agc'];
+    state.fftSizeValues = payload['fft_size_values'];
+    state.fftWindowValues = payload['fft_window_values'];
+    state.antennasList = payload['antennas'];
+    state.hasSoapyAgc = payload['has_soapy_agc'];
+}
 
 export const startRecording = createAsyncThunk(
     'waterfall/startRecording',
@@ -547,6 +624,14 @@ export const waterfallSlice = createSlice({
                 state.showBookmarkSources[source] = value;
             }
         },
+        applySDRConfigParameters: (state, action) => {
+            const selectedSDRId = action.payload?.selectedSDRId;
+            const data = action.payload?.data;
+            if (!data) {
+                return;
+            }
+            applySDRConfigParametersToState(state, data, selectedSDRId);
+        },
     },
     extraReducers: (builder) => {
         builder
@@ -556,19 +641,8 @@ export const waterfallSlice = createSlice({
             })
             .addCase(getSDRConfigParameters.fulfilled, (state, action) => {
                 state.gettingSDRParameters = false;
-                state.gainValues = action.payload['gain_values'];
-                state.sampleRateValues = action.payload['sample_rate_values'];
                 const sdrId = action.meta?.arg?.selectedSDRId;
-                if (sdrId) {
-                    state.sdrCapabilities[sdrId] = action.payload['capabilities'] || {};
-                }
-                state.hasBiasT = action.payload['has_bias_t'];
-                state.hasTunerAgc = action.payload['has_tuner_agc'];
-                state.hasRtlAgc = action.payload['has_rtl_agc'];
-                state.fftSizeValues = action.payload['fft_size_values'];
-                state.fftWindowValues = action.payload['fft_window_values'];
-                state.antennasList = action.payload['antennas'];
-                state.hasSoapyAgc = action.payload['has_soapy_agc'];
+                applySDRConfigParametersToState(state, action.payload, sdrId);
             })
             .addCase(getSDRConfigParameters.rejected, (state, action) => {
                 state.gettingSDRParameters = false;
@@ -667,6 +741,7 @@ export const {
     setNeighboringTransmitters,
     setShowNeighboringTransmitters,
     setShowBookmarkSource,
+    applySDRConfigParameters,
 } = waterfallSlice.actions;
 
 export default waterfallSlice.reducer;

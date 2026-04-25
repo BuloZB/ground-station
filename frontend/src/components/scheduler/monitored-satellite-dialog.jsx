@@ -17,7 +17,7 @@
  *
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
     Dialog,
@@ -67,12 +67,10 @@ import { DecoderConfigSuggestion } from './decoder-config-suggestion.jsx';
 
 const DECODER_TYPES = [
     { value: 'none', label: 'None' },
-    { value: 'lora', label: 'LoRa' },
     { value: 'fsk', label: 'FSK' },
     { value: 'gmsk', label: 'GMSK' },
     { value: 'gfsk', label: 'GFSK' },
     { value: 'bpsk', label: 'BPSK' },
-    { value: 'afsk', label: 'AFSK' },
     { value: 'sstv', label: 'SSTV' },
 ];
 
@@ -197,6 +195,7 @@ export default function MonitoredSatelliteDialog() {
     const selectedGroupId = useSelector((state) => state.scheduler?.satelliteSelection?.groupId);
     const groupOfSats = useSelector((state) => state.scheduler?.satelliteSelection?.groupOfSats || []);
     const rotators = useSelector((state) => state.rotators?.rotators || []);
+    const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const satGroups = useSelector((state) => state.scheduler?.satelliteSelection?.satGroups || []);
     const sdrParameters = useSelector((state) => state.scheduler?.sdrParameters || {});
     const sdrParametersLoading = useSelector((state) => state.scheduler?.sdrParametersLoading || false);
@@ -205,6 +204,17 @@ export default function MonitoredSatelliteDialog() {
     const saveError = useSelector((state) => state.scheduler?.monitoredSatelliteError);
 
     const [activeSessionIndex, setActiveSessionIndex] = useState(0);
+    const trackerInfoByRotatorId = useMemo(() => {
+        const mapping = {};
+        trackerInstances.forEach((instance) => {
+            const rotatorId = instance?.rotator_id;
+            if (!rotatorId) return;
+            mapping[String(rotatorId)] = {
+                targetNumber: Number(instance?.target_number || 0),
+            };
+        });
+        return mapping;
+    }, [trackerInstances]);
     const [formData, setFormData] = useState(() => {
         const initialSession = createEmptySession();
         return {
@@ -420,7 +430,7 @@ export default function MonitoredSatelliteDialog() {
             setActiveSessionIndex(0);
             setExpandedTasks({});
         }
-    }, [selectedMonitoredSatellite, open]);
+    }, [selectedMonitoredSatellite, open, trackerInfoByRotatorId]);
 
     // Clear satellite selection state when opening dialog
     useEffect(() => {
@@ -1068,6 +1078,13 @@ export default function MonitoredSatelliteDialog() {
                                                 <Typography variant="caption" color="text.secondary">
                                                     {[
                                                         rotator.host ? `${rotator.host}:${rotator.port}` : null,
+                                                        (() => {
+                                                            const trackerInfo = trackerInfoByRotatorId[String(rotator.id)];
+                                                            if (trackerInfo?.targetNumber) {
+                                                                return `Target ${trackerInfo.targetNumber}`;
+                                                            }
+                                                            return 'Target resolved at runtime';
+                                                        })(),
                                                         rotator.min_azimuth != null && rotator.max_azimuth != null ? `Az: ${rotator.min_azimuth}° - ${rotator.max_azimuth}°` : null,
                                                         rotator.min_elevation != null && rotator.max_elevation != null ? `El: ${rotator.min_elevation}° - ${rotator.max_elevation}°` : null,
                                                     ].filter(Boolean).join(' • ') || 'No additional details'}
@@ -1077,6 +1094,9 @@ export default function MonitoredSatelliteDialog() {
                                     ))}
                                 </Select>
                             </FormControl>
+                            <Typography variant="caption" color="text.secondary">
+                                Target assignment is resolved at runtime from current rotator ownership.
+                            </Typography>
                             <FormControlLabel
                                 control={
                                     <Checkbox

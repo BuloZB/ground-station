@@ -193,7 +193,6 @@ const BackgroundTasksPopover = () => {
     const buttonRef = useRef(null);
     const [anchorEl, setAnchorEl] = useState(null);
     const [connected, setConnected] = useState(false);
-    const [hideIcon, setHideIcon] = useState(false);
     const [expandedOutputs, setExpandedOutputs] = useState({});
     const [expandedTasks, setExpandedTasks] = useState({});
     const previousStatusesRef = useRef({});
@@ -211,12 +210,6 @@ const BackgroundTasksPopover = () => {
         const task = tasks[taskId];
         return task && task.status === 'stopped';
     });
-
-    // Determine if there are any tasks (running or completed)
-    const hasTasks = runningTaskIds.length > 0 || completedTaskIds.length > 0;
-
-    // Show icon whenever there are tasks and we're not in the hiding transition
-    const shouldShowIcon = hasTasks;
 
     // Socket connection event handlers
     useEffect(() => {
@@ -241,13 +234,6 @@ const BackgroundTasksPopover = () => {
             socket.off('disconnect', handleDisconnect);
         };
     }, [socket]);
-
-    // Show icon whenever there are tasks
-    useEffect(() => {
-        if (hasTasks) {
-            setHideIcon(false);
-        }
-    }, [hasTasks]);
 
     // Collapse output when tasks finish and default completed outputs to collapsed
     useEffect(() => {
@@ -314,14 +300,9 @@ const BackgroundTasksPopover = () => {
             dispatch(removeTask(taskId));
         });
 
-        // If no running tasks remain after clearing, close popover and hide the icon
+        // If no running tasks remain after clearing, close popover
         if (runningTaskIds.length === 0) {
-            // Close popover first
             setAnchorEl(null);
-            // Then hide icon after popover closes (300ms transition)
-            setTimeout(() => {
-                setHideIcon(true);
-            }, 300);
         }
     }, [completedTaskIds, runningTaskIds, dispatch]);
 
@@ -579,7 +560,6 @@ const BackgroundTasksPopover = () => {
                     sx={{
                         color: getIconColor(),
                         position: 'relative',
-                        display: hideIcon ? 'none' : 'inline-flex',
                     }}
                 >
                     {runningTaskIds.length > 0 && (

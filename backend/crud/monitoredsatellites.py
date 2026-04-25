@@ -58,8 +58,11 @@ def _transform_to_db_format(data: dict) -> dict:
         "group_id": satellite.get("group_id"),
     }
 
+    rotator_config = dict(data.get("rotator", {}) or {})
+    rotator_config.pop("tracker_id", None)
+
     hardware_config = {
-        "rotator": data.get("rotator", {}),
+        "rotator": rotator_config,
         "rig": data.get("rig", {}),
     }
 
@@ -109,6 +112,9 @@ def _transform_from_db_format(db_obj: dict) -> dict:
     if updated_at and hasattr(updated_at, "isoformat"):
         updated_at = updated_at.isoformat()
 
+    rotator_config = dict(hardware_config.get("rotator", {}) or {})
+    rotator_config.pop("tracker_id", None)
+
     return {
         "id": db_obj.get("id"),
         "enabled": db_obj.get("enabled"),
@@ -117,7 +123,7 @@ def _transform_from_db_format(db_obj: dict) -> dict:
             "name": satellite_config.get("name"),
             "group_id": satellite_config.get("group_id"),
         },
-        "rotator": hardware_config.get("rotator", {}),
+        "rotator": rotator_config,
         "rig": hardware_config.get("rig", {}),
         "min_elevation": generation_config.get("min_elevation", 20),
         "task_start_elevation": generation_config.get("task_start_elevation", 10),

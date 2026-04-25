@@ -63,6 +63,12 @@ parser.add_argument(
     help="Milliseconds between track updates",
 )
 parser.add_argument(
+    "--max-tracker-targets",
+    type=int,
+    default=None,
+    help="Maximum number of active target-N tracker slots",
+)
+parser.add_argument(
     "--enable-soapy-discovery",
     type=lambda x: str(x).lower() in ("true", "1", "t"),
     default=None,
@@ -87,6 +93,7 @@ if os.environ.get("ALEMBIC_CONTEXT"):
         log_config="data/configs/log_config.yaml",
         secret_key="YOUR_RANDOM_SECRET_KEY",
         track_interval_ms=2000,
+        max_tracker_targets=10,
         enable_soapy_discovery=False,
         runonce_soapy_discovery=True,
         tle_sync_satellite_metadata_urls=["http://db.satnogs.org/api/satellites/?format=json"],
@@ -126,6 +133,7 @@ else:
         track_interval_ms=(
             cli_track_interval_ms if cli_track_interval_ms is not None else file_track_interval_ms
         ),
+        max_tracker_targets=_pick(_raw_args.max_tracker_targets, "max_tracker_targets"),
         enable_soapy_discovery=_pick(_raw_args.enable_soapy_discovery, "enable_soapy_discovery"),
         runonce_soapy_discovery=_pick(_raw_args.runonce_soapy_discovery, "runonce_soapy_discovery"),
         tle_sync_satellite_metadata_urls=_file_config.get("tle_sync_satellite_metadata_urls"),

@@ -34,6 +34,8 @@ export default function ScheduledObservationsLayout() {
             sx={{
                 height: '100%',
                 width: '100%',
+                boxSizing: 'border-box',
+                minWidth: 0,
                 display: 'flex',
                 flexDirection: 'column',
                 p: 2,
@@ -50,6 +52,7 @@ export default function ScheduledObservationsLayout() {
                     display: 'grid',
                     gap: 2,
                     minHeight: 0,
+                    minWidth: 0,
                     gridTemplateRows: {
                         xs: 'auto minmax(0, 1fr)',
                         lg: 'auto minmax(0, 1fr)',
@@ -58,12 +61,12 @@ export default function ScheduledObservationsLayout() {
                 }}
             >
                 {/* Monitored Satellites - Top Section */}
-                <Box sx={{ minHeight: 0 }}>
+                <Box sx={{ minHeight: 0, minWidth: 0 }}>
                     <MonitoredSatellitesTable />
                 </Box>
 
                 {/* Scheduled Observations - Bottom Section */}
-                <Box sx={{ minHeight: 0, overflow: 'hidden' }}>
+                <Box sx={{ minHeight: 0, minWidth: 0, overflow: 'auto' }}>
                     <ObservationsTable />
                 </Box>
             </Box>

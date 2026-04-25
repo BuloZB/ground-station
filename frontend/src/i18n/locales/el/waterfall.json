@@ -59,7 +59,8 @@
     "enable_bias_t": "Ενεργοποίηση Bias T",
     "enable_tuner_agc": "Ενεργοποίηση tuner AGC",
     "enable_agc": "Ενεργοποίηση AGC",
-    "enable_rtl_agc": "Ενεργοποίηση RTL AGC"
+    "enable_rtl_agc": "Ενεργοποίηση RTL AGC",
+    "refresh_params": "Refresh SDR params"
   },
   "fft": {
     "title": "FFT",

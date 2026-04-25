@@ -10,12 +10,15 @@ import {
     Box,
     FormControl,
     FormControlLabel,
+    IconButton,
     InputLabel,
     ListSubheader,
     MenuItem,
     Select,
     Switch,
+    Tooltip,
 } from "@mui/material";
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { useTranslation } from 'react-i18next';
 
 const SdrAccordion = ({
@@ -26,6 +29,7 @@ const SdrAccordion = ({
                           sdrs,
                           selectedSDRId,
                           onSDRChange,
+                          onRefreshParameters,
                           gainValues,
                           localGain,
                           onGainChange,
@@ -148,7 +152,26 @@ const SdrAccordion = ({
                     boxShadow: '-1px 4px 7px #00000059',
                 }}
                 aria-controls="panel3d-content" id="panel3d-header">
-                <Typography component="span">{t('sdr.title')}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <Typography component="span">{t('sdr.title')}</Typography>
+                    <Tooltip title={t('sdr.refresh_params')}>
+                        <span>
+                            <IconButton
+                                size="small"
+                                aria-label={t('sdr.refresh_params')}
+                                onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onRefreshParameters?.();
+                                }}
+                                disabled={gettingSDRParameters || selectedSDRId === 'none'}
+                                sx={{ opacity: 0.7, p: 0.5, mr: 0.5 }}
+                            >
+                                <RefreshIcon sx={{ fontSize: '1rem' }} />
+                            </IconButton>
+                        </span>
+                    </Tooltip>
+                </Box>
             </AccordionSummary>
             <AccordionDetails sx={{
                 backgroundColor: 'background.elevated',
@@ -584,6 +607,7 @@ function areSdrAccordionPropsEqual(prevProps, nextProps) {
         prevProps.sdrs === nextProps.sdrs &&
         prevProps.selectedSDRId === nextProps.selectedSDRId &&
         prevProps.onSDRChange === nextProps.onSDRChange &&
+        prevProps.onRefreshParameters === nextProps.onRefreshParameters &&
         prevProps.gainValues === nextProps.gainValues &&
         prevProps.localGain === nextProps.localGain &&
         prevProps.onGainChange === nextProps.onGainChange &&

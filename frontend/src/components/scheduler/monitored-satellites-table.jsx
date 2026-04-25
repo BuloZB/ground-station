@@ -75,7 +75,17 @@ const MonitoredSatellitesTable = () => {
 
     const monitoredSatellites = useSelector((state) => state.scheduler?.monitoredSatellites || []);
     const loading = useSelector((state) => state.scheduler?.monitoredSatellitesLoading || false);
+    const rotators = useSelector((state) => state.rotators?.rotators || []);
     const rowSelectionModel = useMemo(() => toRowSelectionModel(selectedIds), [selectedIds]);
+    const rotatorNameById = useMemo(() => {
+        const mapping = {};
+        rotators.forEach((rotator) => {
+            const rotatorId = rotator?.id;
+            if (!rotatorId) return;
+            mapping[String(rotatorId)] = rotator?.name || '';
+        });
+        return mapping;
+    }, [rotators]);
 
     useEffect(() => {
         if (socket) {
@@ -261,12 +271,36 @@ const MonitoredSatellitesTable = () => {
         {
             field: 'rotator',
             headerName: 'Rotator',
-            width: 90,
+            minWidth: 180,
+            flex: 1,
+            cellClassName: 'target-rotator-nowrap-cell',
+            headerClassName: 'target-rotator-nowrap-header',
             renderCell: (params) => {
-                return params.value?.tracking_enabled ? (
-                    <Chip label="Enabled" size="small" color="success" variant="outlined" />
-                ) : (
-                    <Typography variant="body2" color="text.secondary">-</Typography>
+                const rotator = params.value || {};
+                const rotatorId = rotator?.id || '';
+                const rotatorName = rotator?.name || (rotatorId ? rotatorNameById[String(rotatorId)] : '');
+                const primaryLabel = rotatorName || (rotatorId ? 'Configured rotator' : 'No rotator');
+                const secondaryLabel = rotatorId
+                    ? (rotator?.tracking_enabled ? 'Tracking enabled' : 'Tracking disabled')
+                    : 'Not configured';
+                return (
+                    <Stack
+                        direction="row"
+                        spacing={0.8}
+                        alignItems="center"
+                        sx={{ py: 0.5, width: '100%', whiteSpace: 'nowrap', overflow: 'hidden' }}
+                    >
+                        <Chip
+                            size="small"
+                            color={rotatorId ? 'primary' : 'default'}
+                            variant={rotatorId ? 'filled' : 'outlined'}
+                            label={primaryLabel}
+                            sx={{ flexShrink: 0 }}
+                        />
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                            {secondaryLabel}
+                        </Typography>
+                    </Stack>
                 );
             },
         },
@@ -352,7 +386,7 @@ const MonitoredSatellitesTable = () => {
                 Satellites in this list will automatically generate scheduled observations for all upcoming passes that meet the specified criteria (minimum elevation, lookahead window).
             </Alert>
 
-            <Box sx={{ width: '100%' }}>
+            <Box sx={{ width: '100%', minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                 <DataGrid
                     autoHeight
                     rows={monitoredSatellites}
@@ -378,6 +412,14 @@ const MonitoredSatellitesTable = () => {
                     }}
                     sx={{
                         border: 0,
+                        width: '100%',
+                        '& .MuiDataGrid-main': {
+                            overflowX: 'auto',
+                        },
+                        '& .MuiDataGrid-virtualScroller': {
+                            overflowX: 'auto',
+                            touchAction: 'pan-x pan-y',
+                        },
                         [`& .${gridClasses.cell}:focus, & .${gridClasses.cell}:focus-within`]: {
                             outline: 'none',
                         },
@@ -407,6 +449,13 @@ const MonitoredSatellitesTable = () => {
                         '& .MuiDataGrid-cell': {
                             display: 'flex',
                             alignItems: 'center',
+                        },
+                        '& .target-rotator-nowrap-cell': {
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                        },
+                        '& .target-rotator-nowrap-header .MuiDataGrid-columnHeaderTitle': {
+                            whiteSpace: 'nowrap',
                         },
                     }}
                 />

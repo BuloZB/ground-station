@@ -140,7 +140,7 @@ flowchart TB
     %% Worker Layer
     subgraph Workers["Worker Processes"]
         direction TB
-        W1[Satellite Tracker + Hardware Control<br/>- Antenna rotator control<br/>- Rig/radio control<br/>- Real-time tracking calculations<br/>- Hardware state management]
+        W1[Tracker Supervisor + Tracker Instances<br/>- One tracker instance per rotator<br/>- Antenna rotator control<br/>- Rig/radio control<br/>- Real-time tracking calculations<br/>- Hardware state management]
         W2[SDR IQ Acquisition<br/>- Raw IQ sample streaming<br/>- IQ Broadcaster pub/sub<br/>- Multi-consumer support]
         W2A[FFT Processor<br/>- Spectrum computation<br/>- Waterfall generation<br/>- Real-time FFT analysis]
         W2B[Demodulators<br/>- FM/SSB/AM modes<br/>- Normal & Internal modes<br/>- Frequency translation<br/>- Audio processing<br/>- Multi-VFO support]
@@ -553,6 +553,8 @@ This project uses the SatNOGS API for transmitter information.
 ## License
 
 This project is licensed under the GNU GPL v3. See the [LICENSE](LICENSE) file for details.
+
+
 
 ![](https://hit.yhype.me/github/profile?account_id=4840328)
 ![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Fsgoudelis%2Fground-station&countColor=%23263759)

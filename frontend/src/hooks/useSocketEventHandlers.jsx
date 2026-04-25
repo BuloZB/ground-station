@@ -43,6 +43,7 @@ import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
 import { store } from '../components/common/store.jsx';
 import { setSyncState } from '../components/satellites/synchronize-slice.jsx';
 import { setSatelliteData, setUITrackerValues, setTrackerCommandStatus } from '../components/target/target-slice.jsx';
+import { setTrackerInstances } from '../components/target/tracker-instances-slice.jsx';
 import { setSynchronizing } from '../components/satellites/synchronize-slice.jsx';
 import { initializeAppData } from '../services/data-sync.js';
 import {
@@ -102,6 +103,7 @@ import {
     setCelestialSceneLive,
     setCelestialTracksLive,
     setSolarSceneLive,
+    upsertCelestialTrackRowLive,
 } from '../components/celestial/celestial-slice.jsx';
 
 /**
@@ -252,6 +254,10 @@ export const useSocketEventHandlers = (socket) => {
 
         socket.on("tracker-command-status", (data) => {
             store.dispatch(setTrackerCommandStatus(data));
+        });
+
+        socket.on("tracker-instances", (data) => {
+            store.dispatch(setTrackerInstances(data));
         });
 
         // File browser state updates (pub/sub model)
@@ -820,6 +826,9 @@ export const useSocketEventHandlers = (socket) => {
         socket.on('celestial-tracks-update', (data) => {
             dispatch(setCelestialTracksLive(data));
         });
+        socket.on('celestial-track-row-update', (data) => {
+            dispatch(upsertCelestialTrackRowLive(data));
+        });
 
         // SoapySDR discovery events
         socket.on('soapysdr:discovery_started', (data) => {
@@ -892,6 +901,7 @@ export const useSocketEventHandlers = (socket) => {
             socket.off("satellite-tracking");
             socket.off("ui-tracker-state");
             socket.off("tracker-command-status");
+            socket.off("tracker-instances");
             socket.off("file_browser_state");
             socket.off("file_browser_error");
             socket.off("recording_state");
@@ -914,6 +924,7 @@ export const useSocketEventHandlers = (socket) => {
             socket.off("celestial-scene-update");
             socket.off("solar-system-scene-update");
             socket.off("celestial-tracks-update");
+            socket.off("celestial-track-row-update");
             socket.off("observation-status-update");
             socket.off("scheduled-observations-changed");
             socket.off("soapysdr:discovery_started");

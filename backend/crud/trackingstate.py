@@ -82,9 +82,6 @@ async def set_tracking_state(session: AsyncSession, data: dict) -> dict:
             assert value.get(
                 "norad_id", None
             ), "norad_id is required when creating new tracking state"
-            assert value.get(
-                "group_id", None
-            ), "group_id is required when creating new tracking state"
             assert (
                 value.get("rotator_state", None) is not None
             ), "rotator_state is required when creating new tracking state"
@@ -148,3 +145,28 @@ async def get_tracking_state(session: AsyncSession, name: str) -> dict:
         pass
 
     return reply
+
+
+async def delete_tracking_state(session: AsyncSession, name: str) -> dict:
+    """Delete a tracking_state row by name."""
+    try:
+        assert name is not None, "name is required when deleting tracking state"
+        stmt = select(TrackingState).filter(TrackingState.name == name)
+        result = await session.execute(stmt)
+        tracking_state = result.scalar_one_or_none()
+
+        if not tracking_state:
+            return {
+                "success": True,
+                "deleted": False,
+                "error": f"Tracking state with name '{name}' not found.",
+            }
+
+        await session.delete(tracking_state)
+        await session.commit()
+        return {"success": True, "deleted": True, "error": None}
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Error deleting satellite tracking state for key '{name}': {e}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "deleted": False, "error": str(e)}

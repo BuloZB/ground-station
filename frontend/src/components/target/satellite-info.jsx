@@ -17,7 +17,7 @@
  *
  */
 
-import {useSelector} from "react-redux";
+import {useDispatch, useSelector} from "react-redux";
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import {
@@ -28,6 +28,8 @@ import {
     humanizeLatitude,
     humanizeLongitude,
     humanizeVelocity,
+    getFrequencyBand,
+    getBandColor,
     renderCountryFlagsCSV,
     TitleBar
 } from "../common/common.jsx";
@@ -36,8 +38,11 @@ import {
     Typography,
     Divider,
     Chip,
-    Button
+    Button,
+    Tooltip,
+    IconButton
 } from '@mui/material';
+import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
@@ -47,19 +52,118 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import PublicIcon from '@mui/icons-material/Public';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
-import UpdateIcon from '@mui/icons-material/Update';
 import BusinessIcon from '@mui/icons-material/Business';
 import RadioIcon from '@mui/icons-material/Radio';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import EditIcon from '@mui/icons-material/Edit';
+import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import Grid from "@mui/material/Grid";
 import React from "react";
+import TransmittersDialog from "../satellites/transmitters-dialog.jsx";
+import SatelliteEditDialog from "../satellites/satellite-edit-dialog.jsx";
+import {fetchSatellite} from "./target-slice.jsx";
+import {useSocket} from "../common/socket.jsx";
 // ElevationDisplay not used in target page; using satelliteData for elevation per request
 
 const TargetSatelliteInfoIsland = () => {
     const { t } = useTranslation('target');
-    const { satelliteData, gridEditable, satelliteId } = useSelector((state) => state.targetSatTrack);
+    const { t: tSat } = useTranslation('satellites');
+    const dispatch = useDispatch();
+    const { socket } = useSocket();
+    const { satelliteData, gridEditable, satelliteId, satellitePasses } = useSelector((state) => state.targetSatTrack);
+    const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const selectedSatellitePositions = useSelector(state => state.overviewSatTrack.selectedSatellitePositions);
     const navigate = useNavigate();
+    const transmitters = satelliteData?.transmitters || [];
+    const [satelliteEditDialogOpen, setSatelliteEditDialogOpen] = React.useState(false);
+    const [transmittersDialogOpen, setTransmittersDialogOpen] = React.useState(false);
+    const [countdown, setCountdown] = React.useState('');
+    const selectedNoradId = satelliteData?.details?.norad_id || satelliteId || null;
+    const selectedSatelliteName = satelliteData?.details?.name || '';
+    const hasTargets = trackerInstances.length > 0;
+    const hasSatelliteSelection = Boolean(selectedNoradId);
+    const hasOperator = Boolean(
+        satelliteData
+        && satelliteData['details']
+        && satelliteData['details']['operator']
+        && satelliteData['details']['operator'] !== 'None'
+    );
+    const satelliteDialogData = {
+        ...(satelliteData?.details || {}),
+        norad_id: selectedNoradId,
+        name: selectedSatelliteName,
+        transmitters,
+    };
+
+    const passInfo = React.useMemo(() => {
+        if (!selectedNoradId || !Array.isArray(satellitePasses) || satellitePasses.length === 0) {
+            return null;
+        }
+        const now = new Date();
+        const selectedNorad = String(selectedNoradId);
+
+        const activePass = satellitePasses.find((pass) => {
+            if (String(pass?.norad_id ?? '') !== selectedNorad) return false;
+            const start = new Date(pass?.event_start);
+            const end = new Date(pass?.event_end);
+            return now >= start && now <= end;
+        });
+        if (activePass) {
+            return { type: 'active', pass: activePass };
+        }
+
+        let nextPass = null;
+        let earliestStart = null;
+        for (const pass of satellitePasses) {
+            if (String(pass?.norad_id ?? '') !== selectedNorad) continue;
+            const start = new Date(pass?.event_start);
+            if (start > now && (!earliestStart || start < earliestStart)) {
+                earliestStart = start;
+                nextPass = pass;
+            }
+        }
+        if (nextPass) {
+            return { type: 'upcoming', pass: nextPass };
+        }
+        return null;
+    }, [selectedNoradId, satellitePasses]);
+
+    React.useEffect(() => {
+        if (!passInfo) {
+            setCountdown('');
+            return;
+        }
+        const updateCountdown = () => {
+            const now = new Date();
+            const targetTime = passInfo.type === 'active'
+                ? new Date(passInfo.pass.event_end)
+                : new Date(passInfo.pass.event_start);
+            const diff = targetTime - now;
+            if (diff <= 0) {
+                setCountdown('0s');
+                return;
+            }
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            if (days > 0) setCountdown(`${days}d ${hours}h ${minutes}m`);
+            else if (hours > 0) setCountdown(`${hours}h ${minutes}m ${seconds}s`);
+            else if (minutes > 0) setCountdown(`${minutes}m ${seconds}s`);
+            else setCountdown(`${seconds}s`);
+        };
+        updateCountdown();
+        const interval = window.setInterval(updateCountdown, 1000);
+        return () => window.clearInterval(interval);
+    }, [passInfo]);
+
+    const handleSatelliteSaved = () => {
+        if (!selectedNoradId) {
+            return;
+        }
+        dispatch(fetchSatellite({ socket, noradId: selectedNoradId }));
+    };
 
     // Mini circular gauge for angular measurements
     const CircularGauge = ({ value, max, size = 36 }) => {
@@ -150,6 +254,13 @@ const TargetSatelliteInfoIsland = () => {
         </Box>
     );
 
+    const formatFrequencyRange = (lowHz, highHz) => {
+        if (!lowHz && !highHz) return t('satellite_info.values.na');
+        if (lowHz && highHz) return `${(lowHz / 1e6).toFixed(3)}-${(highHz / 1e6).toFixed(3)} MHz`;
+        const hz = lowHz || highHz;
+        return `${(hz / 1e6).toFixed(3)} MHz`;
+    };
+
     return (
         <Box sx={{
             height: '100%',
@@ -183,6 +294,43 @@ const TargetSatelliteInfoIsland = () => {
                 </Box>
             </TitleBar>
 
+            {!hasSatelliteSelection && (
+                <Box
+                    sx={{
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        px: 2,
+                    }}
+                >
+                    <Box
+                        sx={{
+                            width: '100%',
+                            maxWidth: 380,
+                            textAlign: 'center',
+                            p: 2.5,
+                            borderRadius: 1.25,
+                            border: '1px dashed',
+                            borderColor: 'border.main',
+                            backgroundColor: 'overlay.light',
+                        }}
+                    >
+                        <TrackChangesIcon sx={{ color: 'text.secondary', mb: 1 }} />
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                            {hasTargets ? 'No satellite selected' : 'No targets configured'}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            {hasTargets
+                                ? 'Choose a satellite from the target selector to view live orbital details.'
+                                : 'Create a target first, then select a satellite to see telemetry and metadata.'}
+                        </Typography>
+                    </Box>
+                </Box>
+            )}
+
+            {hasSatelliteSelection && (
+            <>
             {/* Satellite Status Header - Sticky */}
             <Box sx={{
                 p: 1,
@@ -210,23 +358,40 @@ const TargetSatelliteInfoIsland = () => {
                             bgcolor: satelliteData && satelliteData['details'] && satelliteData['details']['status'] === 'alive' ? 'success.main' : 'error.main',
                             boxShadow: (theme) => `0 0 8px ${satelliteData && satelliteData['details'] && satelliteData['details']['status'] === 'alive' ? theme.palette.success.main : theme.palette.error.main}`
                         }} />
-                        <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 700, letterSpacing: '0.3px' }}>
-                                {satelliteData && satelliteData['details'] ? satelliteData['details']['name'] : "NO DATA"}
-                            </Typography>
-                            {satelliteData && satelliteData['details'] && satelliteData['details']['name_other'] && (
-                                <Typography variant="caption" sx={{
-                                    color: 'text.disabled',
-                                    fontSize: '0.65rem',
-                                    display: 'block',
-                                    mt: -0.5,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap'
-                                }}>
-                                    {satelliteData['details']['name_other']}
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+                                <Typography
+                                    variant="subtitle1"
+                                    noWrap
+                                    sx={{ fontWeight: 700, letterSpacing: '0.3px', minWidth: 0 }}
+                                >
+                                    {satelliteData && satelliteData['details']
+                                        ? `${satelliteData['details']['name']}${satelliteData['details']['name_other'] ? ` • ${satelliteData['details']['name_other']}` : ''}`
+                                        : "NO DATA"}
                                 </Typography>
-                            )}
+                                <Tooltip title="Edit Details">
+                                    <span>
+                                        <IconButton
+                                            size="small"
+                                            onClick={() => setSatelliteEditDialogOpen(true)}
+                                            disabled={!selectedNoradId}
+                                        >
+                                            <EditIcon fontSize="small" />
+                                        </IconButton>
+                                    </span>
+                                </Tooltip>
+                                <Tooltip title="Edit Transmitters">
+                                    <span>
+                                        <IconButton
+                                            size="small"
+                                            onClick={() => setTransmittersDialogOpen(true)}
+                                            disabled={!selectedNoradId}
+                                        >
+                                            <RadioButtonCheckedIcon fontSize="small" />
+                                        </IconButton>
+                                    </span>
+                                </Tooltip>
+                            </Box>
                         </Box>
                     </Box>
                     {satelliteData && satelliteData['details'] && (
@@ -237,23 +402,17 @@ const TargetSatelliteInfoIsland = () => {
                 </Box>
 
                 <Grid container spacing={0.5}>
-                    <Grid size={3}>
+                    <Grid size={hasOperator ? 6.5 : 9}>
                         <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, py: 0.3, bgcolor: 'overlay.main', borderRadius: 0.5 }}>
-                            <RocketLaunchIcon sx={{ fontSize: 11, mr: 0.4, color: 'text.secondary' }} />
-                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.68rem' }}>
-                                {satelliteData && satelliteData['details'] ? humanizeDate(satelliteData['details']['launched']) : 'N/A'}
+                            <AccessTimeIcon sx={{ fontSize: 11, mr: 0.4, color: 'text.secondary' }} />
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.68rem' }} noWrap>
+                                {passInfo && countdown
+                                    ? (passInfo.type === 'active' ? `Pass ends in ${countdown}` : `Next pass in ${countdown}`)
+                                    : 'No upcoming pass'}
                             </Typography>
                         </Box>
                     </Grid>
-                    <Grid size={satelliteData && satelliteData['details'] && satelliteData['details']['operator'] && satelliteData['details']['operator'] !== 'None' ? 3.5 : 6}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, py: 0.3, bgcolor: 'overlay.main', borderRadius: 0.5 }}>
-                            <UpdateIcon sx={{ fontSize: 11, mr: 0.4, color: 'text.secondary' }} />
-                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.68rem' }}>
-                                {satelliteData && satelliteData['details'] ? humanizeDate(satelliteData['details']['updated']) : 'N/A'}
-                            </Typography>
-                        </Box>
-                    </Grid>
-                    {satelliteData && satelliteData['details'] && satelliteData['details']['operator'] && satelliteData['details']['operator'] !== 'None' && (
+                    {hasOperator && (
                         <Grid size={2.5}>
                             <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, py: 0.3, bgcolor: 'overlay.main', borderRadius: 0.5 }}>
                                 <BusinessIcon sx={{ fontSize: 11, mr: 0.4, color: 'text.secondary' }} />
@@ -278,7 +437,6 @@ const TargetSatelliteInfoIsland = () => {
 
             {/* Main Content */}
             <Box sx={{ pr: 1.5, pl: 1.5, pt: 1.5, pb: 1, flex: 1, overflow: 'auto' }}>
-
                 {/* Real-time Position Data - Priority Section */}
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                     <ExploreIcon sx={{ fontSize: 14, mr: 0.75, color: 'primary.main' }} />
@@ -447,36 +605,113 @@ const TargetSatelliteInfoIsland = () => {
 
                 <Divider sx={{ my: 1, borderColor: 'border.main' }} />
 
-                {/* Communication */}
-                <Section title="Communication" icon={RadioIcon}>
-                    <Box sx={{
-                        p: 1,
-                        bgcolor: 'overlay.light',
-                        borderRadius: 1
-                    }}>
-                        <Grid container spacing={1}>
+                {/* Compact Transmitters */}
+                <Section title={t('satellite_transmitters.title')} icon={RadioIcon}>
+                    <Box sx={{ p: 1, bgcolor: 'overlay.light', borderRadius: 1 }}>
+                        <Grid container spacing={1} sx={{ mb: 1 }}>
                             <Grid size={6}>
                                 <Box sx={{ textAlign: 'center' }}>
-                                    <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary', fontFamily: 'monospace' }}>
-                                        {satelliteData && satelliteData['transmitters'] ? satelliteData['transmitters'].length : '0'}
+                                    <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', fontFamily: 'monospace', lineHeight: 1 }}>
+                                        {transmitters.length}
                                     </Typography>
                                     <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem', textTransform: 'uppercase' }}>
-                                        Total TX
+                                        {t('satellite_transmitters.labels.total')}
                                     </Typography>
                                 </Box>
                             </Grid>
                             <Grid size={6}>
                                 <Box sx={{ textAlign: 'center' }}>
-                                    <Typography variant="h5" sx={{ fontWeight: 700, color: 'success.main', fontFamily: 'monospace' }}>
-                                        {satelliteData && satelliteData['transmitters'] ?
-                                            satelliteData['transmitters'].filter(t => t.alive && t.status === 'active').length : '0'}
+                                    <Typography variant="h6" sx={{ fontWeight: 700, color: 'success.main', fontFamily: 'monospace', lineHeight: 1 }}>
+                                        {transmitters.filter(tx => tx?.alive && tx?.status === 'active').length}
                                     </Typography>
                                     <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem', textTransform: 'uppercase' }}>
-                                        Active TX
+                                        {t('satellite_transmitters.labels.active')}
                                     </Typography>
                                 </Box>
                             </Grid>
                         </Grid>
+
+                        {transmitters.length > 0 ? (
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.65 }}>
+                                {[...transmitters]
+                                    .sort((a, b) => {
+                                        const aActive = Number(Boolean(a?.alive && a?.status === 'active'));
+                                        const bActive = Number(Boolean(b?.alive && b?.status === 'active'));
+                                        return bActive - aActive;
+                                    })
+                                    .slice(0, 4)
+                                    .map((tx, idx) => {
+                                        const band = tx?.downlink_low ? getFrequencyBand(tx.downlink_low) : null;
+                                        const isActive = tx?.alive && tx?.status === 'active';
+                                        return (
+                                            <Box
+                                                key={tx?.id || idx}
+                                                sx={{
+                                                    px: 0.75,
+                                                    py: 0.55,
+                                                    borderRadius: 0.8,
+                                                    bgcolor: 'background.paper',
+                                                    border: '1px solid',
+                                                    borderColor: isActive ? 'success.dark' : 'border.main',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    gap: 0.6
+                                                }}
+                                            >
+                                                <Box sx={{ minWidth: 0, flex: 1 }}>
+                                                    <Typography
+                                                        variant="caption"
+                                                        noWrap
+                                                        sx={{ fontSize: '0.66rem', fontWeight: 700, color: 'text.primary', display: 'block' }}
+                                                    >
+                                                        {tx?.description || t('satellite_info.values.na')}
+                                                    </Typography>
+                                                    <Typography
+                                                        variant="caption"
+                                                        noWrap
+                                                        sx={{ fontSize: '0.62rem', color: 'text.secondary', fontFamily: 'monospace', display: 'block' }}
+                                                    >
+                                                        {formatFrequencyRange(tx?.downlink_low, tx?.downlink_high)}
+                                                        {tx?.mode ? ` • ${tx.mode}` : ''}
+                                                    </Typography>
+                                                </Box>
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+                                                    {band && (
+                                                        <Box
+                                                            sx={{
+                                                                px: 0.7,
+                                                                py: 0.2,
+                                                                borderRadius: 99,
+                                                                bgcolor: getBandColor(band) || 'primary.main'
+                                                            }}
+                                                        >
+                                                            <Typography variant="caption" sx={{ color: '#fff', fontSize: '0.58rem', fontWeight: 700 }}>
+                                                                {band}
+                                                            </Typography>
+                                                        </Box>
+                                                    )}
+                                                    <Chip
+                                                        label={isActive ? 'ACTIVE' : 'INACTIVE'}
+                                                        size="small"
+                                                        color={isActive ? 'success' : 'default'}
+                                                        sx={{ height: 18, fontSize: '0.56rem', fontWeight: 700 }}
+                                                    />
+                                                </Box>
+                                            </Box>
+                                        );
+                                    })}
+                                {transmitters.length > 4 && (
+                                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.62rem', textAlign: 'center', pt: 0.25 }}>
+                                        +{transmitters.length - 4} more
+                                    </Typography>
+                                )}
+                            </Box>
+                        ) : (
+                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', textAlign: 'center', py: 0.5 }}>
+                                {t('satellite_transmitters.messages.no_transmitters')}
+                            </Typography>
+                        )}
                     </Box>
                 </Section>
 
@@ -567,6 +802,32 @@ const TargetSatelliteInfoIsland = () => {
                                     </Typography>
                                 </Box>
                             </Grid>
+                            <Grid size={12}>
+                                <Divider sx={{ my: 0.5 }} />
+                            </Grid>
+                            <Grid size={12}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', textTransform: 'uppercase' }}>
+                                        Launched
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.65rem' }}>
+                                        {satelliteData && satelliteData['details'] ? humanizeDate(satelliteData['details']['launched']) : t('satellite_info.values.na')}
+                                    </Typography>
+                                </Box>
+                            </Grid>
+                            <Grid size={12}>
+                                <Divider sx={{ my: 0.5 }} />
+                            </Grid>
+                            <Grid size={12}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', textTransform: 'uppercase' }}>
+                                        Updated
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.65rem' }}>
+                                        {satelliteData && satelliteData['details'] ? humanizeDate(satelliteData['details']['updated']) : t('satellite_info.values.na')}
+                                    </Typography>
+                                </Box>
+                            </Grid>
                             {satelliteData && satelliteData['details'] && satelliteData['details']['website'] && (
                                 <>
                                     <Grid size={12}>
@@ -622,13 +883,55 @@ const TargetSatelliteInfoIsland = () => {
 
                 {/* View Details Button */}
                 {satelliteData && satelliteData['details'] && satelliteData['details']['norad_id'] && (
-                    <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'center' }}>
+                    <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.5, width: '100%' }}>
+                        <Button
+                            variant="text"
+                            size="small"
+                            startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+                            onClick={() => setSatelliteEditDialogOpen(true)}
+                            disabled={!selectedNoradId}
+                            sx={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontSize: '0.65rem',
+                                textTransform: 'none',
+                                color: 'text.secondary',
+                                '&:hover': {
+                                    color: 'primary.main',
+                                    bgcolor: 'transparent'
+                                }
+                            }}
+                        >
+                            Edit Details
+                        </Button>
+                        <Button
+                            variant="text"
+                            size="small"
+                            startIcon={<RadioButtonCheckedIcon sx={{ fontSize: 14 }} />}
+                            onClick={() => setTransmittersDialogOpen(true)}
+                            disabled={!selectedNoradId}
+                            sx={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontSize: '0.65rem',
+                                textTransform: 'none',
+                                color: 'text.secondary',
+                                '&:hover': {
+                                    color: 'primary.main',
+                                    bgcolor: 'transparent'
+                                }
+                            }}
+                        >
+                            Edit Transmitters
+                        </Button>
                         <Button
                             variant="text"
                             size="small"
                             startIcon={<InfoOutlinedIcon sx={{ fontSize: 14 }} />}
                             onClick={() => navigate(`/satellite/${satelliteData['details']['norad_id']}`)}
                             sx={{
+                                flex: 1,
+                                minWidth: 0,
                                 fontSize: '0.65rem',
                                 textTransform: 'none',
                                 color: 'text.secondary',
@@ -643,6 +946,24 @@ const TargetSatelliteInfoIsland = () => {
                     </Box>
                 )}
             </Box>
+            <SatelliteEditDialog
+                open={satelliteEditDialogOpen}
+                onClose={() => setSatelliteEditDialogOpen(false)}
+                satelliteData={satelliteDialogData}
+                onSaved={handleSatelliteSaved}
+            />
+            <TransmittersDialog
+                open={transmittersDialogOpen}
+                onClose={() => setTransmittersDialogOpen(false)}
+                title={tSat('satellite_database.edit_transmitters_title', {
+                    name: selectedSatelliteName || selectedNoradId || '',
+                })}
+                satelliteData={satelliteDialogData}
+                variant="paper"
+                widthOffsetPx={20}
+            />
+            </>
+            )}
         </Box>
     );
 }

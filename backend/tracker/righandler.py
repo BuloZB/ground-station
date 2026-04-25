@@ -42,6 +42,10 @@ class RigHandler:
         self.last_vfo_update_time = 0.0  # Track when VFO frequencies were last updated
         self.failed_tx_control_modes: set[str] = set()
 
+    @staticmethod
+    def _fmt_state_value(value):
+        return "none" if value is None else value
+
     def _get_retune_interval_seconds(self) -> float:
         details = self.tracker.rig_details or {}
         configured = details.get("retune_interval_ms", 2000)
@@ -212,7 +216,11 @@ class RigHandler:
 
     async def handle_rig_state_change(self, old, new):
         """Handle rig state changes."""
-        logger.info(f"Rig state change detected from '{old}' to '{new}'")
+        logger.info(
+            "Rig state change detected from '%s' to '%s'",
+            self._fmt_state_value(old),
+            self._fmt_state_value(new),
+        )
 
         if new == "connected":
             await self.connect_to_rig()

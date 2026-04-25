@@ -65,8 +65,11 @@ def _transform_to_db_format(data: dict) -> dict:
         "task_start_elevation": data.get("task_start_elevation", 10),
     }
 
+    rotator_config = dict(data.get("rotator", {}) or {})
+    rotator_config.pop("tracker_id", None)
+
     hardware_config = {
-        "rotator": data.get("rotator", {}),
+        "rotator": rotator_config,
         "rig": data.get("rig", {}),
         "transmitter": data.get("transmitter", {}),
     }
@@ -118,6 +121,9 @@ def _transform_from_db_format(db_obj: dict) -> dict:
     def to_iso(dt):
         return dt.isoformat() if dt and hasattr(dt, "isoformat") else dt
 
+    rotator_config = dict(hardware_config.get("rotator", {}) or {})
+    rotator_config.pop("tracker_id", None)
+
     return {
         "id": db_obj.get("id"),
         "name": db_obj.get("name"),
@@ -136,7 +142,7 @@ def _transform_from_db_format(db_obj: dict) -> dict:
         "task_start": to_iso(db_obj.get("task_start")),
         "task_end": to_iso(db_obj.get("task_end")),
         "task_start_elevation": pass_config.get("task_start_elevation", 10),
-        "rotator": hardware_config.get("rotator", {}),
+        "rotator": rotator_config,
         "rig": hardware_config.get("rig", {}),
         "transmitter": hardware_config.get("transmitter", {}),
         "sessions": sessions,

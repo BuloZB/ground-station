@@ -61,7 +61,8 @@
     "enable_bias_t": "Enable Bias T",
     "enable_tuner_agc": "Enable tuner AGC",
     "enable_agc": "Enable AGC",
-    "enable_rtl_agc": "Enable RTL AGC"
+    "enable_rtl_agc": "Enable RTL AGC",
+    "refresh_params": "Refresh SDR params"
   },
   "fft": {
     "title": "FFT",

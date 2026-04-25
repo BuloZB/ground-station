@@ -124,8 +124,18 @@ const ObservationsTable = () => {
     const openSettingsDialog = useSelector((state) => state.scheduler?.openObservationsTableSettingsDialog || false);
     const openDataDialog = useSelector((state) => state.scheduler?.openObservationDataDialog || false);
     const selectedObservationForData = useSelector((state) => state.scheduler?.selectedObservationForData || null);
+    const rotators = useSelector((state) => state.rotators?.rotators || []);
     const { timezone, locale } = useUserTimeSettings();
     const rowSelectionModel = useMemo(() => toRowSelectionModel(selectedIds), [selectedIds]);
+    const rotatorNameById = useMemo(() => {
+        const mapping = {};
+        rotators.forEach((rotator) => {
+            const rotatorId = rotator?.id;
+            if (!rotatorId) return;
+            mapping[String(rotatorId)] = rotator?.name || '';
+        });
+        return mapping;
+    }, [rotators]);
 
     // Filter observations based on status filters
     const observations = allObservations.filter(obs => statusFilters[obs.status]);
@@ -375,6 +385,42 @@ const ObservationsTable = () => {
             },
         },
         {
+            field: 'tracker_assignment',
+            headerName: 'Rotator',
+            minWidth: 190,
+            flex: 1.2,
+            sortable: false,
+            filterable: false,
+            renderCell: (params) => {
+                const rotator = params.row?.rotator || {};
+                const rotatorId = rotator?.id || '';
+                const rotatorName = rotator?.name || (rotatorId ? rotatorNameById[String(rotatorId)] : '');
+                const primaryLabel = rotatorName || (rotatorId ? 'Configured rotator' : 'No rotator');
+                const secondaryLabel = rotatorId
+                    ? (rotator?.tracking_enabled ? 'Tracking enabled' : 'Tracking disabled')
+                    : 'Not configured';
+                return (
+                    <Stack
+                        direction="row"
+                        spacing={0.8}
+                        alignItems="center"
+                        sx={{ py: 0.5, width: '100%', whiteSpace: 'nowrap', overflow: 'hidden' }}
+                    >
+                        <Chip
+                            size="small"
+                            color={rotatorId ? 'primary' : 'default'}
+                            variant={rotatorId ? 'filled' : 'outlined'}
+                            label={primaryLabel}
+                            sx={{ flexShrink: 0 }}
+                        />
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                            {secondaryLabel}
+                        </Typography>
+                    </Stack>
+                );
+            },
+        },
+        {
             field: 'tasks',
             headerName: 'Tasks',
             flex: 1.2,
@@ -537,7 +583,7 @@ const ObservationsTable = () => {
                 </Alert>
             )}
 
-            <Box sx={{ flexGrow: 1, width: '100%', minHeight: 0 }}>
+            <Box sx={{ flexGrow: 1, width: '100%', minHeight: 0, minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                 <DataGrid
                     rows={observations}
                     columns={columns}
@@ -565,6 +611,14 @@ const ObservationsTable = () => {
                     }}
                     sx={{
                         border: 0,
+                        width: '100%',
+                        '& .MuiDataGrid-main': {
+                            overflowX: 'auto',
+                        },
+                        '& .MuiDataGrid-virtualScroller': {
+                            overflowX: 'auto',
+                            touchAction: 'pan-x pan-y',
+                        },
                         [`& .${gridClasses.cell}:focus, & .${gridClasses.cell}:focus-within`]: {
                             outline: 'none',
                         },

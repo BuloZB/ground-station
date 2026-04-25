@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
     Box,
     Button,
-    CircularProgress,
     Dialog,
     DialogActions,
     DialogContent,
@@ -47,22 +46,72 @@ import {
 } from './celestial-display-slice.jsx';
 
 const gridLayoutStoreName = 'celestial-layouts';
+const LAYOUT_SCHEMA_VERSION = 2;
 const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
 const DEFAULT_PAST_HOURS = 24;
 const DEFAULT_FUTURE_HOURS = 24;
 const DEFAULT_STEP_MINUTES = 60;
+const DIALOG_PAPER_SX = {
+    bgcolor: 'background.paper',
+    border: (theme) => `1px solid ${theme.palette.divider}`,
+    borderRadius: 2,
+};
+const DIALOG_TITLE_SX = {
+    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+    borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+    fontSize: '1.25rem',
+    fontWeight: 'bold',
+    py: 2.5,
+};
+const DIALOG_CONTENT_SX = {
+    bgcolor: 'background.paper',
+    px: 3,
+    py: 3,
+};
+const DIALOG_ACTIONS_SX = {
+    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+    borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+    px: 3,
+    py: 2.5,
+    gap: 2,
+};
+const DIALOG_CANCEL_BUTTON_SX = {
+    borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400',
+    '&:hover': {
+        borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.600' : 'grey.500',
+        bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
+    },
+};
 
 function loadLayoutsFromLocalStorage() {
     try {
         const raw = localStorage.getItem(gridLayoutStoreName);
-        return raw ? JSON.parse(raw) : null;
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+
+        // Enforce new default layout by rejecting legacy/unversioned payloads.
+        if (!('version' in parsed) || !('layouts' in parsed)) {
+            return null;
+        }
+
+        return parsed.version === LAYOUT_SCHEMA_VERSION ? parsed.layouts : null;
     } catch {
         return null;
     }
 }
 
 function saveLayoutsToLocalStorage(layouts) {
-    localStorage.setItem(gridLayoutStoreName, JSON.stringify(layouts));
+    localStorage.setItem(
+        gridLayoutStoreName,
+        JSON.stringify({
+            version: LAYOUT_SCHEMA_VERSION,
+            layouts,
+        }),
+    );
 }
 
 function normalizeLayoutsResizeHandles(layouts) {
@@ -145,6 +194,8 @@ const CelestialMainLayout = () => {
         return ensureRequiredLayoutItems(normalizeLayoutsResizeHandles(loaded ?? defaultLayouts));
     });
     const [fitAllSignal, setFitAllSignal] = useState(0);
+    const [focusTargetSignal, setFocusTargetSignal] = useState(0);
+    const [focusTargetKey, setFocusTargetKey] = useState('');
     const [zoomInSignal, setZoomInSignal] = useState(0);
     const [zoomOutSignal, setZoomOutSignal] = useState(0);
     const [resetZoomSignal, setResetZoomSignal] = useState(0);
@@ -172,8 +223,11 @@ const CelestialMainLayout = () => {
         const normalizedLayouts = normalizeLayoutsResizeHandles(allLayouts);
         const mergedLayouts = ensureRequiredLayoutItems(normalizedLayouts);
         setLayouts(mergedLayouts);
-        saveLayoutsToLocalStorage(mergedLayouts);
     };
+
+    useEffect(() => {
+        saveLayoutsToLocalStorage(layouts);
+    }, [layouts]);
 
     useEffect(() => {
         if (!socket) return;
@@ -185,7 +239,7 @@ const CelestialMainLayout = () => {
         if (!socket) return;
         dispatch(fetchSolarSystemScene({ socket, payload: sceneRequestPayload }));
         dispatch(fetchCelestialTracks({ socket, payload: sceneRequestPayload }));
-    }, [socket, dispatch, sceneRequestPayload]);
+    }, [socket, dispatch]);
 
     const handleViewportCommit = React.useCallback((nextViewport) => {
         if (!socket) return;
@@ -225,9 +279,53 @@ const CelestialMainLayout = () => {
         };
     }, [celestialState.solarScene, celestialState.celestialTracks]);
 
-    const planetsCount = combinedScene?.planets?.length || 0;
+    const solarBodies = Array.isArray(combinedScene?.planets) ? combinedScene.planets : [];
+    const bodyTypeCounts = combinedScene?.meta?.solar_system?.body_type_counts || {};
+    const inferredCounts = solarBodies.reduce(
+        (acc, body) => {
+            if (body?.body_type === 'moon' || (body?.body_type == null && body?.parent_id)) {
+                acc.moons += 1;
+            } else {
+                acc.planets += 1;
+            }
+            return acc;
+        },
+        { planets: 0, moons: 0 },
+    );
+    const planetsCount = Number.isFinite(Number(bodyTypeCounts?.planet))
+        ? Number(bodyTypeCounts.planet)
+        : inferredCounts.planets;
+    const moonsCount = Number.isFinite(Number(bodyTypeCounts?.moon))
+        ? Number(bodyTypeCounts.moon)
+        : inferredCounts.moons;
     const trackedCount = combinedScene?.celestial?.length || 0;
-    const hasSolarScene = planetsCount > 0;
+    const hasSolarScene = (planetsCount + moonsCount) > 0;
+    const selectedTargetKeys = React.useMemo(() => {
+        const rows = monitoredState?.monitored || [];
+        const selectedId = (monitoredState?.selectedIds || [])[0];
+        const selectedRow = rows.find((row) => row.id === selectedId);
+        if (!selectedRow) return [];
+
+        const explicitKey = String(selectedRow?.targetKey || '').trim();
+        if (explicitKey) return [explicitKey];
+        const type = String(selectedRow?.targetType || 'mission').toLowerCase();
+        if (type === 'body') {
+            const bodyId = String(selectedRow?.bodyId || selectedRow?.command || '').toLowerCase();
+            return bodyId ? [`body:${bodyId}`] : [];
+        }
+        const command = String(selectedRow?.command || '').trim();
+        return command ? [`mission:${command}`] : [];
+    }, [monitoredState?.monitored, monitoredState?.selectedIds]);
+    const tracksProgress = celestialState?.tracksProgress || null;
+    const tracksProgressText = React.useMemo(() => {
+        if (!celestialState?.tracksLoading) return '';
+        const current = Number(tracksProgress?.current);
+        const total = Number(tracksProgress?.total);
+        if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
+            return `${Math.max(0, Math.min(current, total))}/${total}`;
+        }
+        return 'Loading...';
+    }, [celestialState?.tracksLoading, tracksProgress?.current, tracksProgress?.total]);
 
     const updateProjectionSetting = React.useCallback((updates) => {
         if (!socket) return;
@@ -240,17 +338,6 @@ const CelestialMainLayout = () => {
             setCelestialMapSettings({
                 socket,
                 value: nextSettings,
-            }),
-        );
-
-        dispatch(
-            fetchCelestialTracks({
-                socket,
-                payload: {
-                    past_hours: Number(nextSettings.pastHours) || DEFAULT_PAST_HOURS,
-                    future_hours: Number(nextSettings.futureHours) || DEFAULT_FUTURE_HOURS,
-                    step_minutes: Number(nextSettings.stepMinutes) || DEFAULT_STEP_MINUTES,
-                },
             }),
         );
     }, [socket, celestialState.mapSettings, dispatch]);
@@ -286,14 +373,10 @@ const CelestialMainLayout = () => {
                         await dispatch(fetchMonitoredCelestial({ socket }));
                     }}
                     loading={celestialState.tracksLoading}
+                    loadingText={tracksProgressText}
                     disabled={!socket}
                 />
                 <Box sx={{ p: 0, flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
-                    {celestialState.solarLoading || celestialState.tracksLoading ? (
-                        <Stack direction="row" spacing={2} alignItems="center" sx={{ p: 1, position: 'absolute', zIndex: 2 }}>
-                            <CircularProgress size={18} />
-                        </Stack>
-                    ) : null}
                     {celestialState.error && !hasSolarScene ? (
                         <Typography variant="body2" color="error" sx={{ p: 1 }}>
                             {celestialState.error}
@@ -302,7 +385,10 @@ const CelestialMainLayout = () => {
                         <Box sx={{ height: '100%', minHeight: 220 }}>
                             <SolarSystemCanvas
                                 scene={combinedScene}
+                                selectedTargetKeys={selectedTargetKeys}
                                 fitAllSignal={fitAllSignal}
+                                focusTargetSignal={focusTargetSignal}
+                                focusTargetKey={focusTargetKey}
                                 zoomInSignal={zoomInSignal}
                                 zoomOutSignal={zoomOutSignal}
                                 resetZoomSignal={resetZoomSignal}
@@ -313,7 +399,11 @@ const CelestialMainLayout = () => {
                         </Box>
                     )}
                 </Box>
-                <CelestialStatusBar planetsCount={planetsCount} trackedCount={trackedCount} />
+                <CelestialStatusBar
+                    planetsCount={planetsCount}
+                    moonsCount={moonsCount}
+                    trackedCount={trackedCount}
+                />
             </Box>
         </StyledIslandParentNoScrollbar>,
         <StyledIslandParentNoScrollbar key="monitored-celestial">
@@ -339,6 +429,16 @@ const CelestialMainLayout = () => {
                     <MonitoredCelestialGridIsland
                         rows={monitoredState.monitored || []}
                         loading={Boolean(monitoredState.loading)}
+                        onTargetSelected={(row) => {
+                            const type = String(row?.targetType || row?.target_type || 'mission').toLowerCase();
+                            const key = String(row?.targetKey || '').trim()
+                                || (type === 'body'
+                                    ? `body:${String(row?.bodyId || row?.command || '').toLowerCase()}`
+                                    : `mission:${String(row?.command || '').trim()}`);
+                            if (!key) return;
+                            setFocusTargetKey(key);
+                            setFocusTargetSignal((value) => value + 1);
+                        }}
                     />
                 </Box>
             </Box>
@@ -352,9 +452,10 @@ const CelestialMainLayout = () => {
                 onClose={() => setOpenSolarSystemLayoutOptionsDialog(false)}
                 maxWidth="sm"
                 fullWidth
+                PaperProps={{ sx: DIALOG_PAPER_SX }}
             >
-                <DialogTitle>Solar System Layout Options</DialogTitle>
-                <DialogContent>
+                <DialogTitle sx={DIALOG_TITLE_SX}>Solar System Layout Options</DialogTitle>
+                <DialogContent sx={DIALOG_CONTENT_SX}>
                     <Stack spacing={0.25} sx={{ pt: 0.5 }}>
                         {[
                             ['showGrid', 'Show grid'],
@@ -394,11 +495,19 @@ const CelestialMainLayout = () => {
                         ))}
                     </Stack>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => dispatch(resetSolarSystemDisplayOptions())}>
+                <DialogActions sx={DIALOG_ACTIONS_SX}>
+                    <Button
+                        onClick={() => dispatch(resetSolarSystemDisplayOptions())}
+                        variant="outlined"
+                        sx={DIALOG_CANCEL_BUTTON_SX}
+                    >
                         Reset
                     </Button>
-                    <Button onClick={() => setOpenSolarSystemLayoutOptionsDialog(false)} variant="contained">
+                    <Button
+                        onClick={() => setOpenSolarSystemLayoutOptionsDialog(false)}
+                        color="success"
+                        variant="contained"
+                    >
                         Close
                     </Button>
                 </DialogActions>

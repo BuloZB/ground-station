@@ -38,6 +38,11 @@ class StateManager:
         """
         self.tracker = tracker
 
+    @staticmethod
+    def _fmt_state_value(value: Any) -> Any:
+        """Normalize null-ish state values for human-readable logs."""
+        return "none" if value is None else value
+
     def check_state_changes(self) -> List[Tuple[str, Any, Any]]:
         """Check for state changes and return list of changes."""
         changes: List[Tuple[str, Any, Any]] = []
@@ -103,7 +108,12 @@ class StateManager:
     async def handle_satellite_change(self, old, new):
         """Handle satellite target change events."""
         sat_name = self.tracker.satellite_data.get("details", {}).get("name", "Unknown")
-        logger.info(f"Target satellite change detected from '{old}' to '{new}' ({sat_name})")
+        logger.info(
+            "Target satellite change detected from '%s' to '%s' (%s)",
+            self._fmt_state_value(old),
+            self._fmt_state_value(new),
+            sat_name,
+        )
 
         # Reset state
         self.tracker.rotator_data["minelevation"] = False
@@ -152,15 +162,27 @@ class StateManager:
 
     async def handle_rotator_id_change(self, old, new):
         """Handle rotator ID changes."""
-        logger.info(f"Rotator ID change detected from '{old}' to '{new}'")
+        logger.info(
+            "Rotator ID change detected from '%s' to '%s'",
+            self._fmt_state_value(old),
+            self._fmt_state_value(new),
+        )
 
     async def handle_transmitter_id_change(self, old, new):
         """Handle transmitter ID changes."""
-        logger.info(f"Transmitter ID change detected from '{old}' to '{new}'")
+        logger.info(
+            "Transmitter ID change detected from '%s' to '%s'",
+            self._fmt_state_value(old),
+            self._fmt_state_value(new),
+        )
 
     async def handle_rig_id_change(self, old, new):
         """Handle rig ID changes."""
-        logger.info(f"Rig ID change detected from '{old}' to '{new}'")
+        logger.info(
+            "Rig ID change detected from '%s' to '%s'",
+            self._fmt_state_value(old),
+            self._fmt_state_value(new),
+        )
 
     async def process_commands(self) -> bool:
         """

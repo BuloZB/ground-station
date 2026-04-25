@@ -21,7 +21,6 @@ import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
-from common.constants import TrackingStateNames
 from common.logger import logger
 from common.sdrconfig import SDRConfig
 from crud import trackingstate
@@ -49,6 +48,8 @@ from server import runtimestate
 from session.service import session_service
 from session.tracker import session_tracker
 from tasks.registry import get_task
+from tracker.contracts import get_tracking_state_name
+from tracker.runner import get_assigned_tracker_for_rotator
 from vfos.state import INTERNAL_VFO_NUMBER, VFOManager
 
 KNOWN_SATDUMP_PIPELINES = {
@@ -84,12 +85,13 @@ class ObservationExecutor:
         self.decoder_handler = DecoderHandler(process_manager)
         self.recorder_handler = RecorderHandler(process_manager)
         self.transcription_handler = TranscriptionHandler(process_manager)
-        self.tracker_handler = TrackerHandler()
+        self.tracker_handler = TrackerHandler(sio=sio)
 
         # Track actively executing observations to prevent concurrent starts
         self._running_observations: set[str] = set()
         self._observations_lock: Optional[asyncio.Lock] = None  # Will be initialized lazily
         self._iq_recording_info: Dict[str, Dict[str, Dict[int, Dict[str, Any]]]] = {}
+        self._tracker_context_by_observation: Dict[str, Dict[str, Any]] = {}
 
     @property
     def vfo_manager(self):
@@ -107,6 +109,17 @@ class ObservationExecutor:
     def _get_session_key(self, session: Dict[str, Any], session_index: int) -> str:
         sdr_id = session.get("sdr", {}).get("id") if isinstance(session, dict) else None
         return str(sdr_id) if sdr_id else f"session-{session_index}"
+
+    @staticmethod
+    def _resolve_tracker_id(rotator_config: Dict[str, Any]) -> str:
+        """Resolve tracker slot id from current rotator ownership only."""
+        owner_tracker_id = get_assigned_tracker_for_rotator(rotator_config.get("id"))
+        if owner_tracker_id is None:
+            return ""
+        tracker_id = str(owner_tracker_id).strip()
+        if not tracker_id or tracker_id.lower() == "none":
+            return ""
+        return tracker_id
 
     async def start_observation(self, observation_id: str) -> Dict[str, Any]:
         """
@@ -128,6 +141,7 @@ class ObservationExecutor:
             Dictionary with success status and error message if failed
         """
         started_sessions: list[tuple[str, Dict[str, Any]]] = []
+        tracker_context: Optional[Dict[str, Any]] = None
         try:
             logger.info(f"Starting observation: {observation_id}")
             await log_execution_event(observation_id, "Start requested", "info")
@@ -183,37 +197,47 @@ class ObservationExecutor:
             # 3. If rotator is required and currently parked, either unpark or cancel
             rotator_config = observation.get("rotator", {})
             if rotator_config.get("tracking_enabled") and rotator_config.get("id"):
-                async with AsyncSessionLocal() as session:
-                    tracking_state_reply = await trackingstate.get_tracking_state(
-                        session, TrackingStateNames.SATELLITE_TRACKING
-                    )
-                if tracking_state_reply.get("success"):
-                    tracking_value = (tracking_state_reply.get("data") or {}).get("value", {})
-                    rotator_state = str(tracking_value.get("rotator_state", "")).lower()
-                    if rotator_state == "parked":
-                        if not bool(rotator_config.get("unpark_before_tracking", False)):
-                            msg = (
-                                f"Rotator is parked; cancelling observation {observation_id} "
-                                f"(unpark_before_tracking is disabled)"
-                            )
-                            logger.warning(msg)
-                            await log_execution_event(observation_id, msg, "warning")
-                            await update_observation_status(
-                                self.sio, observation_id, STATUS_CANCELLED
-                            )
-                            await remove_scheduled_stop_job(observation_id)
-                            self._running_observations.discard(observation_id)
-                            return {"success": False, "error": msg}
-                        await log_execution_event(
-                            observation_id,
-                            "Rotator is parked; unpark_before_tracking is enabled, will unpark before tracking",
-                            "info",
-                        )
-                else:
+                tracker_id = self._resolve_tracker_id(rotator_config)
+                if not tracker_id:
                     logger.warning(
-                        f"Failed to fetch tracking state; proceeding with observation "
-                        f"{observation_id}: {tracking_state_reply.get('error')}"
+                        "Observation %s rotator has no assigned tracker slot yet; skipping parked-state precheck",
+                        observation_id,
                     )
+                else:
+                    state_name = get_tracking_state_name(tracker_id)
+                async with AsyncSessionLocal() as session:
+                    tracking_state_reply = (
+                        await trackingstate.get_tracking_state(session, state_name)
+                        if tracker_id
+                        else {"success": True, "data": None}
+                    )
+                    if tracking_state_reply.get("success"):
+                        tracking_value = (tracking_state_reply.get("data") or {}).get("value", {})
+                        rotator_state = str(tracking_value.get("rotator_state", "")).lower()
+                        if rotator_state == "parked":
+                            if not bool(rotator_config.get("unpark_before_tracking", False)):
+                                msg = (
+                                    f"Rotator is parked; cancelling observation {observation_id} "
+                                    f"(unpark_before_tracking is disabled)"
+                                )
+                                logger.warning(msg)
+                                await log_execution_event(observation_id, msg, "warning")
+                                await update_observation_status(
+                                    self.sio, observation_id, STATUS_CANCELLED
+                                )
+                                await remove_scheduled_stop_job(observation_id)
+                                self._running_observations.discard(observation_id)
+                                return {"success": False, "error": msg}
+                            await log_execution_event(
+                                observation_id,
+                                "Rotator is parked; unpark_before_tracking is enabled, will unpark before tracking",
+                                "info",
+                            )
+                    else:
+                        logger.warning(
+                            f"Failed to fetch tracking state; proceeding with observation "
+                            f"{observation_id}: {tracking_state_reply.get('error')}"
+                        )
 
             # 4. Check if SDRs are available (not in use by other sessions)
             for session_index, session in enumerate(sessions, start=1):
@@ -239,7 +263,55 @@ class ObservationExecutor:
                 else:
                     logger.info(f"SDR {sdr_id} is available for observation {observation_id}")
 
-            # 5. Execute observation sessions
+            # 5. Start tracker before any session tasks so doppler-dependent flows are ready
+            combined_tasks: list[Dict[str, Any]] = []
+            for session in sessions:
+                combined_tasks.extend(session.get("tasks", []) if isinstance(session, dict) else [])
+
+            rotator_config = observation.get("rotator", {})
+            satellite = observation.get("satellite", {})
+            tracker_start_result = await self.tracker_handler.start_tracker_task(
+                observation_id, satellite, rotator_config, combined_tasks
+            )
+            if not tracker_start_result.get("success"):
+                tracker_error = tracker_start_result.get("error", "tracker_start_failed")
+                tracker_message = tracker_start_result.get(
+                    "message",
+                    f"Failed to start tracker for observation {observation_id}",
+                )
+
+                await log_execution_event(
+                    observation_id,
+                    f"Tracker start failed ({tracker_error}): {tracker_message}",
+                    "error",
+                )
+
+                self._running_observations.discard(observation_id)
+                self._tracker_context_by_observation.pop(observation_id, None)
+
+                status = STATUS_CANCELLED if tracker_error == "rotator_in_use" else STATUS_FAILED
+                await update_observation_status(
+                    self.sio,
+                    observation_id,
+                    status,
+                    f"{tracker_error}: {tracker_message}",
+                )
+                await remove_scheduled_stop_job(observation_id)
+                return {
+                    "success": False,
+                    "error": tracker_message,
+                    "code": tracker_error,
+                }
+
+            tracker_context = {
+                "tracker_id": tracker_start_result.get("tracker_id"),
+                "created": bool(tracker_start_result.get("created", False)),
+                "reused_existing": bool(tracker_start_result.get("reused_existing", False)),
+                "ephemeral": bool(tracker_start_result.get("ephemeral", False)),
+            }
+            self._tracker_context_by_observation[observation_id] = tracker_context
+
+            # 6. Execute observation sessions
             logger.info(f"Executing observation tasks for {observation['name']}")
             await log_execution_event(
                 observation_id, f"Starting tasks for {observation['name']}", "info"
@@ -253,17 +325,6 @@ class ObservationExecutor:
                 started_sessions.append((session_key, session))
                 if session_index < len(sessions):
                     await asyncio.sleep(0.5)
-
-            # 6. Start tracker once using combined tasks
-            combined_tasks: list[Dict[str, Any]] = []
-            for session in sessions:
-                combined_tasks.extend(session.get("tasks", []) if isinstance(session, dict) else [])
-
-            rotator_config = observation.get("rotator", {})
-            satellite = observation.get("satellite", {})
-            await self.tracker_handler.start_tracker_task(
-                observation_id, satellite, rotator_config, combined_tasks
-            )
 
             # 7. Update observation status to RUNNING
             await update_observation_status(self.sio, observation_id, STATUS_RUNNING)
@@ -288,6 +349,27 @@ class ObservationExecutor:
                     except Exception as cleanup_error:
                         logger.error(
                             f"Failed to clean up session {session_key} after start error: {cleanup_error}"
+                        )
+
+            if "observation" in locals():
+                rotator_config = observation.get("rotator", {}) or {}
+                active_tracker_context = self._tracker_context_by_observation.get(
+                    observation_id, tracker_context
+                )
+                if active_tracker_context:
+                    try:
+                        tracker_stopped = await self.tracker_handler.stop_tracker_task(
+                            observation_id,
+                            rotator_config,
+                            tracker_context=active_tracker_context,
+                        )
+                        if tracker_stopped:
+                            self._tracker_context_by_observation.pop(observation_id, None)
+                    except Exception as cleanup_error:
+                        logger.error(
+                            "Failed to clean up tracker for observation %s after start error: %s",
+                            observation_id,
+                            cleanup_error,
                         )
 
             # Clean up running observation tracking
@@ -615,7 +697,19 @@ class ObservationExecutor:
         try:
             # 1. Stop tracker / optionally park rotator based on observation rotator config
             rotator_config = observation.get("rotator", {}) or {}
-            await self.tracker_handler.stop_tracker_task(observation_id, rotator_config)
+            tracker_context = self._tracker_context_by_observation.get(observation_id)
+            tracker_stop_ok = await self.tracker_handler.stop_tracker_task(
+                observation_id,
+                rotator_config,
+                tracker_context=tracker_context,
+            )
+            if tracker_stop_ok or not tracker_context:
+                self._tracker_context_by_observation.pop(observation_id, None)
+            else:
+                logger.warning(
+                    "Tracker cleanup for observation %s reported failure; keeping context for retry",
+                    observation_id,
+                )
 
             # 2. Stop decoders explicitly before cleaning up each session
             for session_index, session in enumerate(sessions, start=1):

@@ -54,11 +54,11 @@ import {
     satellitePathsSelector,
     satelliteTransmittersSelector
 } from './state-selectors.jsx';
-import ControllerTabs from "../common/controller.jsx";
 import TargetSatelliteMapContainer from './satellite-map.jsx';
-import TargetSatelliteTransmittersIsland from "./satellite-transmitters.jsx";
 import SatellitePassTimeline from "./timeline-main.jsx";
 import TargetSatelliteSelectorBar from "./target-satellite-selector-bar.jsx";
+import RotatorControl from "../dashboard/rotator-control.jsx";
+import RigControl from "../dashboard/rig-control.jsx";
 
 
 // global leaflet map object
@@ -72,7 +72,15 @@ export const handleSetGridEditableTarget = function (value) {
 };
 
 export const gridLayoutStoreName = 'target-sat-track-layouts';
+const LAYOUT_SCHEMA_VERSION = 3;
 const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
+const FIXED_ISLAND_HEIGHTS = {
+    lg: {'rotator-control': 13, 'rig-control': 13},
+    md: {'rotator-control': 13, 'rig-control': 13},
+    sm: {'rotator-control': 13, 'rig-control': 13},
+    xs: {'rotator-control': 13, 'rig-control': 13},
+    xxs: {'rotator-control': 13, 'rig-control': 13},
+};
 
 // -------------------------------------------------
 // Leaflet icon path fix for React
@@ -88,14 +96,32 @@ L.Icon.Default.mergeOptions({
 function loadLayoutsFromLocalStorage() {
     try {
         const raw = localStorage.getItem(gridLayoutStoreName);
-        return raw ? JSON.parse(raw) : null;
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+
+        // Enforce new default layout by rejecting legacy/unversioned payloads.
+        if (!('version' in parsed) || !('layouts' in parsed)) {
+            return null;
+        }
+
+        return parsed.version === LAYOUT_SCHEMA_VERSION ? parsed.layouts : null;
     } catch {
         return null;
     }
 }
 
 function saveLayoutsToLocalStorage(layouts) {
-    localStorage.setItem(gridLayoutStoreName, JSON.stringify(layouts));
+    localStorage.setItem(
+        gridLayoutStoreName,
+        JSON.stringify({
+            version: LAYOUT_SCHEMA_VERSION,
+            layouts,
+        }),
+    );
 }
 
 function normalizeLayoutsResizeHandles(layouts) {
@@ -113,6 +139,64 @@ function normalizeLayoutsResizeHandles(layouts) {
                 }))
                 : items,
         ]),
+    );
+}
+
+function ensureLayoutsContainRequiredItems(layouts, defaultLayouts) {
+    if (!layouts || typeof layouts !== 'object') {
+        return layouts;
+    }
+
+    return Object.fromEntries(
+        Object.entries(layouts).map(([breakpoint, items]) => {
+            const currentItems = Array.isArray(items) ? [...items] : [];
+            const defaultItems = Array.isArray(defaultLayouts?.[breakpoint]) ? defaultLayouts[breakpoint] : [];
+            const currentKeys = new Set(currentItems.map((item) => item?.i).filter(Boolean));
+            const missingDefaults = defaultItems.filter((item) => item?.i && !currentKeys.has(item.i));
+            return [breakpoint, [...currentItems, ...missingDefaults]];
+        }),
+    );
+}
+
+function removeDeprecatedLayoutItems(layouts) {
+    if (!layouts || typeof layouts !== 'object') {
+        return layouts;
+    }
+
+    return Object.fromEntries(
+        Object.entries(layouts).map(([breakpoint, items]) => [
+            breakpoint,
+            Array.isArray(items)
+                ? items.filter((item) => item?.i !== 'transmitters')
+                : items,
+        ]),
+    );
+}
+
+function enforceFixedIslandHeights(layouts) {
+    if (!layouts || typeof layouts !== 'object') {
+        return layouts;
+    }
+
+    return Object.fromEntries(
+        Object.entries(layouts).map(([breakpoint, items]) => {
+            const fixedHeights = FIXED_ISLAND_HEIGHTS[breakpoint] || {};
+            return [
+                breakpoint,
+                Array.isArray(items)
+                    ? items.map((item) => {
+                        const fixedHeight = fixedHeights[item?.i];
+                        if (!fixedHeight) return item;
+                        return {
+                            ...item,
+                            h: fixedHeight,
+                            minH: fixedHeight,
+                            maxH: fixedHeight,
+                        };
+                    })
+                    : items,
+            ];
+        }),
     );
 }
 
@@ -252,144 +336,244 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     // default layout if none in localStorage
     const defaultLayouts = {
         "lg": [{
-            "w": 6,
-            "h": 13,
-            "x": 6,
-            "y": 0,
             "i": "map",
-            "moved": false,
-            "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
-        }, {
+            "x": 0,
+            "y": 0,
             "w": 3,
             "h": 13,
-            "x": 0,
-            "y": 0,
-            "i": "info",
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
-            "w": 12,
-            "h": 7,
-            "x": 0,
-            "y": 19,
+            "i": "info",
+            "x": 3,
+            "y": 0,
+            "w": 3,
+            "h": 13,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
             "i": "passes",
+            "x": 0,
+            "y": 20,
+            "w": 12,
+            "h": 6,
             "minH": 6,
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
-        }, {"w": 3, "h": 13, "x": 3, "y": 0, "i": "transmitters", "moved": false, "static": false}, {
-            "w": 12,
-            "h": 6,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "timeline",
             "x": 0,
             "y": 13,
-            "i": "timeline",
+            "w": 12,
+            "h": 7,
             "moved": false,
-            "static": false
-        }],
-        "md": [{
-            "w": 4,
-            "h": 15,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "rotator-control",
             "x": 6,
             "y": 0,
-            "i": "map",
+            "w": 3,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
+            "i": "rig-control",
+            "x": 9,
+            "y": 0,
             "w": 3,
-            "h": 15,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }],
+        "md": [{
+            "i": "map",
             "x": 0,
             "y": 0,
-            "i": "info",
+            "w": 10,
+            "h": 15,
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
+            "i": "info",
+            "x": 6,
+            "y": 15,
+            "w": 4,
+            "h": 12,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "passes",
+            "x": 0,
+            "y": 35,
             "w": 10,
             "h": 9,
-            "x": 0,
-            "y": 21,
-            "i": "passes",
             "minH": 6,
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
-        }, {"w": 3, "h": 15, "x": 3, "y": 0, "i": "transmitters", "moved": false, "static": false}, {
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "timeline",
+            "x": 0,
+            "y": 28,
             "w": 10,
-            "h": 6,
+            "h": 7,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "rotator-control",
             "x": 0,
             "y": 15,
-            "i": "timeline",
+            "w": 3,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
             "moved": false,
-            "static": false
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "rig-control",
+            "x": 3,
+            "y": 15,
+            "w": 3,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }],
         "sm": [{
-            "w": 6,
-            "h": 15,
+            "i": "map",
             "x": 0,
             "y": 0,
-            "i": "map",
-            "moved": false,
-            "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
-        }, {
-            "w": 3,
+            "w": 6,
             "h": 15,
-            "x": 0,
-            "y": 30,
-            "i": "info",
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
+            "i": "info",
+            "x": 2,
+            "y": 28,
+            "w": 4,
+            "h": 12,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "passes",
+            "x": 0,
+            "y": 60,
             "w": 6,
             "h": 9,
-            "x": 0,
-            "y": 21,
-            "i": "passes",
             "minH": 6,
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
-        }, {"w": 3, "h": 15, "x": 3, "y": 30, "i": "transmitters", "moved": false, "static": false}, {
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "timeline",
+            "x": 0,
+            "y": 53,
             "w": 6,
-            "h": 6,
+            "h": 7,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "rotator-control",
             "x": 0,
             "y": 15,
-            "i": "timeline",
+            "w": 3,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
             "moved": false,
-            "static": false
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "rig-control",
+            "x": 3,
+            "y": 40,
+            "w": 3,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }],
         "xs": [{
+            "i": "map",
+            "x": 0,
+            "y": 0,
             "w": 2,
             "h": 15,
-            "x": 0,
-            "y": 6,
-            "i": "map",
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
+            "i": "info",
+            "x": 0,
+            "y": 28,
             "w": 2,
             "h": 12,
-            "x": 0,
-            "y": 36,
-            "i": "info",
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
+            "i": "passes",
+            "x": 0,
+            "y": 60,
             "w": 2,
             "h": 9,
-            "x": 0,
-            "y": 27,
-            "i": "passes",
             "minH": 6,
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "timeline",
+            "x": 0,
+            "y": 53,
+            "w": 2,
+            "h": 7,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "rotator-control",
+            "x": 0,
+            "y": 15,
+            "w": 2,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "rig-control",
+            "x": 0,
+            "y": 40,
+            "w": 2,
+            "h": 13,
+            "minH": 13,
+            "maxH": 13,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
             "w": 2,
             "h": 6,
@@ -398,15 +582,7 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
             "i": "satselector",
             "moved": false,
             "static": false,
-            "resizeHandles": ["se", "ne", "nw", "sw", "s", "e", "w"]
-        }, {"w": 2, "h": 16, "x": 0, "y": 48, "i": "transmitters", "moved": false, "static": false}, {
-            "w": 2,
-            "h": 6,
-            "x": 0,
-            "y": 21,
-            "i": "timeline",
-            "moved": false,
-            "static": false
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }]
     };
 
@@ -428,14 +604,23 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     // we load any stored layouts from localStorage or fallback to default
     const [layouts, setLayouts] = useState(() => {
         const loaded = loadLayoutsFromLocalStorage();
-        return normalizeLayoutsResizeHandles(loaded ?? defaultLayouts);
+        const mergedLayouts = ensureLayoutsContainRequiredItems((loaded ?? defaultLayouts), defaultLayouts);
+        const withoutDeprecatedItems = removeDeprecatedLayoutItems(mergedLayouts);
+        const constrainedLayouts = enforceFixedIslandHeights(withoutDeprecatedItems);
+        return normalizeLayoutsResizeHandles(constrainedLayouts);
     });
 
     function handleLayoutsChange(currentLayout, allLayouts) {
-        const normalizedLayouts = normalizeLayoutsResizeHandles(allLayouts);
+        const mergedLayouts = ensureLayoutsContainRequiredItems(allLayouts, defaultLayouts);
+        const withoutDeprecatedItems = removeDeprecatedLayoutItems(mergedLayouts);
+        const constrainedLayouts = enforceFixedIslandHeights(withoutDeprecatedItems);
+        const normalizedLayouts = normalizeLayoutsResizeHandles(constrainedLayouts);
         setLayouts(normalizedLayouts);
-        saveLayoutsToLocalStorage(normalizedLayouts);
     }
+
+    useEffect(() => {
+        saveLayoutsToLocalStorage(layouts);
+    }, [layouts]);
 
     useEffect(() => {
         // we do this here once onmount,
@@ -473,9 +658,6 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
         // <StyledIslandParentScrollbar key="satselector">
         //     <SatSelectorIsland initialNoradId={noradId} initialGroupId={groupId}/>
         // </StyledIslandParentScrollbar>,
-        <StyledIslandParentScrollbar key="transmitters">
-            <TargetSatelliteTransmittersIsland/>
-        </StyledIslandParentScrollbar>,
         <StyledIslandParentNoScrollbar key="timeline">
             <SatellitePassTimeline
                 timeWindowHours={nextPassesHours}
@@ -485,11 +667,14 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
                 showGeostationarySatellites={true}
             />
         </StyledIslandParentNoScrollbar>,
+        <StyledIslandParentScrollbar key="rotator-control">
+            <RotatorControl/>
+        </StyledIslandParentScrollbar>,
+        <StyledIslandParentScrollbar key="rig-control">
+            <RigControl/>
+        </StyledIslandParentScrollbar>,
         // <StyledIslandParentScrollbar key="video">
         //     <CameraView/>
-        // </StyledIslandParentScrollbar>,
-        // <StyledIslandParentScrollbar key="rotator-control">
-        //     <ControllerTabs />
         // </StyledIslandParentScrollbar>,
     ];
 
@@ -511,7 +696,7 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
 
     return (
         <>
-            <TargetSatelliteSelectorBar />
+            <TargetSatelliteSelectorBar/>
             <div ref={containerRef}>
                 {ResponsiveGridLayoutParent}
             </div>

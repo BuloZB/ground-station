@@ -155,6 +155,67 @@ _PLANET_ELEMENTS: Dict[str, Dict[str, float]] = {
     },
 }
 
+_AU_IN_KM = 149597870.7
+_EARTH_RADIUS_KM = 6378.1366
+_EARTH_RADIUS_IN_AU = _EARTH_RADIUS_KM / _AU_IN_KM
+_JUPITER_RADIUS_KM = 71492.0
+_JUPITER_RADIUS_IN_AU = _JUPITER_RADIUS_KM / _AU_IN_KM
+_SATURN_RADIUS_KM = 60268.0
+_SATURN_RADIUS_IN_AU = _SATURN_RADIUS_KM / _AU_IN_KM
+_MOON_ORBIT_PERIOD_DAYS = 27.321661
+_JUPITER_MOONS: Dict[str, Dict[str, float | str]] = {
+    "io": {
+        "name": "Io",
+        "semi_major_axis_jupiter_radii": 5.905,
+        "period_days": 1.769,
+        "phase_offset": 0.0,
+    },
+    "europa": {
+        "name": "Europa",
+        "semi_major_axis_jupiter_radii": 9.397,
+        "period_days": 3.551,
+        "phase_offset": 1.4,
+    },
+    "ganymede": {
+        "name": "Ganymede",
+        "semi_major_axis_jupiter_radii": 14.989,
+        "period_days": 7.155,
+        "phase_offset": 2.7,
+    },
+    "callisto": {
+        "name": "Callisto",
+        "semi_major_axis_jupiter_radii": 26.364,
+        "period_days": 16.689,
+        "phase_offset": 4.1,
+    },
+}
+_SATURN_MOONS: Dict[str, Dict[str, float | str]] = {
+    "enceladus": {
+        "name": "Enceladus",
+        "semi_major_axis_saturn_radii": 3.949,
+        "period_days": 1.370,
+        "phase_offset": 0.5,
+    },
+    "rhea": {
+        "name": "Rhea",
+        "semi_major_axis_saturn_radii": 8.742,
+        "period_days": 4.518,
+        "phase_offset": 1.8,
+    },
+    "titan": {
+        "name": "Titan",
+        "semi_major_axis_saturn_radii": 20.273,
+        "period_days": 15.945,
+        "phase_offset": 2.9,
+    },
+    "iapetus": {
+        "name": "Iapetus",
+        "semi_major_axis_saturn_radii": 59.091,
+        "period_days": 79.3215,
+        "phase_offset": 4.4,
+    },
+}
+
 
 def _days_since_j2000(epoch: datetime) -> float:
     utc_epoch = epoch.astimezone(timezone.utc)
@@ -198,6 +259,7 @@ def _planet_state(name: str, day_offset: float) -> Dict[str, object]:
     return {
         "name": name.capitalize(),
         "id": name,
+        "body_type": "planet",
         "position_xyz_au": [x_helio, y_helio, z_helio],
         "orbital_elements": {
             "semi_major_axis_au": a_au,
@@ -214,17 +276,98 @@ def _planet_state(name: str, day_offset: float) -> Dict[str, object]:
 
 def _velocity_from_finite_difference(name: str, day_offset: float) -> List[float]:
     delta_days = 1.0 / 1440.0
-    prev_state = _planet_state(name, day_offset - delta_days)
-    next_state = _planet_state(name, day_offset + delta_days)
-
-    prev_pos = cast(List[float], prev_state["position_xyz_au"])
-    next_pos = cast(List[float], next_state["position_xyz_au"])
+    prev_pos = _body_position_au(name, day_offset - delta_days)
+    next_pos = _body_position_au(name, day_offset + delta_days)
 
     return [
         (next_pos[0] - prev_pos[0]) / (2.0 * delta_days),
         (next_pos[1] - prev_pos[1]) / (2.0 * delta_days),
         (next_pos[2] - prev_pos[2]) / (2.0 * delta_days),
     ]
+
+
+def _moon_geocentric_position_au(day_offset: float) -> List[float]:
+    """Compute low-precision Moon geocentric ecliptic position in AU."""
+    n_deg = 125.1228 - 0.0529538083 * day_offset
+    i_deg = 5.1454
+    w_deg = 318.0634 + 0.1643573223 * day_offset
+    a_earth_radii = 60.2666
+    e_val = 0.0549
+    m_deg = _normalize_angle_deg(115.3654 + 13.0649929509 * day_offset)
+
+    m_rad = m_deg * pi / 180.0
+    n_rad = n_deg * pi / 180.0
+    i_rad = i_deg * pi / 180.0
+    w_rad = w_deg * pi / 180.0
+
+    ecc_anomaly = _solve_kepler(m_rad, e_val)
+    x_orb = a_earth_radii * (cos(ecc_anomaly) - e_val)
+    y_orb = a_earth_radii * sqrt(max(0.0, 1.0 - e_val * e_val)) * sin(ecc_anomaly)
+
+    true_anomaly = atan2(y_orb, x_orb)
+    radius_earth_radii = sqrt(x_orb * x_orb + y_orb * y_orb)
+
+    x_geo = radius_earth_radii * (
+        cos(n_rad) * cos(true_anomaly + w_rad) - sin(n_rad) * sin(true_anomaly + w_rad) * cos(i_rad)
+    )
+    y_geo = radius_earth_radii * (
+        sin(n_rad) * cos(true_anomaly + w_rad) + cos(n_rad) * sin(true_anomaly + w_rad) * cos(i_rad)
+    )
+    z_geo = radius_earth_radii * (sin(true_anomaly + w_rad) * sin(i_rad))
+
+    scale = _EARTH_RADIUS_IN_AU
+    return [x_geo * scale, y_geo * scale, z_geo * scale]
+
+
+def _jupiter_moon_jovicentric_position_au(moon_id: str, day_offset: float) -> List[float]:
+    moon = _JUPITER_MOONS[moon_id]
+    radius_au = cast(float, moon["semi_major_axis_jupiter_radii"]) * _JUPITER_RADIUS_IN_AU
+    period_days = cast(float, moon["period_days"])
+    phase_offset = cast(float, moon["phase_offset"])
+    phase = (2.0 * pi * (day_offset / period_days)) + phase_offset
+    return [radius_au * cos(phase), radius_au * sin(phase), 0.0]
+
+
+def _saturn_moon_saturncentric_position_au(moon_id: str, day_offset: float) -> List[float]:
+    moon = _SATURN_MOONS[moon_id]
+    radius_au = cast(float, moon["semi_major_axis_saturn_radii"]) * _SATURN_RADIUS_IN_AU
+    period_days = cast(float, moon["period_days"])
+    phase_offset = cast(float, moon["phase_offset"])
+    phase = (2.0 * pi * (day_offset / period_days)) + phase_offset
+    return [radius_au * cos(phase), radius_au * sin(phase), 0.0]
+
+
+def _body_position_au(name: str, day_offset: float) -> List[float]:
+    if name == "moon":
+        earth_state = _planet_state("earth", day_offset)
+        earth_pos = cast(List[float], earth_state["position_xyz_au"])
+        moon_geo = _moon_geocentric_position_au(day_offset)
+        return [
+            earth_pos[0] + moon_geo[0],
+            earth_pos[1] + moon_geo[1],
+            earth_pos[2] + moon_geo[2],
+        ]
+    if name in _JUPITER_MOONS:
+        jupiter_state = _planet_state("jupiter", day_offset)
+        jupiter_pos = cast(List[float], jupiter_state["position_xyz_au"])
+        moon_jovi = _jupiter_moon_jovicentric_position_au(name, day_offset)
+        return [
+            jupiter_pos[0] + moon_jovi[0],
+            jupiter_pos[1] + moon_jovi[1],
+            jupiter_pos[2] + moon_jovi[2],
+        ]
+    if name in _SATURN_MOONS:
+        saturn_state = _planet_state("saturn", day_offset)
+        saturn_pos = cast(List[float], saturn_state["position_xyz_au"])
+        moon_saturn = _saturn_moon_saturncentric_position_au(name, day_offset)
+        return [
+            saturn_pos[0] + moon_saturn[0],
+            saturn_pos[1] + moon_saturn[1],
+            saturn_pos[2] + moon_saturn[2],
+        ]
+
+    state = _planet_state(name, day_offset)
+    return cast(List[float], state["position_xyz_au"])
 
 
 def _orbit_samples(name: str, day_offset: float, samples: int = 128) -> List[List[float]]:
@@ -236,6 +379,66 @@ def _orbit_samples(name: str, day_offset: float, samples: int = 128) -> List[Lis
         sample_day = day_offset + (fraction - 0.5) * orbital_period_days
         sample_state = _planet_state(name, sample_day)
         points.append(cast(List[float], sample_state["position_xyz_au"]))
+    return points
+
+
+def _moon_orbit_samples(day_offset: float, samples: int = 96) -> List[List[float]]:
+    """Render a lunar orbit ring around Earth's current heliocentric position."""
+    earth_now = _body_position_au("earth", day_offset)
+    points: List[List[float]] = []
+    for idx in range(samples):
+        fraction = idx / float(samples)
+        sample_day = day_offset + (fraction - 0.5) * _MOON_ORBIT_PERIOD_DAYS
+        moon_geo = _moon_geocentric_position_au(sample_day)
+        points.append(
+            [
+                earth_now[0] + moon_geo[0],
+                earth_now[1] + moon_geo[1],
+                earth_now[2] + moon_geo[2],
+            ]
+        )
+    return points
+
+
+def _jupiter_moon_orbit_samples(
+    moon_id: str, day_offset: float, samples: int = 96
+) -> List[List[float]]:
+    """Render a moon orbit ring around Jupiter's current heliocentric position."""
+    jupiter_now = _body_position_au("jupiter", day_offset)
+    period_days = cast(float, _JUPITER_MOONS[moon_id]["period_days"])
+    points: List[List[float]] = []
+    for idx in range(samples):
+        fraction = idx / float(samples)
+        sample_day = day_offset + (fraction - 0.5) * period_days
+        moon_jovi = _jupiter_moon_jovicentric_position_au(moon_id, sample_day)
+        points.append(
+            [
+                jupiter_now[0] + moon_jovi[0],
+                jupiter_now[1] + moon_jovi[1],
+                jupiter_now[2] + moon_jovi[2],
+            ]
+        )
+    return points
+
+
+def _saturn_moon_orbit_samples(
+    moon_id: str, day_offset: float, samples: int = 96
+) -> List[List[float]]:
+    """Render a moon orbit ring around Saturn's current heliocentric position."""
+    saturn_now = _body_position_au("saturn", day_offset)
+    period_days = cast(float, _SATURN_MOONS[moon_id]["period_days"])
+    points: List[List[float]] = []
+    for idx in range(samples):
+        fraction = idx / float(samples)
+        sample_day = day_offset + (fraction - 0.5) * period_days
+        moon_saturn = _saturn_moon_saturncentric_position_au(moon_id, sample_day)
+        points.append(
+            [
+                saturn_now[0] + moon_saturn[0],
+                saturn_now[1] + moon_saturn[1],
+                saturn_now[2] + moon_saturn[2],
+            ]
+        )
     return points
 
 
@@ -252,10 +455,74 @@ def compute_solar_system_snapshot(
         state["orbit_samples_xyz_au"] = _orbit_samples(planet_id, day_offset)
         planets.append(state)
 
+    moon_pos = _body_position_au("moon", day_offset)
+    planets.append(
+        {
+            "name": "Moon",
+            "id": "moon",
+            "body_type": "moon",
+            "parent_id": "earth",
+            "position_xyz_au": moon_pos,
+            "velocity_xyz_au_per_day": _velocity_from_finite_difference("moon", day_offset),
+            "orbit_samples_xyz_au": _moon_orbit_samples(day_offset),
+            "orbital_elements": {
+                "semi_major_axis_au": 60.2666 * _EARTH_RADIUS_IN_AU,
+                "eccentricity": 0.0549,
+                "inclination_deg": 5.1454,
+                "period_days": _MOON_ORBIT_PERIOD_DAYS,
+            },
+            "phase": None,
+        }
+    )
+
+    for moon_id, moon in _JUPITER_MOONS.items():
+        planets.append(
+            {
+                "name": cast(str, moon["name"]),
+                "id": moon_id,
+                "body_type": "moon",
+                "parent_id": "jupiter",
+                "position_xyz_au": _body_position_au(moon_id, day_offset),
+                "velocity_xyz_au_per_day": _velocity_from_finite_difference(moon_id, day_offset),
+                "orbit_samples_xyz_au": _jupiter_moon_orbit_samples(moon_id, day_offset),
+                "orbital_elements": {
+                    "semi_major_axis_au": cast(float, moon["semi_major_axis_jupiter_radii"])
+                    * _JUPITER_RADIUS_IN_AU,
+                    "period_days": cast(float, moon["period_days"]),
+                },
+                "phase": None,
+            }
+        )
+
+    for moon_id, moon in _SATURN_MOONS.items():
+        planets.append(
+            {
+                "name": cast(str, moon["name"]),
+                "id": moon_id,
+                "body_type": "moon",
+                "parent_id": "saturn",
+                "position_xyz_au": _body_position_au(moon_id, day_offset),
+                "velocity_xyz_au_per_day": _velocity_from_finite_difference(moon_id, day_offset),
+                "orbit_samples_xyz_au": _saturn_moon_orbit_samples(moon_id, day_offset),
+                "orbital_elements": {
+                    "semi_major_axis_au": cast(float, moon["semi_major_axis_saturn_radii"])
+                    * _SATURN_RADIUS_IN_AU,
+                    "period_days": cast(float, moon["period_days"]),
+                },
+                "phase": None,
+            }
+        )
+
+    body_type_counts: Dict[str, int] = {}
+    for body in planets:
+        body_type = str(body.get("body_type") or "unknown")
+        body_type_counts[body_type] = body_type_counts.get(body_type, 0) + 1
+
     meta: Dict[str, object] = {
         "source": "offline-analytic-kepler",
         "reference": "J2000 low-precision orbital elements",
         "epoch_utc": epoch.astimezone(timezone.utc).isoformat(),
+        "body_type_counts": body_type_counts,
     }
 
     return meta, planets

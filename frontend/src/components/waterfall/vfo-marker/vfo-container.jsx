@@ -60,6 +60,8 @@ const VFOMarkersContainer = ({
                                  containerWidth,
                                  transformTick = 0,
                                  interactionActive = false,
+                                 allowInteractionMeasure = false,
+                                 interactionMeasureTick = 0,
                                  zoomScale,
                                  currentPositionX,
                              }) => {
@@ -388,6 +390,13 @@ const VFOMarkersContainer = ({
         }
         updateActualWidth();
     }, [containerWidth, transformTick, interactionActive, updateActualWidth]);
+
+    useEffect(() => {
+        if (!interactionActive || !allowInteractionMeasure) {
+            return;
+        }
+        updateActualWidth();
+    }, [interactionActive, allowInteractionMeasure, interactionMeasureTick, updateActualWidth]);
 
     // Resize backing store only when dimensions actually change.
     useEffect(() => {

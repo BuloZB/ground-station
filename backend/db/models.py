@@ -77,6 +77,7 @@ class JsonField(TypeDecorator):
     """
 
     impl = JSON
+    cache_ok = True
 
     def process_result_value(self, value, dialect):
         """
@@ -351,10 +352,40 @@ class MonitoredCelestial(Base):
 
     id = Column(String, primary_key=True, nullable=False)
     display_name = Column(String, nullable=False)
-    command = Column(String, nullable=False, unique=True, index=True)
+    target_type = Column(
+        String, nullable=False, default="mission", server_default="mission", index=True
+    )
+    command = Column(String, nullable=True, index=True)
+    body_id = Column(String, nullable=True, index=True)
+    color = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True, index=True)
     last_refresh_at = Column(AwareDateTime, nullable=True)
     last_error = Column(String, nullable=True)
+    created_at = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))
+    updated_at = Column(
+        AwareDateTime,
+        nullable=False,
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+    )
+
+
+class CelestialVectorsCache(Base):
+    """Persisted Horizons vectors snapshots keyed by target + projection window."""
+
+    __tablename__ = "celestial_vectors_cache"
+
+    id = Column(String, primary_key=True, nullable=False)
+    command = Column(String, nullable=False, index=True)
+    epoch_bucket_utc = Column(AwareDateTime, nullable=False, index=True)
+    past_hours = Column(Integer, nullable=False)
+    future_hours = Column(Integer, nullable=False)
+    step_minutes = Column(Integer, nullable=False)
+    payload = Column(JsonField, nullable=False)
+    source = Column(String, nullable=False, default="horizons", server_default="horizons")
+    error = Column(String, nullable=True)
+    fetched_at = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))
+    expires_at = Column(AwareDateTime, nullable=False)
     created_at = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))
     updated_at = Column(
         AwareDateTime,

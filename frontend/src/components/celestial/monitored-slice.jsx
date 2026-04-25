@@ -2,8 +2,12 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
 const normalizeMonitoredEntry = (entry) => ({
     id: entry?.id,
+    targetType: entry?.target_type ?? entry?.targetType ?? 'mission',
+    targetKey: entry?.target_key ?? entry?.targetKey ?? '',
     displayName: entry?.display_name ?? entry?.displayName ?? '',
     command: entry?.command ?? '',
+    bodyId: entry?.body_id ?? entry?.bodyId ?? '',
+    color: entry?.color ?? null,
     sourceMode: entry?.source_mode ?? entry?.sourceMode ?? null,
     enabled: entry?.enabled !== false,
     lastRefreshAt: entry?.last_refresh_at ?? entry?.lastRefreshAt ?? null,
@@ -38,8 +42,10 @@ export const createMonitoredCelestial = createAsyncThunk(
                     'data_submission',
                     'create-monitored-celestial',
                     {
+                        target_type: entry.targetType || 'mission',
                         display_name: entry.displayName,
-                        command: entry.command,
+                        command: entry.targetType === 'mission' ? entry.command : null,
+                        body_id: entry.targetType === 'body' ? entry.bodyId : null,
                         enabled: entry.enabled ?? true,
                         source_mode: entry.sourceMode || 'catalog',
                     },
@@ -68,8 +74,11 @@ export const updateMonitoredCelestial = createAsyncThunk(
                     'update-monitored-celestial',
                     {
                         id: entry.id,
+                        target_type: entry.targetType || 'mission',
                         display_name: entry.displayName,
-                        command: entry.command,
+                        command: entry.targetType === 'mission' ? entry.command : null,
+                        body_id: entry.targetType === 'body' ? entry.bodyId : null,
+                        color: entry.color ?? null,
                         enabled: entry.enabled,
                     },
                     (response) => {
@@ -138,8 +147,10 @@ const monitoredSlice = createSlice({
         addDialogOpen: false,
         manageDialogOpen: false,
         form: {
+            targetType: 'mission',
             displayName: '',
             command: '',
+            bodyId: '',
         },
         formError: '',
         loading: false,
@@ -148,10 +159,15 @@ const monitoredSlice = createSlice({
         openGridSettingsDialog: false,
         tableColumnVisibility: {
             displayName: true,
+            targetType: true,
+            color: true,
             command: true,
             source: true,
             sourceMode: true,
             enabled: true,
+            visibility: true,
+            elevationDeg: true,
+            azimuthDeg: true,
             distanceFromSunAu: true,
             speedKmS: true,
             lightTimeMinutes: true,
@@ -164,7 +180,7 @@ const monitoredSlice = createSlice({
             lastError: true,
         },
         tablePageSize: 10,
-        tableSortModel: [{ field: 'enabled', sort: 'desc' }, { field: 'displayName', sort: 'asc' }],
+        tableSortModel: [{ field: 'visibility', sort: 'desc' }, { field: 'displayName', sort: 'asc' }],
     },
     reducers: {
         openAddDialog: (state) => {
@@ -174,8 +190,10 @@ const monitoredSlice = createSlice({
         closeAddDialog: (state) => {
             state.addDialogOpen = false;
             state.formError = '';
+            state.form.targetType = 'mission';
             state.form.displayName = '';
             state.form.command = '';
+            state.form.bodyId = '';
         },
         openManageDialog: (state) => {
             state.manageDialogOpen = true;
@@ -193,7 +211,8 @@ const monitoredSlice = createSlice({
             state.formError = action.payload || '';
         },
         setSelectedMonitoredIds: (state, action) => {
-            state.selectedIds = action.payload || [];
+            const next = Array.isArray(action.payload) ? action.payload : [];
+            state.selectedIds = next.length ? [next[0]] : [];
         },
         setOpenGridSettingsDialog: (state, action) => {
             state.openGridSettingsDialog = action.payload;
@@ -231,10 +250,11 @@ const monitoredSlice = createSlice({
             .addCase(createMonitoredCelestial.fulfilled, (state, action) => {
                 state.saveLoading = false;
                 state.monitored.push(action.payload);
-                state.selectedIds = Array.from(new Set([...state.selectedIds, action.payload.id]));
+                state.selectedIds = [action.payload.id];
                 state.addDialogOpen = false;
                 state.form.displayName = '';
                 state.form.command = '';
+                state.form.bodyId = '';
                 state.formError = '';
             })
             .addCase(createMonitoredCelestial.rejected, (state, action) => {

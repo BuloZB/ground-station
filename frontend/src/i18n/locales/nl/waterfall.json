@@ -59,7 +59,8 @@
     "enable_bias_t": "Schakel Bias T in",
     "enable_tuner_agc": "Schakel tuner AGC in",
     "enable_agc": "Schakel AGC in",
-    "enable_rtl_agc": "Schakel RTL AGC in"
+    "enable_rtl_agc": "Schakel RTL AGC in",
+    "refresh_params": "Refresh SDR params"
   },
   "fft": {
     "title": "FFT",
