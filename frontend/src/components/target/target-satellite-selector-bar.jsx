@@ -43,7 +43,6 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { useSocket } from "../common/socket.jsx";
 import { useTranslation } from 'react-i18next';
-import StopIcon from '@mui/icons-material/Stop';
 import CloseIcon from '@mui/icons-material/Close';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import {
@@ -85,11 +84,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     const {
         trackingState,
         trackerId,
-        satelliteId,
         selectedRadioRig,
         selectedTransmitter,
-        rigData,
-        rotatorData,
     } = useSelector((state) => state.targetSatTrack);
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const schedulerObservations = useSelector((state) => state.scheduler?.observations || []);
@@ -113,19 +109,6 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     const [createSelectedSatellite, setCreateSelectedSatellite] = useState(null);
     const [createSelectedRigId, setCreateSelectedRigId] = useState('none');
     const [createSelectedRotatorId, setCreateSelectedRotatorId] = useState('none');
-
-    const handleTrackingStop = useCallback(() => {
-        if (!trackerId) {
-            return;
-        }
-        const newTrackingState = {
-            ...trackingState,
-            tracker_id: trackerId,
-            'rotator_state': "stopped",
-            'rig_state': "stopped",
-        };
-        dispatch(setTrackingStateInBackend({socket, data: newTrackingState}));
-    }, [dispatch, socket, trackingState, trackerId]);
 
     const handleTargetTabChange = useCallback((event, value) => {
         if (!value) return;
@@ -401,6 +384,11 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     const tabValue = targetOptions.some((option) => option.trackerId === trackerId)
         ? trackerId
         : (targetOptions[0]?.trackerId || false);
+    const activeTargetOption = useMemo(
+        () => targetOptions.find((option) => option.trackerId === tabValue) || null,
+        [targetOptions, tabValue]
+    );
+    const disableRetargetSearch = Boolean(activeTargetOption?.hasActiveObservation);
     const nextTargetSlotId = useMemo(() => deriveNextTrackerSlotId(trackerInstances), [trackerInstances]);
     const hardwareUsageRows = useMemo(() => {
         return trackerInstances.map((instance, index) => {
@@ -1163,47 +1151,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                 <SatelliteSearchAutocomplete
                     key={searchResetKey}
                     onSatelliteSelect={handleRetargetSatelliteSelect}
+                    disabled={disableRetargetSearch}
                 />
-            </Box>
-
-            {/* Pills + Stop (desktop row) OR Stop only (mobile/tablet column) */}
-            <Box
-                sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    ml: 'auto',
-                    flexShrink: 0,
-                    minWidth: 0,
-                }}
-            >
-                {/* Stop tracking button */}
-                {satelliteId && (
-                    <Button
-                        variant="contained"
-                        color="error"
-                        startIcon={<StopIcon />}
-                        disabled={rigData?.tracking !== true && rotatorData?.tracking !== true}
-                        onClick={handleTrackingStop}
-                        size="small"
-                        sx={{
-                            textTransform: 'none',
-                            fontWeight: 'bold',
-                            minWidth: { xs: 36, lg: 'auto' },
-                            width: { xs: 36, lg: 'auto' },
-                            px: { xs: 0, lg: 2 },
-                            height: 36,
-                            '& .MuiButton-startIcon': {
-                                mr: { xs: 0, lg: 1 },
-                                ml: 0,
-                            },
-                        }}
-                    >
-                        <Box component="span" sx={{ display: { xs: 'none', lg: 'inline' } }}>
-                            {t('satellite_selector.stop_tracking')}
-                        </Box>
-                    </Button>
-                )}
             </Box>
         </Box>
         </>

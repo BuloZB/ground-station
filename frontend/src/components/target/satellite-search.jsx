@@ -7,7 +7,10 @@ import {Box, CircularProgress, Divider, Paper, TextField, Typography} from "@mui
 import { useTranslation } from 'react-i18next';
 
 
-const SatelliteSearchAutocomplete = React.memo(function SatelliteSearchAutocomplete({onSatelliteSelect}) {
+const SatelliteSearchAutocomplete = React.memo(function SatelliteSearchAutocomplete({
+    onSatelliteSelect,
+    disabled = false,
+}) {
     const {socket} = useSocket();
     const { t } = useTranslation('target');
     const [open, setOpen] = React.useState(false);
@@ -36,6 +39,9 @@ const SatelliteSearchAutocomplete = React.memo(function SatelliteSearchAutocompl
     };
 
     const handleOpen = () => {
+        if (disabled) {
+            return;
+        }
         setOpen(true);
     };
 
@@ -45,22 +51,38 @@ const SatelliteSearchAutocomplete = React.memo(function SatelliteSearchAutocompl
     };
 
     const handleInputChange = (event, newInputValue) => {
+        if (disabled) {
+            return;
+        }
         if (newInputValue.length > 2) {
             search(newInputValue);
         }
     };
 
     const handleOptionSelect = (event, selectedSatellite) => {
+        if (disabled) {
+            return;
+        }
         if (selectedSatellite !== null) {
             selectedSatellite['id'] = selectedSatellite['norad_id'];
             onSatelliteSelect(selectedSatellite);
         }
     }
 
+    React.useEffect(() => {
+        if (!disabled) {
+            return;
+        }
+        setOpen(false);
+        setOptions([]);
+        setLoading(false);
+    }, [disabled]);
+
     return (
         <Autocomplete
             size="small"
             sx={{ minWidth: 200, margin: 0 }}
+            disabled={disabled}
             open={open}
             fullWidth={true}
             onOpen={handleOpen}
@@ -88,6 +110,7 @@ const SatelliteSearchAutocomplete = React.memo(function SatelliteSearchAutocompl
                 <TextField
                     size="small"
                     fullWidth={true}
+                    disabled={disabled}
                     {...params}
                     label={t('satellite_search.search_label')}
                     slotProps={{
