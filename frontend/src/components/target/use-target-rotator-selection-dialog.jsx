@@ -23,20 +23,29 @@ import { DEFAULT_TRACKER_ID, resolveTrackerId } from './tracking-constants.js';
 const normalizeRotatorId = (candidate) => resolveTrackerId(candidate, '');
 const TARGET_SLOT_ID_PATTERN = /^target-(\d+)$/;
 
+const parseTargetSlotNumber = (trackerId = '') => {
+    const matched = String(trackerId || '').match(TARGET_SLOT_ID_PATTERN);
+    if (!matched) {
+        return null;
+    }
+    const parsedNumber = Number(matched[1]);
+    return Number.isFinite(parsedNumber) && parsedNumber > 0 ? parsedNumber : null;
+};
+
 const deriveNextTrackerSlotId = (rows = []) => {
-    let maxTargetNumber = 0;
+    const usedTargetNumbers = new Set();
     rows.forEach((row) => {
         const trackerId = resolveTrackerId(row?.trackerId, DEFAULT_TRACKER_ID);
-        const matched = trackerId.match(TARGET_SLOT_ID_PATTERN);
-        if (!matched) {
-            return;
-        }
-        const parsedNumber = Number(matched[1]);
-        if (Number.isFinite(parsedNumber) && parsedNumber > maxTargetNumber) {
-            maxTargetNumber = parsedNumber;
+        const parsedNumber = parseTargetSlotNumber(trackerId);
+        if (parsedNumber !== null) {
+            usedTargetNumbers.add(parsedNumber);
         }
     });
-    return `target-${Math.max(1, maxTargetNumber + 1)}`;
+    let nextTargetNumber = 1;
+    while (usedTargetNumbers.has(nextTargetNumber)) {
+        nextTargetNumber += 1;
+    }
+    return `target-${nextTargetNumber}`;
 };
 
 export function useTargetRotatorSelectionDialog() {
@@ -83,12 +92,15 @@ export function useTargetRotatorSelectionDialog() {
 
     const usageRows = React.useMemo(() => {
         return trackerInstances
-            .map((instance, index) => {
+            .map((instance) => {
                 const trackerId = String(instance?.tracker_id || '');
                 if (!trackerId) {
                     return null;
                 }
-                const targetNumber = Number(instance?.target_number || (index + 1));
+                const targetNumber = parseTargetSlotNumber(trackerId);
+                if (targetNumber === null) {
+                    return null;
+                }
                 const trackingState = instance?.tracking_state || {};
                 const rotatorId = String(instance?.rotator_id || trackingState?.rotator_id || 'none');
                 const noradId = trackingState?.norad_id ?? null;

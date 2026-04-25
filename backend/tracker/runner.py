@@ -16,6 +16,7 @@
 import asyncio
 import logging
 import multiprocessing
+import re
 import time
 from dataclasses import dataclass
 from multiprocessing import Queue
@@ -24,6 +25,7 @@ from typing import Any, Dict, Optional
 
 import setproctitle
 
+from common.arguments import arguments
 from tracker.contracts import require_tracker_id
 from tracker.logic import SatelliteTracker
 from tracker.manager import TrackerManager
@@ -40,43 +42,119 @@ class TrackerRuntime:
 
 
 class TrackerSupervisor:
+    TARGET_TRACKER_ID_PATTERN = re.compile(r"^target-(\d+)$")
+
     def __init__(self):
         self.output_queue: Queue = multiprocessing.Queue()
         self.runtimes: Dict[str, TrackerRuntime] = {}
         self.managers: Dict[str, TrackerManager] = {}
         self.tracker_rotator_map: Dict[str, str] = {}
         self.rotator_tracker_map: Dict[str, str] = {}
-        self.tracker_target_number_map: Dict[str, int] = {}
-        self._next_target_number: int = 1
+        configured_limit = getattr(arguments, "max_tracker_targets", 10)
+        try:
+            configured_limit = int(configured_limit)
+        except (TypeError, ValueError):
+            configured_limit = 10
+        self.max_target_slots: int = max(1, configured_limit)
 
-    def _ensure_target_number(self, tracker_id: str) -> int:
-        normalized_tracker_id = require_tracker_id(tracker_id)
-        existing_number = self.tracker_target_number_map.get(normalized_tracker_id)
-        if existing_number is not None:
-            return existing_number
-        target_number = self._next_target_number
-        self._next_target_number += 1
-        self.tracker_target_number_map[normalized_tracker_id] = target_number
-        return target_number
+    @classmethod
+    def _parse_target_slot_number(cls, tracker_id: str) -> Optional[int]:
+        matched = cls.TARGET_TRACKER_ID_PATTERN.match(tracker_id)
+        if not matched:
+            return None
+        try:
+            parsed = int(matched.group(1))
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
 
-    def _allocate_tracker_id(self) -> str:
-        """Allocate a new tracker slot id in target-N format."""
-        while True:
-            candidate = f"target-{self._next_target_number}"
-            if (
-                candidate in self.runtimes
-                or candidate in self.managers
-                or candidate in self.tracker_rotator_map
-                or candidate in self.tracker_target_number_map
-            ):
-                self._next_target_number += 1
-                continue
-            self._ensure_target_number(candidate)
-            return candidate
+    @classmethod
+    def _is_target_tracker_id(cls, tracker_id: str) -> bool:
+        return cls._parse_target_slot_number(tracker_id) is not None
+
+    def _all_known_tracker_ids(self) -> set[str]:
+        return (
+            set(self.runtimes.keys())
+            | set(self.managers.keys())
+            | set(self.tracker_rotator_map.keys())
+            | set(self.rotator_tracker_map.values())
+        )
+
+    def _active_target_tracker_ids(self) -> set[str]:
+        return {
+            tracker_id
+            for tracker_id in self._all_known_tracker_ids()
+            if self._is_target_tracker_id(tracker_id)
+        }
+
+    def _build_tracker_slot_limit_error(
+        self,
+        tracker_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "success": False,
+            "error": "tracker_slot_limit_reached",
+            "message": (
+                f"Maximum number of active target slots reached " f"({self.max_target_slots})."
+            ),
+            "data": {
+                "tracker_id": tracker_id,
+                "limit": self.max_target_slots,
+                "active_targets": len(self._active_target_tracker_ids()),
+            },
+        }
+
+    def _allocate_target_tracker_id(self) -> Optional[str]:
+        """Allocate the lowest free target-N slot within configured limit."""
+        active_target_ids = self._active_target_tracker_ids()
+        if len(active_target_ids) >= self.max_target_slots:
+            return None
+
+        used_slot_numbers = {
+            slot_number
+            for tracker_id in active_target_ids
+            if (slot_number := self._parse_target_slot_number(tracker_id))
+            and 1 <= slot_number <= self.max_target_slots
+        }
+
+        for slot_number in range(1, self.max_target_slots + 1):
+            if slot_number not in used_slot_numbers:
+                return f"target-{slot_number}"
+        return None
 
     def create_tracker_slot(self) -> Dict[str, Any]:
         """Create a new tracker slot id without assigning a rotator."""
-        tracker_id = self._allocate_tracker_id()
+        tracker_id = self._allocate_target_tracker_id()
+        if not tracker_id:
+            return self._build_tracker_slot_limit_error()
+        return {
+            "success": True,
+            "tracker_id": tracker_id,
+            "created": True,
+        }
+
+    def create_observation_tracker_slot(self, observation_id: str) -> Dict[str, Any]:
+        """
+        Create an observation-scoped tracker id (obs-*) that does not consume target slots.
+        """
+        observation_token = str(observation_id or "").strip()
+        if not observation_token:
+            observation_token = f"{int(time.time() * 1000)}"
+
+        base_tracker_id = (
+            observation_token
+            if observation_token.startswith("obs-")
+            else f"obs-{observation_token}"
+        )
+        base_tracker_id = require_tracker_id(base_tracker_id)
+
+        known_tracker_ids = self._all_known_tracker_ids()
+        tracker_id = base_tracker_id
+        suffix = 2
+        while tracker_id in known_tracker_ids:
+            tracker_id = f"{base_tracker_id}-{suffix}"
+            suffix += 1
+
         return {
             "success": True,
             "tracker_id": tracker_id,
@@ -122,7 +200,6 @@ class TrackerSupervisor:
 
     def start_tracker(self, tracker_id: str) -> TrackerRuntime:
         normalized_id = require_tracker_id(tracker_id)
-        self._ensure_target_number(normalized_id)
         existing = self.runtimes.get(normalized_id)
         if existing and existing.process.is_alive():
             return existing
@@ -155,6 +232,8 @@ class TrackerSupervisor:
         normalized_id = require_tracker_id(tracker_id)
         runtime = self.runtimes.get(normalized_id)
         if not runtime:
+            # Keep ownership maps consistent even when runtime is already gone.
+            self.assign_rotator(normalized_id, None)
             return
 
         try:
@@ -236,7 +315,6 @@ class TrackerSupervisor:
 
     def assign_rotator(self, tracker_id: str, rotator_id: Optional[str]) -> Dict[str, Any]:
         normalized_tracker_id = require_tracker_id(tracker_id)
-        self._ensure_target_number(normalized_tracker_id)
         normalized_rotator_id = self._normalize_rotator_id(rotator_id)
         previous_rotator_id = self.tracker_rotator_map.get(normalized_tracker_id)
 
@@ -279,8 +357,6 @@ class TrackerSupervisor:
     def swap_rotators(self, tracker_a_id: str, tracker_b_id: str) -> Dict[str, Any]:
         normalized_tracker_a_id = require_tracker_id(tracker_a_id)
         normalized_tracker_b_id = require_tracker_id(tracker_b_id)
-        self._ensure_target_number(normalized_tracker_a_id)
-        self._ensure_target_number(normalized_tracker_b_id)
 
         if normalized_tracker_a_id == normalized_tracker_b_id:
             rotator_id = self.tracker_rotator_map.get(normalized_tracker_a_id)
@@ -340,7 +416,6 @@ class TrackerSupervisor:
 
         owner_tracker_id = self.rotator_tracker_map.get(normalized_rotator_id)
         if owner_tracker_id:
-            self._ensure_target_number(owner_tracker_id)
             return {
                 "success": True,
                 "tracker_id": owner_tracker_id,
@@ -348,7 +423,9 @@ class TrackerSupervisor:
                 "created": False,
             }
 
-        tracker_id = self._allocate_tracker_id()
+        tracker_id = self._allocate_target_tracker_id()
+        if not tracker_id:
+            return self._build_tracker_slot_limit_error()
         assignment_result = self.assign_rotator(tracker_id, normalized_rotator_id)
         if not assignment_result.get("success"):
             return dict(assignment_result)
@@ -360,17 +437,21 @@ class TrackerSupervisor:
             "created": True,
         }
 
+    def _tracker_sort_key(self, tracker_id: str) -> tuple[int, int, str]:
+        slot_number = self._parse_target_slot_number(tracker_id)
+        if slot_number is not None:
+            return (0, slot_number, tracker_id)
+        if tracker_id.startswith("obs-"):
+            return (1, 0, tracker_id)
+        return (2, 0, tracker_id)
+
     def get_instances_payload(self) -> Dict[str, Any]:
-        tracker_ids = sorted(
-            set(self.runtimes.keys())
-            | set(self.managers.keys())
-            | set(self.tracker_rotator_map.keys())
-        )
+        tracker_ids = sorted(self._all_known_tracker_ids(), key=self._tracker_sort_key)
         instances: list[Dict[str, Any]] = []
         for tracker_id in tracker_ids:
             runtime = self.runtimes.get(tracker_id)
             manager = self.managers.get(tracker_id)
-            target_number = self._ensure_target_number(tracker_id)
+            target_number = self._parse_target_slot_number(tracker_id)
             tracking_state = (
                 dict(manager.current_tracking_state)
                 if manager and manager.current_tracking_state
@@ -452,6 +533,10 @@ def ensure_tracker_for_rotator(rotator_id: Optional[str]) -> Dict[str, Any]:
 
 def create_tracker_slot() -> Dict[str, Any]:
     return _tracker_supervisor.create_tracker_slot()
+
+
+def create_observation_tracker_slot(observation_id: str) -> Dict[str, Any]:
+    return _tracker_supervisor.create_observation_tracker_slot(observation_id)
 
 
 def swap_rotators_between_trackers(tracker_a_id: str, tracker_b_id: str) -> Dict[str, Any]:

@@ -62,18 +62,28 @@ import { cancelRunningObservation } from "../scheduler/scheduler-slice.jsx";
 const TARGET_SLOT_ID_PATTERN = /^target-(\d+)$/;
 const ADD_TARGET_TAB_VALUE = '__add-target__';
 
+const parseTargetSlotNumber = (trackerId = '') => {
+    const match = String(trackerId || '').match(TARGET_SLOT_ID_PATTERN);
+    if (!match) {
+        return null;
+    }
+    const targetNumber = Number(match[1]);
+    return Number.isFinite(targetNumber) && targetNumber > 0 ? targetNumber : null;
+};
+
 const deriveNextTrackerSlotId = (instances = []) => {
-    let maxTargetNumber = 0;
+    const usedTargetNumbers = new Set();
     instances.forEach((instance) => {
-        const trackerId = String(instance?.tracker_id || '');
-        const match = trackerId.match(TARGET_SLOT_ID_PATTERN);
-        if (!match) return;
-        const targetNumber = Number(match[1]);
-        if (Number.isFinite(targetNumber) && targetNumber > maxTargetNumber) {
-            maxTargetNumber = targetNumber;
+        const targetNumber = parseTargetSlotNumber(instance?.tracker_id);
+        if (targetNumber !== null) {
+            usedTargetNumbers.add(targetNumber);
         }
     });
-    return `target-${Math.max(1, maxTargetNumber + 1)}`;
+    let nextTargetNumber = 1;
+    while (usedTargetNumbers.has(nextTargetNumber)) {
+        nextTargetNumber += 1;
+    }
+    return `target-${nextTargetNumber}`;
 };
 
 const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBar() {
@@ -109,6 +119,33 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     const [createSelectedSatellite, setCreateSelectedSatellite] = useState(null);
     const [createSelectedRigId, setCreateSelectedRigId] = useState('none');
     const [createSelectedRotatorId, setCreateSelectedRotatorId] = useState('none');
+    const [createDialogError, setCreateDialogError] = useState('');
+    const targetTrackerInstances = useMemo(
+        () => trackerInstances.filter((instance) => parseTargetSlotNumber(instance?.tracker_id) !== null),
+        [trackerInstances]
+    );
+
+    const emitTrackingErrorToast = useCallback((error, fallbackMessage, options = {}) => {
+        const suppressLimitToast = Boolean(options?.suppressLimitToast);
+        const errorCode = String(error?.error || error?.code || '').trim();
+        let message = '';
+        if (errorCode === 'tracker_slot_limit_reached') {
+            const limit = Number(error?.data?.limit);
+            if (Number.isFinite(limit) && limit > 0) {
+                message = `Target limit reached (${limit}). Delete an existing target first.`;
+            } else {
+                message = 'Target limit reached. Delete an existing target first.';
+            }
+            if (!suppressLimitToast) {
+                toast.error(message);
+            }
+            return message;
+        } else {
+            message = error?.message || String(error) || fallbackMessage;
+        }
+        toast.error(message);
+        return message;
+    }, []);
 
     const handleTargetTabChange = useCallback((event, value) => {
         if (!value) return;
@@ -126,12 +163,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         if (!trackerIdToDelete) {
             return;
         }
-        const instance = trackerInstances.find((row) => row?.tracker_id === trackerIdToDelete);
-        const targetNumber = Number(
-            instance?.target_number
-            || (trackerInstances.findIndex((row) => row?.tracker_id === trackerIdToDelete) + 1)
-            || 0
-        );
+        const targetNumber = Number(targetOption?.targetNumber || 0);
         const linkedRunning = (targetOption?.linkedObservations || [])
             .filter((obs) => obs?.status === 'running');
         if (targetOption?.hasActiveObservation && linkedRunning.length > 0) {
@@ -141,7 +173,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         }
         setPendingDeleteTarget({ trackerId: trackerIdToDelete, targetNumber });
         setDeleteDialogOpen(true);
-    }, [trackerInstances]);
+    }, []);
 
     const handleConfirmAbortObservation = useCallback(async () => {
         if (!pendingAbortObservation?.id || !socket) {
@@ -200,6 +232,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         setCreateSelectedSatellite(null);
         setCreateSelectedRigId('none');
         setCreateSelectedRotatorId('none');
+        setCreateDialogError('');
         setCreateTargetBusy(false);
     }, []);
 
@@ -233,6 +266,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     }, [socket]);
 
     const handleCreateTargetSubmit = useCallback(async () => {
+        setCreateDialogError('');
         if (!createSelectedSatellite?.norad_id) {
             toast.error('Please select a satellite first');
             return;
@@ -244,7 +278,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
             return;
         }
 
-        const trackerSlotId = deriveNextTrackerSlotId(trackerInstances);
+        const trackerSlotId = deriveNextTrackerSlotId(targetTrackerInstances);
         const normalizedRigId = createSelectedRigId || 'none';
         const normalizedRotatorId = createSelectedRotatorId || 'none';
         const nextTransmitters = getTransmittersFromSatellite(createSelectedSatellite);
@@ -275,7 +309,12 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
             setCreateDialogOpen(false);
             resetCreateDialogState();
         } catch (error) {
-            toast.error(error?.message || 'Failed to create target');
+            const errorMessage = emitTrackingErrorToast(
+                error,
+                'Failed to create target',
+                { suppressLimitToast: true },
+            );
+            setCreateDialogError(String(errorMessage || 'Failed to create target'));
             setCreateTargetBusy(false);
         }
     }, [
@@ -283,10 +322,11 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         createSelectedRotatorId,
         createSelectedSatellite,
         dispatch,
+        emitTrackingErrorToast,
         getTransmittersFromSatellite,
         resetCreateDialogState,
         socket,
-        trackerInstances,
+        targetTrackerInstances,
         trackingState,
     ]);
 
@@ -323,10 +363,11 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
             await dispatch(setTrackingStateInBackend({ socket, data })).unwrap();
             setSearchResetKey((value) => value + 1);
         } catch (error) {
-            toast.error(error?.message || 'Failed to set target');
+            emitTrackingErrorToast(error, 'Failed to set target');
         }
     }, [
         dispatch,
+        emitTrackingErrorToast,
         getTransmittersFromSatellite,
         requestRotatorForTarget,
         selectedRadioRig,
@@ -335,9 +376,9 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         trackingState,
     ]);
 
-    const targetOptions = useMemo(() => trackerInstances.map((instance, index) => {
+    const targetOptions = useMemo(() => targetTrackerInstances.map((instance, index) => {
         const instanceTrackerId = instance?.tracker_id || '';
-        const targetNumber = Number(instance?.target_number || (index + 1));
+        const targetNumber = Number(parseTargetSlotNumber(instanceTrackerId) || (index + 1));
         const view = trackerViews?.[instanceTrackerId] || {};
         const satName = view?.satelliteData?.details?.name || 'No satellite';
         const satNorad = view?.trackingState?.norad_id || 'none';
@@ -379,7 +420,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
             hasScheduledObservation: upcomingObs.length > 0,
             linkedObservations,
         };
-    }), [trackerInstances, trackerViews, schedulerObservations, rotatorRows]);
+    }), [targetTrackerInstances, trackerViews, schedulerObservations, rotatorRows]);
 
     const tabValue = targetOptions.some((option) => option.trackerId === trackerId)
         ? trackerId
@@ -389,7 +430,10 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         [targetOptions, tabValue]
     );
     const disableRetargetSearch = Boolean(activeTargetOption?.hasActiveObservation);
-    const nextTargetSlotId = useMemo(() => deriveNextTrackerSlotId(trackerInstances), [trackerInstances]);
+    const nextTargetSlotId = useMemo(
+        () => deriveNextTrackerSlotId(targetTrackerInstances),
+        [targetTrackerInstances]
+    );
     const hardwareUsageRows = useMemo(() => {
         return trackerInstances.map((instance, index) => {
             const instanceTrackerId = String(instance?.tracker_id || '');
@@ -652,6 +696,9 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                         onInputChange={handleCreateSearchInputChange}
                         onChange={(event, value) => {
                             setCreateSelectedSatellite(value || null);
+                            if (createDialogError) {
+                                setCreateDialogError('');
+                            }
                         }}
                         isOptionEqualToValue={(option, value) => option?.norad_id === value?.norad_id}
                         getOptionLabel={(option) => `${option?.norad_id || ''} - ${option?.name || ''}`}
@@ -868,6 +915,26 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                     </Box>
 
                 </Box>
+                {createDialogError && (
+                    <Box
+                        sx={{
+                            mt: 0.75,
+                            px: 1.2,
+                            py: 0.9,
+                            borderRadius: 1.2,
+                            border: '1px solid',
+                            borderColor: 'error.main',
+                            bgcolor: 'error.light',
+                        }}
+                    >
+                        <Typography
+                            variant="caption"
+                            sx={{ color: 'error.contrastText', fontWeight: 700, lineHeight: 1.3 }}
+                        >
+                            {createDialogError}
+                        </Typography>
+                    </Box>
+                )}
             </DialogContent>
             <DialogActions
                 sx={{

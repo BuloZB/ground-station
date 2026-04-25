@@ -16,11 +16,13 @@
 """Tracking state handlers and emission functions."""
 
 import asyncio
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
 import crud
+from common.arguments import arguments
 from common.constants import (
     RigStates,
     RotatorStates,
@@ -42,6 +44,8 @@ from tracker.runner import (
 )
 from tracker.stateupdate import update_tracking_state_with_ownership
 from tracking.events import fetch_next_events_for_satellite
+
+TARGET_TRACKER_ID_PATTERN = re.compile(r"^target-(\d+)$")
 
 
 def _tracker_id_required_response() -> Dict[str, Any]:
@@ -71,6 +75,26 @@ def _missing_new_tracker_fields(value: Dict[str, Any]) -> list[str]:
             if field_value is None:
                 missing.append(field)
     return missing
+
+
+def _parse_target_slot_number(tracker_id: str) -> Optional[int]:
+    matched = TARGET_TRACKER_ID_PATTERN.match(tracker_id)
+    if not matched:
+        return None
+    try:
+        parsed = int(matched.group(1))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _resolve_max_target_slots() -> int:
+    configured_limit = getattr(arguments, "max_tracker_targets", 10)
+    try:
+        configured_limit = int(configured_limit)
+    except (TypeError, ValueError):
+        configured_limit = 10
+    return max(1, configured_limit)
 
 
 async def emit_tracker_data(dbsession, sio, logger, tracker_id: str):
@@ -231,6 +255,40 @@ async def set_tracking_state(
     }
     is_new_tracker = tracker_id not in existing_tracker_ids
     if is_new_tracker:
+        target_slot_number = _parse_target_slot_number(tracker_id)
+        if target_slot_number is not None:
+            max_target_slots = _resolve_max_target_slots()
+            existing_target_tracker_ids = {
+                existing_tracker_id
+                for existing_tracker_id in existing_tracker_ids
+                if _parse_target_slot_number(existing_tracker_id) is not None
+            }
+            active_target_count = len(existing_target_tracker_ids)
+            if target_slot_number > max_target_slots or active_target_count >= max_target_slots:
+                if target_slot_number > max_target_slots:
+                    message = (
+                        f"Tracker slot '{tracker_id}' exceeds configured target slot limit "
+                        f"({max_target_slots})."
+                    )
+                    reason = "slot_out_of_range"
+                else:
+                    message = (
+                        f"Maximum number of active targets reached ({max_target_slots}). "
+                        f"Delete an existing target before creating '{tracker_id}'."
+                    )
+                    reason = "active_limit_reached"
+                return {
+                    "success": False,
+                    "error": "tracker_slot_limit_reached",
+                    "message": message,
+                    "data": {
+                        "tracker_id": tracker_id,
+                        "limit": max_target_slots,
+                        "active_targets": active_target_count,
+                        "reason": reason,
+                    },
+                }
+
         missing_fields = _missing_new_tracker_fields(value)
         if missing_fields:
             return {

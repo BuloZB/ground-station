@@ -23,8 +23,8 @@ async def test_start_tracker_unparks_before_tracking_when_requested(monkeypatch)
         lambda _tracker_id: manager,
     )
     monkeypatch.setattr(
-        "observations.tasks.trackerhandler.ensure_tracker_for_rotator",
-        lambda _rotator_id: {"success": True, "tracker_id": "target-1", "created": False},
+        "observations.tasks.trackerhandler.get_assigned_tracker_for_rotator",
+        lambda _rotator_id: "target-1",
     )
 
     async def _mock_update(tracker_id, value, requester_sid=None):
@@ -131,8 +131,8 @@ async def test_start_tracker_returns_rotator_in_use_error(monkeypatch):
         lambda _tracker_id: manager,
     )
     monkeypatch.setattr(
-        "observations.tasks.trackerhandler.ensure_tracker_for_rotator",
-        lambda _rotator_id: {"success": True, "tracker_id": "target-1", "created": False},
+        "observations.tasks.trackerhandler.get_assigned_tracker_for_rotator",
+        lambda _rotator_id: "target-1",
     )
 
     async def _mock_update(tracker_id, value, requester_sid=None):
@@ -165,7 +165,7 @@ async def test_start_tracker_returns_rotator_in_use_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_start_tracker_auto_creates_tracker_slot_when_unassigned(monkeypatch):
+async def test_start_tracker_uses_observation_slot_when_rotator_unassigned(monkeypatch):
     called = {"update": False, "manager": False}
 
     manager = _DummyTrackerManager({"rotator_state": "connected"})
@@ -174,13 +174,17 @@ async def test_start_tracker_auto_creates_tracker_slot_when_unassigned(monkeypat
         lambda _tracker_id: (called.__setitem__("manager", True), manager)[1],
     )
     monkeypatch.setattr(
-        "observations.tasks.trackerhandler.ensure_tracker_for_rotator",
-        lambda _rotator_id: {"success": True, "tracker_id": "target-9", "created": True},
+        "observations.tasks.trackerhandler.get_assigned_tracker_for_rotator",
+        lambda _rotator_id: None,
+    )
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.create_observation_tracker_slot",
+        lambda _observation_id: {"success": True, "tracker_id": "obs-5", "created": True},
     )
 
     async def _mock_update(tracker_id, value, requester_sid=None):
         called["update"] = True
-        assert tracker_id == "target-9"
+        assert tracker_id == "obs-5"
         return {"success": True}
 
     monkeypatch.setattr(
@@ -200,6 +204,9 @@ async def test_start_tracker_auto_creates_tracker_slot_when_unassigned(monkeypat
     )
 
     assert result["success"] is True
+    assert result["tracker_id"] == "obs-5"
+    assert result["ephemeral"] is True
+    assert result["created"] is True
     assert called["manager"] is True
     assert called["update"] is True
 
@@ -214,8 +221,12 @@ async def test_start_tracker_emits_tracker_instances_snapshot(monkeypatch):
         lambda _tracker_id: manager,
     )
     monkeypatch.setattr(
-        "observations.tasks.trackerhandler.ensure_tracker_for_rotator",
-        lambda _rotator_id: {"success": True, "tracker_id": "target-2", "created": True},
+        "observations.tasks.trackerhandler.get_assigned_tracker_for_rotator",
+        lambda _rotator_id: None,
+    )
+    monkeypatch.setattr(
+        "observations.tasks.trackerhandler.create_observation_tracker_slot",
+        lambda _observation_id: {"success": True, "tracker_id": "obs-emit", "created": True},
     )
 
     async def _mock_update(tracker_id, value, requester_sid=None):
@@ -257,8 +268,8 @@ async def test_start_tracker_without_rotator_starts_ephemeral_context_tracker(mo
     update_calls = []
 
     monkeypatch.setattr(
-        "observations.tasks.trackerhandler.create_tracker_slot",
-        lambda: {"success": True, "tracker_id": "target-77", "created": True},
+        "observations.tasks.trackerhandler.create_observation_tracker_slot",
+        lambda _observation_id: {"success": True, "tracker_id": "obs-no-rotator", "created": True},
     )
     monkeypatch.setattr(
         "observations.tasks.trackerhandler.get_tracker_manager",
@@ -285,7 +296,7 @@ async def test_start_tracker_without_rotator_starts_ephemeral_context_tracker(mo
     )
 
     assert result["success"] is True
-    assert result["tracker_id"] == "target-77"
+    assert result["tracker_id"] == "obs-no-rotator"
     assert result["ephemeral"] is True
     assert result["created"] is True
     assert len(update_calls) == 1
@@ -300,8 +311,8 @@ async def test_start_tracker_reuses_existing_rotator_slot_when_tracking_disabled
     update_calls = []
 
     monkeypatch.setattr(
-        "observations.tasks.trackerhandler.ensure_tracker_for_rotator",
-        lambda _rotator_id: {"success": True, "tracker_id": "target-9", "created": False},
+        "observations.tasks.trackerhandler.get_assigned_tracker_for_rotator",
+        lambda _rotator_id: "target-9",
     )
     monkeypatch.setattr(
         "observations.tasks.trackerhandler.get_tracker_manager",
@@ -360,11 +371,11 @@ async def test_stop_tracker_removes_ephemeral_tracker_instance(monkeypatch):
     ok = await handler.stop_tracker_task(
         observation_id="obs-ephemeral-stop",
         rotator_config={},
-        tracker_context={"tracker_id": "target-11", "ephemeral": True},
+        tracker_context={"tracker_id": "obs-11", "ephemeral": True},
     )
 
     assert ok is True
-    assert remove_calls == ["target-11"]
+    assert remove_calls == ["obs-11"]
 
 
 @pytest.mark.asyncio

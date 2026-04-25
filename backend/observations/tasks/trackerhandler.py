@@ -25,8 +25,7 @@ from db import AsyncSessionLocal
 from tracker.contracts import get_tracking_state_name
 from tracker.instances import emit_tracker_instances
 from tracker.runner import (
-    create_tracker_slot,
-    ensure_tracker_for_rotator,
+    create_observation_tracker_slot,
     get_assigned_tracker_for_rotator,
     get_tracker_manager,
     remove_tracker_instance,
@@ -121,6 +120,7 @@ class TrackerHandler:
         """
         tracker_id = ""
         has_rotator = bool(rotator_config.get("id"))
+        uses_observation_slot = False
         try:
             norad_id = satellite.get("norad_id")
             if not norad_id:
@@ -132,12 +132,24 @@ class TrackerHandler:
 
             tracking_enabled = bool(rotator_config.get("tracking_enabled"))
             transmitter_id = self._extract_transmitter_id(tasks)
+            rotator_id = rotator_config.get("id") if has_rotator else None
 
-            # Reuse slot tied to rotator ownership when available, otherwise create an ephemeral slot.
+            # Reuse existing target owner when available. Otherwise, use a dedicated
+            # observation-scoped tracker slot that will be removed after the pass.
             if has_rotator:
-                tracker_resolution = ensure_tracker_for_rotator(rotator_config.get("id"))
+                owner_tracker_id = get_assigned_tracker_for_rotator(rotator_id)
+                if owner_tracker_id:
+                    tracker_resolution = {
+                        "success": True,
+                        "tracker_id": owner_tracker_id,
+                        "created": False,
+                    }
+                else:
+                    tracker_resolution = create_observation_tracker_slot(observation_id)
+                    uses_observation_slot = True
             else:
-                tracker_resolution = create_tracker_slot()
+                tracker_resolution = create_observation_tracker_slot(observation_id)
+                uses_observation_slot = True
 
             if not tracker_resolution.get("success"):
                 return {
@@ -155,14 +167,14 @@ class TrackerHandler:
                     "message": "Tracker resolution returned an invalid tracker ID.",
                 }
 
-            if has_rotator and tracker_resolution.get("created"):
+            if has_rotator and uses_observation_slot:
                 logger.info(
-                    "Created tracker slot %s for rotator %s (observation %s)",
+                    "Created observation tracker slot %s for rotator %s (observation %s)",
                     tracker_id,
-                    rotator_config.get("id"),
+                    rotator_id,
                     observation_id,
                 )
-            elif not has_rotator:
+            elif uses_observation_slot:
                 logger.info(
                     "Created observation tracker slot %s for observation %s (no rotator)",
                     tracker_id,
@@ -172,7 +184,7 @@ class TrackerHandler:
             tracker_manager = get_tracker_manager(tracker_id)
 
             requested_rotator_state = "disconnected"
-            requested_rotator_id = rotator_config.get("id") if has_rotator else "none"
+            requested_rotator_id = rotator_id if has_rotator else "none"
 
             if has_rotator and tracking_enabled:
                 requested_rotator_state = "tracking"
@@ -186,7 +198,7 @@ class TrackerHandler:
                         tracker_id=tracker_id,
                         value={
                             "rotator_state": "connected",
-                            "rotator_id": rotator_config.get("id"),
+                            "rotator_id": rotator_id,
                         },
                         requester_sid=f"observation:{observation_id}",
                     )
@@ -211,7 +223,7 @@ class TrackerHandler:
                 requester_sid=f"observation:{observation_id}",
             )
             if not tracking_reply.get("success"):
-                if not has_rotator:
+                if uses_observation_slot:
                     await self._remove_observation_tracker_instance(tracker_id)
                 return tracking_reply
 
@@ -230,11 +242,11 @@ class TrackerHandler:
                 "tracker_id": tracker_id,
                 "created": bool(tracker_resolution.get("created", False)),
                 "reused_existing": not bool(tracker_resolution.get("created", False)),
-                "ephemeral": not has_rotator,
+                "ephemeral": uses_observation_slot,
             }
 
         except Exception as e:
-            if tracker_id and not has_rotator:
+            if tracker_id and uses_observation_slot:
                 await self._remove_observation_tracker_instance(tracker_id)
             logger.error(f"Error starting tracker: {e}")
             logger.error(traceback.format_exc())

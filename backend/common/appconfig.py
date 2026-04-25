@@ -31,6 +31,7 @@ DEFAULT_APP_CONFIG: Dict[str, Any] = {
     "log_config": "data/configs/log_config.yaml",
     "secret_key": "YOUR_RANDOM_SECRET_KEY",
     "track_interval_ms": 2000,
+    "max_tracker_targets": 10,
     "enable_soapy_discovery": False,
     "runonce_soapy_discovery": True,
     # Optional override list for satellite metadata API endpoints used during TLE sync.
