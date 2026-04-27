@@ -141,6 +141,29 @@ const HardwareSettingsPopover = () => {
             },
         };
 
+        const configuredRotatorIds = new Set(
+            (Array.isArray(rotators) ? rotators : [])
+                .map((rotator) => rotator?.id)
+                .filter((id) => hasAssignedHardwareId(id))
+                .map((id) => String(id))
+        );
+        const configuredRigIds = new Set(
+            (Array.isArray(rigs) ? rigs : [])
+                .map((rig) => rig?.id)
+                .filter((id) => hasAssignedHardwareId(id))
+                .map((id) => String(id))
+        );
+        const assignedRotatorIds = new Set();
+        const activeRotatorIds = new Set();
+        const connectedRotatorIds = new Set();
+        const warningRotatorIds = new Set();
+        const disconnectedRotatorIds = new Set();
+        const assignedRigIds = new Set();
+        const activeRigIds = new Set();
+        const connectedRigIds = new Set();
+        const warningRigIds = new Set();
+        const disconnectedRigIds = new Set();
+
         trackerInstances.forEach((instance) => {
             const instanceTrackerId = instance?.tracker_id || '';
             const view = trackerViews?.[instanceTrackerId] || {};
@@ -155,7 +178,8 @@ const HardwareSettingsPopover = () => {
             );
             const hasRotatorAssigned = hasAssignedHardwareId(rotatorId);
             if (hasRotatorAssigned) {
-                summary.rotator.assignedCount += 1;
+                const normalizedRotatorId = String(rotatorId);
+                assignedRotatorIds.add(normalizedRotatorId);
                 const rotatorStatus = resolveRotatorLedStatus({ rotatorId, rotatorData, trackingState });
                 const rotatorDisconnected = rotatorStatus === 'disconnected';
                 const rotatorWarning = isRotatorWarningStatus(rotatorStatus);
@@ -163,10 +187,10 @@ const HardwareSettingsPopover = () => {
                 const rotatorConnected = Boolean(rotatorData?.connected) || (
                     !['disconnected', 'none', 'unknown'].includes(rotatorStatus)
                 );
-                if (rotatorActive) summary.rotator.activeCount += 1;
-                if (rotatorConnected) summary.rotator.connectedCount += 1;
-                if (rotatorDisconnected) summary.rotator.disconnectedCount += 1;
-                else if (rotatorWarning) summary.rotator.warningCount += 1;
+                if (rotatorActive) activeRotatorIds.add(normalizedRotatorId);
+                if (rotatorConnected) connectedRotatorIds.add(normalizedRotatorId);
+                if (rotatorDisconnected) disconnectedRotatorIds.add(normalizedRotatorId);
+                else if (rotatorWarning) warningRotatorIds.add(normalizedRotatorId);
             }
 
             const rigId = resolveAssignedHardwareId(
@@ -176,7 +200,8 @@ const HardwareSettingsPopover = () => {
             );
             const hasRigAssigned = hasAssignedHardwareId(rigId);
             if (hasRigAssigned) {
-                summary.rig.assignedCount += 1;
+                const normalizedRigId = String(rigId);
+                assignedRigIds.add(normalizedRigId);
                 const rigStatus = resolveRigLedStatus({ rigId, rigData, trackingState });
                 const rigDisconnected = rigStatus === 'disconnected';
                 const rigWarning = isRigWarningStatus(rigStatus);
@@ -184,19 +209,43 @@ const HardwareSettingsPopover = () => {
                 const rigConnected = Boolean(rigData?.connected) || (
                     !['disconnected', 'none', 'unknown'].includes(rigStatus)
                 );
-                if (rigActive) summary.rig.activeCount += 1;
-                if (rigConnected) summary.rig.connectedCount += 1;
-                if (rigDisconnected) summary.rig.disconnectedCount += 1;
-                else if (rigWarning) summary.rig.warningCount += 1;
+                if (rigActive) activeRigIds.add(normalizedRigId);
+                if (rigConnected) connectedRigIds.add(normalizedRigId);
+                if (rigDisconnected) disconnectedRigIds.add(normalizedRigId);
+                else if (rigWarning) warningRigIds.add(normalizedRigId);
             }
         });
+
+        summary.rotator.assignedCount = assignedRotatorIds.size;
+        summary.rotator.activeCount = activeRotatorIds.size;
+        summary.rotator.connectedCount = connectedRotatorIds.size;
+        summary.rotator.warningCount = warningRotatorIds.size;
+        const disconnectedAssignedRotatorCount = [...disconnectedRotatorIds]
+            .filter((id) => !connectedRotatorIds.has(id))
+            .length;
+        const unassignedConfiguredRotatorCount = [...configuredRotatorIds]
+            .filter((id) => !assignedRotatorIds.has(id))
+            .length;
+        summary.rotator.disconnectedCount = disconnectedAssignedRotatorCount + unassignedConfiguredRotatorCount;
+
+        summary.rig.assignedCount = assignedRigIds.size;
+        summary.rig.activeCount = activeRigIds.size;
+        summary.rig.connectedCount = connectedRigIds.size;
+        summary.rig.warningCount = warningRigIds.size;
+        const disconnectedAssignedRigCount = [...disconnectedRigIds]
+            .filter((id) => !connectedRigIds.has(id))
+            .length;
+        const unassignedConfiguredRigCount = [...configuredRigIds]
+            .filter((id) => !assignedRigIds.has(id))
+            .length;
+        summary.rig.disconnectedCount = disconnectedAssignedRigCount + unassignedConfiguredRigCount;
 
         // Badge bubbles represent warning/error attention only.
         // Disconnected is treated as neutral state and is reported in tooltip text instead.
         summary.rotator.issueCount = summary.rotator.warningCount;
         summary.rig.issueCount = summary.rig.warningCount;
         return summary;
-    }, [trackerInstances, trackerViews]);
+    }, [trackerInstances, trackerViews, rigs, rotators]);
 
     const getFleetBadgeColor = useCallback((summaryByType) => {
         if (summaryByType.warningCount > 0) return 'warning';
