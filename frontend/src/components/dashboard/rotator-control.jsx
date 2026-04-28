@@ -185,16 +185,21 @@ const RotatorControl = React.memo(function RotatorControl({ trackerId: trackerId
 
     const rotatorStatusChip = React.useMemo(() => {
         if (!isSocketConnected) return { label: 'Offline', color: 'default' };
-        if (!effectiveRotatorData?.connected) return { label: 'Disconnected', color: 'error' };
+        if (!effectiveRotatorData?.connected) {
+            return {
+                label: t('common.disconnected', { ns: 'common', defaultValue: 'Disconnected' }),
+                color: 'default'
+            };
+        }
         if (effectiveRotatorData?.tracking) return { label: 'Tracking', color: 'success' };
         if (effectiveRotatorData?.slewing) return { label: 'Slewing', color: 'warning' };
         if (effectiveRotatorData?.parked) return { label: 'Parked', color: 'warning' };
         if (effectiveRotatorData?.stopped) return { label: 'Stopped', color: 'warning' };
         return { label: 'Connected', color: 'success' };
-    }, [isSocketConnected, effectiveRotatorData?.connected, effectiveRotatorData?.tracking, effectiveRotatorData?.slewing, effectiveRotatorData?.parked, effectiveRotatorData?.stopped]);
+    }, [isSocketConnected, effectiveRotatorData?.connected, effectiveRotatorData?.tracking, effectiveRotatorData?.slewing, effectiveRotatorData?.parked, effectiveRotatorData?.stopped, t]);
     const rotatorStatusLedColor = React.useMemo(() => {
         if (!isSocketConnected) return 'action.disabled';
-        if (!effectiveRotatorData?.connected) return 'error.main';
+        if (!effectiveRotatorData?.connected) return 'action.disabled';
         if (effectiveRotatorData?.tracking) return 'success.main';
         if (effectiveRotatorData?.slewing) return 'warning.main';
         if (effectiveRotatorData?.parked) return 'warning.main';
@@ -440,7 +445,7 @@ const RotatorControl = React.memo(function RotatorControl({ trackerId: trackerId
                             if (effectiveRotatorData?.connected) {
                                 return (theme) => `linear-gradient(135deg, ${theme.palette.info.main}26 0%, ${theme.palette.info.main}0D 100%)`;
                             }
-                            return (theme) => `linear-gradient(135deg, ${theme.palette.error.main}26 0%, ${theme.palette.error.main}0D 100%)`;
+                            return (theme) => `linear-gradient(135deg, ${theme.palette.action.disabledBackground} 0%, ${theme.palette.action.hover} 100%)`;
                         })(),
                         borderBottom: '1px solid',
                         borderColor: 'divider'

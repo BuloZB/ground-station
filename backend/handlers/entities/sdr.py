@@ -77,6 +77,40 @@ def _coerce_int(value, default, field_name, logger):
     return default
 
 
+def _coerce_bool(value, default, field_name, logger):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("", "none"):
+            logger.warning(f"{field_name} is unset; using default {default}.")
+            return default
+        if normalized in ("true", "1", "yes", "on"):
+            return True
+        if normalized in ("false", "0", "no", "off"):
+            return False
+        logger.warning(f"{field_name} is invalid ({value}); using default {default}.")
+        return default
+    logger.warning(f"{field_name} has unsupported type; using default {default}.")
+    return default
+
+
+def _sanitize_overlap_percent(value, default, field_name, logger):
+    percent = _coerce_int(value, default, field_name, logger)
+    allowed = [0, 25, 50, 75]
+    if percent not in allowed:
+        snapped = min(allowed, key=lambda x: abs(x - percent))
+        logger.warning(
+            f"{field_name}={percent} is unsupported; using nearest supported value {snapped}."
+        )
+        percent = snapped
+    return percent
+
+
 async def sdr_data_request_routing(sio, cmd, data, logger, client_id):
 
     async with AsyncSessionLocal() as dbsession:
@@ -114,6 +148,19 @@ async def sdr_data_request_routing(sio, cmd, data, logger, client_id):
                 sdr_serial = sdr_device.get("serial", 0)
                 sdr_host = sdr_device.get("host", None)
                 sdr_port = sdr_device.get("port", None)
+                sdr_type_raw = sdr_device.get("type")
+                sdr_type = sdr_type_raw.lower() if isinstance(sdr_type_raw, str) else ""
+                default_fft_overlap_percent = (
+                    50
+                    if sdr_type
+                    in [
+                        "rtlsdrtcpv3",
+                        "rtlsdrusbv3",
+                        "rtlsdrtcpv4",
+                        "rtlsdrusbv4",
+                    ]
+                    else 0
+                )
 
                 # Default to 100 MHz
                 center_freq = _coerce_float(
@@ -169,6 +216,16 @@ async def sdr_data_request_routing(sio, cmd, data, logger, client_id):
 
                 # FFT Averaging
                 fft_averaging = _coerce_int(data.get("fftAveraging", 1), 1, "fftAveraging", logger)
+                fft_overlap_percent = _sanitize_overlap_percent(
+                    data.get("fftOverlapPercent", default_fft_overlap_percent),
+                    default_fft_overlap_percent,
+                    "fftOverlapPercent",
+                    logger,
+                )
+                fft_overlap_depth = _coerce_int(
+                    data.get("fftOverlapDepth", 16), 16, "fftOverlapDepth", logger
+                )
+                fft_overlap_depth = max(1, min(64, fft_overlap_depth))
 
                 # Antenna port
                 antenna = data.get("antenna", None)
@@ -204,6 +261,8 @@ async def sdr_data_request_routing(sio, cmd, data, logger, client_id):
                     rtl_agc=rtl_agc,
                     fft_window=fft_window,
                     fft_averaging=fft_averaging,
+                    fft_overlap_percent=fft_overlap_percent,
+                    fft_overlap_depth=fft_overlap_depth,
                     sdr_id=sdr_id,
                     recording_path=recording_path,
                     serial_number=sdr_serial,

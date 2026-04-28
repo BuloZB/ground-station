@@ -1,18 +1,15 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSocket } from '../common/socket.jsx';
+import { useWaterfallEngine } from './waterfall-engine-provider.jsx';
 import {
-    setCenterFrequency,
-    setSampleRate,
-    setGain,
-    setFFTSize,
-    setFFTWindow,
-    setFFTAveraging,
     setIsStreaming,
     setErrorMessage,
-    setErrorDialogOpen,
     setStartStreamingLoading,
     setFFTdataOverflow,
+    setExpandedPanels,
+    setStartStreamValidationErrors,
+    clearStartStreamValidationErrors,
     stopRecording
 } from './waterfall-slice.jsx';
 import { toast } from '../../utils/toast-with-timestamp.jsx';
@@ -30,6 +27,7 @@ const useWaterfallStream = ({
 }) => {
     const dispatch = useDispatch();
     const { socket } = useSocket();
+    const { subscribeToFftData } = useWaterfallEngine();
     const {
         selectedSDRId,
         centerFrequency,
@@ -38,6 +36,8 @@ const useWaterfallStream = ({
         fftSize,
         sdrSettingsById,
         fftWindow,
+        fftOverlapPercent,
+        fftOverlapDepth,
         selectedAntenna,
         selectedOffsetValue,
         fftAveraging,
@@ -46,6 +46,7 @@ const useWaterfallStream = ({
         autoDBRange,
         playbackRecordingPath,
         isRecording,
+        expandedPanels,
     } = useSelector((state) => state.waterfall);
 
     const biasT = sdrSettingsById?.[selectedSDRId]?.draft?.biasT ?? false;
@@ -67,9 +68,6 @@ const useWaterfallStream = ({
     const fftDataOverflowLimit = 60;
 
     const cancelAnimations = useCallback(() => {
-        if (waterfallRendererMode === 'worker' && workerRef.current) {
-            workerRef.current.postMessage({ cmd: 'stop' });
-        }
         if (animationFrameRef.current) {
             cancelAnimationFrame(animationFrameRef.current);
             animationFrameRef.current = null;
@@ -78,19 +76,31 @@ const useWaterfallStream = ({
             cancelAnimationFrame(bandscopeAnimationFrameRef.current);
             bandscopeAnimationFrameRef.current = null;
         }
-    }, [workerRef, waterfallRendererMode]);
+    }, []);
 
     useEffect(() => {
+        if (!socket) {
+            return;
+        }
+
         // Note: sdr-config-error, sdr-error, sdr-config, and sdr-status are now handled
         // in the parent-level socket event handler (hooks/useSocketEventHandlers.jsx)
         // to ensure messages are always received even when this component unmounts
 
-        socket.on('disconnect', () => {
+        const handleDisconnect = () => {
             cancelAnimations();
             dispatch(setIsStreaming(false));
-        });
+        };
 
-        socket.on('sdr-fft-data', (payload) => {
+        socket.on('disconnect', handleDisconnect);
+
+        return () => {
+            socket.off('disconnect', handleDisconnect);
+        };
+    }, [socket, cancelAnimations, dispatch]);
+
+    useEffect(() => {
+        const unsubscribe = subscribeToFftData((frame) => {
             const now = performance.now();
             timestampWindowRef.current.push(now);
             const cutoffTime = now - windowSizeMs;
@@ -112,52 +122,36 @@ const useWaterfallStream = ({
                 }
                 lastAllowedUpdateRef.current = now;
             }
-            // Extract binary data from payload (may be ArrayBuffer directly for backwards compatibility,
-            // or an object with data and playback timing info for playback mode)
-            const binaryData = payload.data || payload;
-            const recordingDatetime = payload.recording_datetime || null;
-            const playbackElapsed = payload.playback_elapsed_seconds || null;
-            const playbackRemaining = payload.playback_remaining_seconds || null;
-            const playbackTotal = payload.playback_total_seconds || null;
+            const {
+                fft,
+                playbackElapsedSeconds,
+                playbackRemainingSeconds,
+                playbackTotalSeconds,
+            } = frame;
 
             // Update playback timing refs without causing re-renders
             if (playbackElapsedSecondsRef) {
-                playbackElapsedSecondsRef.current = playbackElapsed;
+                playbackElapsedSecondsRef.current = playbackElapsedSeconds;
             }
             if (playbackRemainingSecondsRef) {
-                playbackRemainingSecondsRef.current = playbackRemaining;
+                playbackRemainingSecondsRef.current = playbackRemainingSeconds;
             }
             if (playbackTotalSecondsRef) {
-                playbackTotalSecondsRef.current = playbackTotal;
+                playbackTotalSecondsRef.current = playbackTotalSeconds;
             }
 
-            // Create a typed view over the incoming ArrayBuffer and transfer its buffer
-            // to the worker to avoid structured-clone copying (zero-copy transfer).
-            const floatArray = new Float32Array(binaryData);
             if (waterfallRendererMode === 'dom-tiles') {
                 if (onDomTileFftData) {
-                    onDomTileFftData(floatArray);
+                    onDomTileFftData(fft);
                 }
-            } else if (workerRef.current) {
-                // After this postMessage, floatArray.buffer becomes detached in the main thread.
-                // Do not reuse floatArray or its buffer hereafter.
-                workerRef.current.postMessage({
-                    cmd: 'updateFFTData',
-                    fft: floatArray,
-                    recording_datetime: recordingDatetime,
-                    playback_elapsed_seconds: playbackElapsed,
-                    playback_remaining_seconds: playbackRemaining,
-                    playback_total_seconds: playbackTotal,
-                    immediate: true,
-                }, [floatArray.buffer]);
             }
         });
 
         return () => {
             cancelAnimations();
-            socket.off('sdr-fft-data');
+            unsubscribe();
         };
-    }, [socket, cancelAnimations, dispatch, workerRef, waterfallRendererMode, onDomTileFftData]);
+    }, [subscribeToFftData, cancelAnimations, dispatch, waterfallRendererMode, onDomTileFftData]);
 
     // Effect to handle cleanup when streaming stops (from parent handler or local stop)
     useEffect(() => {
@@ -165,6 +159,17 @@ const useWaterfallStream = ({
             cancelAnimations();
         }
     }, [isStreaming, cancelAnimations]);
+
+    const isUnsetSelection = useCallback((value) => {
+        if (value === null || value === undefined) {
+            return true;
+        }
+        if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            return normalized === '' || normalized === 'none';
+        }
+        return false;
+    }, []);
 
     const startStreaming = useCallback(() => {
         if (!isStreaming) {
@@ -174,6 +179,21 @@ const useWaterfallStream = ({
                 return;
             }
 
+            const validationErrors = {
+                gain: isUnsetSelection(gain),
+                sampleRate: isUnsetSelection(sampleRate),
+                antenna: isUnsetSelection(selectedAntenna),
+            };
+            if (validationErrors.gain || validationErrors.sampleRate || validationErrors.antenna) {
+                dispatch(setStartStreamValidationErrors(validationErrors));
+                if (!expandedPanels.includes('sdr')) {
+                    dispatch(setExpandedPanels([...expandedPanels, 'sdr']));
+                }
+                toast.error('Select gain, sample rate, and antenna before starting stream');
+                return;
+            }
+
+            dispatch(clearStartStreamValidationErrors());
             dispatch(setStartStreamingLoading(true));
             dispatch(setErrorMessage(''));
 
@@ -205,6 +225,8 @@ const useWaterfallStream = ({
                 tunerAgc,
                 rtlAgc,
                 fftWindow,
+                fftOverlapPercent,
+                fftOverlapDepth,
                 antenna: selectedAntenna,
                 offsetFrequency: selectedOffsetValue,
                 soapyAgc,
@@ -213,16 +235,10 @@ const useWaterfallStream = ({
             }, (response) => {
                 if (response['success']) {
                     socket.emit('sdr_data', 'start-streaming', { selectedSDRId });
-                    if (waterfallRendererMode === 'worker' && workerRef.current) {
-                        workerRef.current.postMessage({
-                            cmd: 'start',
-                            data: { fps: targetFPSRef.current }
-                        });
-                    }
                 }
             });
         }
-    }, [isStreaming, dispatch, socket, selectedSDRId, centerFrequency, sampleRate, gain, fftSize, biasT, tunerAgc, rtlAgc, fftWindow, selectedAntenna, selectedOffsetValue, soapyAgc, fftAveraging, workerRef, targetFPSRef, getAudioState, initializeAudio, waterfallRendererMode]);
+    }, [isStreaming, dispatch, socket, selectedSDRId, centerFrequency, sampleRate, gain, fftSize, biasT, tunerAgc, rtlAgc, fftWindow, fftOverlapPercent, fftOverlapDepth, selectedAntenna, selectedOffsetValue, soapyAgc, fftAveraging, getAudioState, initializeAudio, isUnsetSelection, expandedPanels]);
 
     const stopStreaming = useCallback(async () => {
         if (isStreaming) {
@@ -260,9 +276,8 @@ const useWaterfallStream = ({
         const noSDRSelected = selectedSDRId === 'none';
         const isSigmfPlayback = selectedSDRId === 'sigmf-playback';
         const isLoadingParameters = gettingSDRParameters;
-        const missingRequiredParameters = !sampleRate || gain === null || gain === undefined || sampleRate === 'none' || gain === 'none' || selectedAntenna === 'none';
-        return isStreamingActive || noSDRSelected || isSigmfPlayback || isLoadingParameters || missingRequiredParameters;
-    }, [isStreaming, selectedSDRId, gettingSDRParameters, sampleRate, gain, selectedAntenna]);
+        return isStreamingActive || noSDRSelected || isSigmfPlayback || isLoadingParameters;
+    }, [isStreaming, selectedSDRId, gettingSDRParameters]);
 
     return { startStreaming, stopStreaming, playButtonEnabledOrNot };
 };

@@ -3,27 +3,61 @@ import {
     Box,
     Button,
     Chip,
-    Divider,
+    CircularProgress,
     Dialog,
     DialogActions,
     DialogContent,
     DialogContentText,
     DialogTitle,
-    FormControl,
-    InputLabel,
-    MenuItem,
-    Select,
+    Divider,
     Stack,
     Typography,
 } from '@mui/material';
-import SettingsInputAntennaIcon from '@mui/icons-material/SettingsInputAntenna';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useSelector } from 'react-redux';
 import { Trans, useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
 import { DEFAULT_TRACKER_ID, resolveTrackerId } from './tracking-constants.js';
 
-const normalizeRotatorId = (candidate) => resolveTrackerId(candidate, '');
+const RETARGET_ACTIONS = Object.freeze({
+    CURRENT_SLOT: 'retarget_current_slot',
+    NEW_SLOT: 'create_new_slot',
+});
+const HARDWARE_STATUS_DEFAULT_LABELS = Object.freeze({
+    unassigned: 'Unassigned',
+    disconnected: 'Disconnected',
+    tracking: 'Tracking',
+    slewing: 'Slewing',
+    parked: 'Parked',
+    stopped: 'Stopped',
+    connected: 'Connected',
+    unknown: 'Unknown',
+});
+const resolveStatusLedColor = (theme, statusColor = 'default') => {
+    switch (statusColor) {
+    case 'success':
+        return theme.palette.success.main;
+    case 'warning':
+        return theme.palette.warning.main;
+    case 'error':
+        return theme.palette.error.main;
+    case 'info':
+        return theme.palette.info.main;
+    default:
+        return theme.palette.grey[500];
+    }
+};
+
+const normalizeHardwareId = (candidate) => {
+    if (typeof candidate === 'string') {
+        const normalized = candidate.trim();
+        return normalized && normalized !== 'none' ? normalized : 'none';
+    }
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+        return String(candidate);
+    }
+    return 'none';
+};
+const normalizeRotatorId = normalizeHardwareId;
+const normalizeRigId = normalizeHardwareId;
 const TARGET_SLOT_ID_PATTERN = /^target-(\d+)$/;
 
 const parseTargetSlotNumber = (trackerId = '') => {
@@ -38,10 +72,9 @@ const parseTargetSlotNumber = (trackerId = '') => {
 const deriveNextTrackerSlotId = (rows = []) => {
     const usedTargetNumbers = new Set();
     rows.forEach((row) => {
-        const trackerId = resolveTrackerId(row?.trackerId, DEFAULT_TRACKER_ID);
-        const parsedNumber = parseTargetSlotNumber(trackerId);
-        if (parsedNumber !== null) {
-            usedTargetNumbers.add(parsedNumber);
+        const targetNumber = parseTargetSlotNumber(row?.trackerId);
+        if (targetNumber !== null) {
+            usedTargetNumbers.add(targetNumber);
         }
     });
     let nextTargetNumber = 1;
@@ -53,53 +86,54 @@ const deriveNextTrackerSlotId = (rows = []) => {
 
 export function useTargetRotatorSelectionDialog() {
     const { t } = useTranslation('target');
-    const navigate = useNavigate();
     const rotators = useSelector((state) => state.rotators?.rotators || []);
+    const rigs = useSelector((state) => state.rigs?.rigs || []);
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
+    const activeTrackerId = useSelector((state) => state.targetSatTrack?.trackerId || DEFAULT_TRACKER_ID);
     const selectedRotator = useSelector((state) => state.targetSatTrack?.selectedRotator || 'none');
+    const selectedRadioRig = useSelector((state) => state.targetSatTrack?.selectedRadioRig || 'none');
     const trackerViews = useSelector((state) => state.targetSatTrack?.trackerViews || {});
 
     const [open, setOpen] = React.useState(false);
     const [pendingSatelliteName, setPendingSatelliteName] = React.useState('');
-    const [pendingRotatorId, setPendingRotatorId] = React.useState('');
+    const [pendingErrorMessage, setPendingErrorMessage] = React.useState('');
+    const [submitting, setSubmitting] = React.useState(false);
+    const [pendingAction, setPendingAction] = React.useState(RETARGET_ACTIONS.CURRENT_SLOT);
+    const [pendingAssignment, setPendingAssignment] = React.useState({
+        trackerId: DEFAULT_TRACKER_ID,
+        rotatorId: 'none',
+        rigId: 'none',
+    });
     const resolverRef = React.useRef(null);
+    const submitHandlerRef = React.useRef(null);
 
     const closeWithResult = React.useCallback((result) => {
         const resolve = resolverRef.current;
         resolverRef.current = null;
+        submitHandlerRef.current = null;
         setOpen(false);
         setPendingSatelliteName('');
-        setPendingRotatorId('');
+        setPendingErrorMessage('');
+        setSubmitting(false);
+        setPendingAction(RETARGET_ACTIONS.CURRENT_SLOT);
+        setPendingAssignment({ trackerId: DEFAULT_TRACKER_ID, rotatorId: 'none', rigId: 'none' });
         if (typeof resolve === 'function') {
             resolve(result);
         }
     }, []);
 
-    const requestRotatorForTarget = React.useCallback((satelliteName = '') => {
-        return new Promise((resolve) => {
-            const initialRotatorId = normalizeRotatorId(selectedRotator);
-            resolverRef.current = resolve;
-            setPendingSatelliteName(satelliteName || '');
-            setPendingRotatorId(initialRotatorId);
-            setOpen(true);
-        });
-    }, [selectedRotator]);
-
-    const canConfirm = pendingRotatorId !== '';
-    const hasRotators = rotators.length > 0;
-    const satelliteLabel = pendingSatelliteName || t('target_rotator_dialog.this_satellite', { defaultValue: 'this satellite' });
-    const rotatorNameById = React.useMemo(() => {
-        const mapping = {};
-        rotators.forEach((rotator) => {
-            mapping[String(rotator.id)] = rotator.name;
-        });
-        return mapping;
-    }, [rotators]);
-
     const usageRows = React.useMemo(() => {
+        const rotatorNameById = rotators.reduce((mapping, rotator) => {
+            mapping[String(rotator.id)] = rotator.name;
+            return mapping;
+        }, {});
+        const rigNameById = rigs.reduce((mapping, rig) => {
+            mapping[String(rig.id)] = rig.name;
+            return mapping;
+        }, {});
         return trackerInstances
             .map((instance) => {
-                const trackerId = String(instance?.tracker_id || '');
+                const trackerId = resolveTrackerId(instance?.tracker_id, DEFAULT_TRACKER_ID);
                 if (!trackerId) {
                     return null;
                 }
@@ -108,51 +142,90 @@ export function useTargetRotatorSelectionDialog() {
                     return null;
                 }
                 const trackingState = instance?.tracking_state || {};
-                const rotatorId = String(instance?.rotator_id || trackingState?.rotator_id || 'none');
-                const noradId = trackingState?.norad_id ?? null;
-                const groupId = trackingState?.group_id ?? null;
                 const trackerView = trackerViews?.[trackerId] || {};
                 const viewRotatorData = trackerView?.rotatorData || {};
+                const viewRigData = trackerView?.rigData || {};
                 const viewTrackingState = trackerView?.trackingState || trackingState || {};
+                const satName = String(trackerView?.satelliteData?.details?.name || '').trim() || null;
+                const rotatorId = normalizeRotatorId(
+                    trackerView?.selectedRotator
+                    ?? instance?.rotator_id
+                    ?? trackingState?.rotator_id
+                    ?? 'none'
+                );
+                const rigId = normalizeRigId(
+                    trackerView?.selectedRadioRig
+                    ?? instance?.rig_id
+                    ?? trackingState?.rig_id
+                    ?? 'none'
+                );
 
-                let statusLabel = 'unknown';
-                let statusColor = 'default';
-                if (!rotatorId || rotatorId === 'none') {
-                    statusLabel = 'unassigned';
-                    statusColor = 'default';
+                let rotatorStatusLabel = 'unknown';
+                let rotatorStatusColor = 'default';
+                if (rotatorId === 'none') {
+                    rotatorStatusLabel = 'unassigned';
+                    rotatorStatusColor = 'default';
                 } else if (
                     viewRotatorData?.connected === false
                     || viewTrackingState?.rotator_state === 'disconnected'
                 ) {
-                    statusLabel = 'disconnected';
-                    statusColor = 'error';
+                    rotatorStatusLabel = 'disconnected';
+                    rotatorStatusColor = 'error';
                 } else if (
                     viewRotatorData?.tracking === true
                     || viewTrackingState?.rotator_state === 'tracking'
                 ) {
-                    statusLabel = 'tracking';
-                    statusColor = 'success';
+                    rotatorStatusLabel = 'tracking';
+                    rotatorStatusColor = 'success';
                 } else if (viewRotatorData?.slewing === true) {
-                    statusLabel = 'slewing';
-                    statusColor = 'warning';
+                    rotatorStatusLabel = 'slewing';
+                    rotatorStatusColor = 'warning';
                 } else if (
                     viewRotatorData?.parked === true
                     || viewTrackingState?.rotator_state === 'parked'
                 ) {
-                    statusLabel = 'parked';
-                    statusColor = 'warning';
+                    rotatorStatusLabel = 'parked';
+                    rotatorStatusColor = 'warning';
                 } else if (
                     viewRotatorData?.stopped === true
                     || viewTrackingState?.rotator_state === 'stopped'
                 ) {
-                    statusLabel = 'stopped';
-                    statusColor = 'info';
+                    rotatorStatusLabel = 'stopped';
+                    rotatorStatusColor = 'info';
                 } else if (
                     viewRotatorData?.connected === true
                     || viewTrackingState?.rotator_state === 'connected'
                 ) {
-                    statusLabel = 'connected';
-                    statusColor = 'success';
+                    rotatorStatusLabel = 'connected';
+                    rotatorStatusColor = 'success';
+                }
+
+                let rigStatusLabel = 'unknown';
+                let rigStatusColor = 'default';
+                if (rigId === 'none') {
+                    rigStatusLabel = 'unassigned';
+                    rigStatusColor = 'default';
+                } else if (
+                    viewRigData?.connected === false
+                    || viewTrackingState?.rig_state === 'disconnected'
+                ) {
+                    rigStatusLabel = 'disconnected';
+                    rigStatusColor = 'error';
+                } else if (
+                    viewRigData?.tracking === true
+                    || viewTrackingState?.rig_state === 'tracking'
+                ) {
+                    rigStatusLabel = 'tracking';
+                    rigStatusColor = 'success';
+                } else if (viewTrackingState?.rig_state === 'stopped') {
+                    rigStatusLabel = 'stopped';
+                    rigStatusColor = 'info';
+                } else if (
+                    viewRigData?.connected === true
+                    || viewTrackingState?.rig_state === 'connected'
+                ) {
+                    rigStatusLabel = 'connected';
+                    rigStatusColor = 'success';
                 }
 
                 return {
@@ -160,56 +233,73 @@ export function useTargetRotatorSelectionDialog() {
                     targetNumber,
                     rotatorId,
                     rotatorName: rotatorNameById[rotatorId] || null,
-                    noradId,
-                    groupId,
-                    isAlive: Boolean(instance?.is_alive),
-                    statusLabel,
-                    statusColor,
+                    rigId,
+                    rigName: rigNameById[rigId] || null,
+                    noradId: trackingState?.norad_id ?? null,
+                    satName,
+                    rotatorStatusLabel,
+                    rotatorStatusColor,
+                    rigStatusLabel,
+                    rigStatusColor,
                 };
             })
             .filter(Boolean)
             .sort((a, b) => a.targetNumber - b.targetNumber);
-    }, [trackerInstances, rotatorNameById, trackerViews]);
-    const usageByRotatorId = React.useMemo(() => {
-        const mapping = {};
-        usageRows.forEach((row) => {
-            if (!row.rotatorId || row.rotatorId === 'none') {
-                return;
-            }
-            if (!mapping[row.rotatorId]) {
-                mapping[row.rotatorId] = [];
-            }
-            mapping[row.rotatorId].push(row);
+    }, [rigs, rotators, trackerInstances, trackerViews]);
+
+    const resolveAssignmentForRetarget = React.useCallback(() => {
+        const normalizedActiveTrackerId = resolveTrackerId(activeTrackerId, DEFAULT_TRACKER_ID);
+        const preferredRow = usageRows.find((row) => row.trackerId === normalizedActiveTrackerId) || usageRows[0] || null;
+        if (preferredRow) {
+            return {
+                trackerId: preferredRow.trackerId,
+                rotatorId: preferredRow.rotatorId,
+                rigId: preferredRow.rigId,
+            };
+        }
+        return {
+            trackerId: normalizedActiveTrackerId || DEFAULT_TRACKER_ID,
+            rotatorId: normalizeRotatorId(selectedRotator),
+            rigId: normalizeRigId(selectedRadioRig),
+        };
+    }, [activeTrackerId, selectedRadioRig, selectedRotator, usageRows]);
+
+    const requestRotatorForTarget = React.useCallback((satelliteName = '', options = {}) => {
+        return new Promise((resolve) => {
+            resolverRef.current = resolve;
+            submitHandlerRef.current = typeof options?.onSubmit === 'function' ? options.onSubmit : null;
+            setPendingSatelliteName(satelliteName || '');
+            setPendingErrorMessage(String(options?.errorMessage || '').trim());
+            setSubmitting(false);
+            setPendingAction(RETARGET_ACTIONS.CURRENT_SLOT);
+            setPendingAssignment(resolveAssignmentForRetarget());
+            setOpen(true);
         });
-        return mapping;
-    }, [usageRows]);
+    }, [resolveAssignmentForRetarget]);
 
-    const resolveTrackerIdForRotator = React.useCallback((rotatorId) => {
-        const normalizedRotatorId = normalizeRotatorId(rotatorId);
-        if (!normalizedRotatorId) {
-            return DEFAULT_TRACKER_ID;
-        }
-        const rotatorUsage = usageByRotatorId[normalizedRotatorId] || [];
-        if (rotatorUsage.length > 0) {
-            return resolveTrackerId(rotatorUsage[0]?.trackerId, DEFAULT_TRACKER_ID);
-        }
-        const unassignedTracker = usageRows.find((row) => !row.rotatorId || row.rotatorId === 'none');
-        if (unassignedTracker?.trackerId) {
-            return resolveTrackerId(unassignedTracker.trackerId, DEFAULT_TRACKER_ID);
-        }
-        // If no existing assignment and no idle slot exists, allocate next slot id.
-        return deriveNextTrackerSlotId(usageRows);
-    }, [usageByRotatorId, usageRows]);
-
-    const handleOpenRotatorSetup = React.useCallback(() => {
-        closeWithResult(null);
-        navigate('/hardware/rotator');
-    }, [closeWithResult, navigate]);
+    const nextTargetSlotId = React.useMemo(() => deriveNextTrackerSlotId(usageRows), [usageRows]);
+    const canConfirm = pendingAction === RETARGET_ACTIONS.NEW_SLOT
+        ? Boolean(nextTargetSlotId)
+        : Boolean(resolveTrackerId(pendingAssignment?.trackerId, DEFAULT_TRACKER_ID));
+    const satelliteLabel = pendingSatelliteName || t('target_retarget_dialog.this_satellite', { defaultValue: 'this satellite' });
+    const newTargetLabel = t(
+        'target_retarget_dialog.new_target_slot',
+        { defaultValue: `New target (${nextTargetSlotId})`, slot: nextTargetSlotId },
+    );
+    const selectedTrackerId = resolveTrackerId(pendingAssignment?.trackerId, DEFAULT_TRACKER_ID);
+    const getStatusLabel = React.useCallback((status) => {
+        const key = String(status || 'unknown').toLowerCase();
+        const defaultLabel = HARDWARE_STATUS_DEFAULT_LABELS[key] || HARDWARE_STATUS_DEFAULT_LABELS.unknown;
+        return t(`target_retarget_dialog.status_${key}`, { defaultValue: defaultLabel });
+    }, [t]);
 
     const dialog = (
         <Dialog
             open={open}
-            onClose={() => closeWithResult(null)}
+            onClose={() => {
+                if (submitting) return;
+                closeWithResult(null);
+            }}
             fullWidth
             maxWidth="sm"
             PaperProps={{
@@ -222,223 +312,461 @@ export function useTargetRotatorSelectionDialog() {
         >
             <DialogTitle
                 sx={{
-                    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
-                    borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
-                    fontSize: '1.25rem',
+                    bgcolor: 'background.paper',
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                    fontSize: '1.2rem',
                     fontWeight: 'bold',
-                    py: 2.5,
+                    py: 2.2,
                 }}
             >
-                {t('target_rotator_dialog.title', { defaultValue: 'Select Rotator' })}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
+                            {t('target_retarget_dialog.title', { defaultValue: 'Retarget Satellite' })}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.2 }}>
+                            {t('target_retarget_dialog.subtitle', { defaultValue: 'Choose to retarget the active slot or create a new one' })}
+                        </Typography>
+                    </Box>
+                </Box>
             </DialogTitle>
-            <DialogContent sx={{ bgcolor: 'background.paper', px: 3, py: 3 }}>
-                <Box sx={{ pt: 1.5 }}>
-                <DialogContentText sx={{ mb: 2, mt: 1 }}>
-                    {hasRotators ? (
-                        <Trans
-                            ns="target"
-                            i18nKey="target_rotator_dialog.description"
-                            defaults="Choose the rotator that will handle tracking for <satellite>{{satellite}}</satellite>."
-                            values={{ satellite: satelliteLabel }}
-                            components={{ satellite: <strong /> }}
-                        />
-                    ) : (
-                        <Trans
-                            ns="target"
-                            i18nKey="target_rotator_dialog.no_rotators_intro"
-                            defaults="To start tracking <satellite>{{satellite}}</satellite>, add your first rotator in Hardware settings."
-                            values={{ satellite: satelliteLabel }}
-                            components={{ satellite: <strong /> }}
-                        />
-                    )}
-                </DialogContentText>
-                {hasRotators ? (
-                    <>
-                        <FormControl fullWidth size="small">
-                            <InputLabel id="target-rotator-select-label">
-                                {t('target_rotator_dialog.rotator_label', { defaultValue: 'Rotator' })}
-                            </InputLabel>
-                            <Select
-                                labelId="target-rotator-select-label"
-                                value={pendingRotatorId}
-                                label={t('target_rotator_dialog.rotator_label', { defaultValue: 'Rotator' })}
-                                onChange={(event) => setPendingRotatorId(normalizeRotatorId(event.target.value))}
-                            >
-                                {rotators.map((rotator) => {
-                                    const rotatorUsage = usageByRotatorId[String(rotator.id)] || [];
-                                    const usageSummary = rotatorUsage.length
-                                        ? rotatorUsage
-                                            .map((row) => `T${row.targetNumber}${row.noradId ? `→${row.noradId}` : ''}`)
-                                            .join(', ')
-                                        : 'unassigned';
-                                    const statusSummary = rotatorUsage.length
-                                        ? rotatorUsage
-                                            .map((row) => `T${row.targetNumber}:${row.statusLabel}`)
-                                            .join(' | ')
-                                        : 'available';
-                                    const statusColor = rotatorUsage.length === 1
-                                        ? (rotatorUsage[0].statusColor || 'default')
-                                        : 'default';
-                                    return (
-                                        <MenuItem key={rotator.id} value={rotator.id} sx={{ alignItems: 'flex-start', py: 0.75 }}>
-                                            <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2, width: '100%' }}>
-                                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-                                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                                        {rotator.name}
-                                                    </Typography>
-                                                    <Chip
-                                                        size="small"
-                                                        color={statusColor}
-                                                        variant="outlined"
-                                                        label={statusSummary}
-                                                        sx={{ height: 18, '& .MuiChip-label': { px: 0.7, fontSize: '0.62rem' } }}
-                                                    />
-                                                </Box>
-                                                <Typography variant="caption" color="text.secondary">
-                                                    {`${rotator.host}:${rotator.port} • ${usageSummary}`}
-                                                </Typography>
-                                            </Box>
-                                        </MenuItem>
-                                    );
-                                })}
-                            </Select>
-                        </FormControl>
-                    </>
-                ) : (
+            <DialogContent sx={{ bgcolor: 'background.paper', px: 3, pb: 2.5, pt: 5 }}>
+                <Box sx={{ display: 'grid', gap: 1.25, pt: 2 }}>
                     <Box
                         sx={{
-                            mt: 1,
-                            border: '1px dashed',
-                            borderColor: 'border.main',
-                            borderRadius: 2,
-                            px: 2,
-                            py: 2.2,
-                            bgcolor: 'overlay.light',
-                            textAlign: 'center',
+                            p: 1.25,
+                            borderRadius: 1.5,
+                            background: (theme) => `linear-gradient(135deg, ${theme.palette.primary.main}1A 0%, ${theme.palette.primary.main}08 100%)`,
                         }}
                     >
-                        <SettingsInputAntennaIcon sx={{ fontSize: 32, color: 'warning.main', mb: 1 }} />
-                        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
-                            {t('target_rotator_dialog.no_rotators_title', { defaultValue: 'No rotators are set up yet' })}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                            {t('target_rotator_dialog.no_rotators', {
-                                defaultValue: 'Add a rotator in Hardware > Rotators, then come back to assign it to this target.',
-                            })}
-                        </Typography>
-                        <Stack spacing={0.6} sx={{ alignItems: 'flex-start', maxWidth: 360, mx: 'auto', textAlign: 'left' }}>
-                            <Typography variant="caption" color="text.secondary">
-                                {t('target_rotator_dialog.no_rotators_step_1', { defaultValue: '1. Open Hardware > Rotators' })}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                                {t('target_rotator_dialog.no_rotators_step_2', { defaultValue: '2. Add and save your rotator connection' })}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                                {t('target_rotator_dialog.no_rotators_step_3', { defaultValue: '3. Return here and select it for tracking' })}
-                            </Typography>
-                        </Stack>
-                    </Box>
-                )}
-                {hasRotators && usageRows.length > 0 && (
-                    <Box sx={{ mt: 2 }}>
-                        <Divider sx={{ mb: 1.5 }} />
-                        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>
-                            {t('target_rotator_dialog.usage_overview', { defaultValue: 'Current Usage' })}
-                        </Typography>
-                        <Stack spacing={0.7}>
-                            {usageRows.map((row) => {
-                                const isSelectedRotator = pendingRotatorId && row.rotatorId === pendingRotatorId;
+                        <DialogContentText sx={{ mt: 0.4, mb: 1, color: 'text.secondary' }}>
+                            <Trans
+                                ns="target"
+                                i18nKey="target_retarget_dialog.description"
+                                defaults="Choose which slot should track <satellite>{{satellite}}</satellite>."
+                                values={{ satellite: satelliteLabel }}
+                                components={{ satellite: <strong /> }}
+                            />
+                        </DialogContentText>
+                        <Stack spacing={1}>
+                            {usageRows.length > 0 ? usageRows.map((row) => {
+                                const isSelected = pendingAction === RETARGET_ACTIONS.CURRENT_SLOT
+                                    && row.trackerId === selectedTrackerId;
+                                const slotTitle = t(
+                                    'target_retarget_dialog.option_slot_title',
+                                    { defaultValue: `Retarget Target ${row.targetNumber}`, number: row.targetNumber },
+                                );
+                                const slotLabel = row.trackerId ? `Slot ${row.trackerId}` : 'Slot';
+                                const rotatorLabel = row.rotatorId !== 'none'
+                                    ? (row.rotatorName || row.rotatorId)
+                                    : t('target_retarget_dialog.no_rotator', { defaultValue: 'No rotator control' });
                                 return (
-                                    <Box
+                                    <Button
                                         key={row.trackerId}
+                                        variant="outlined"
+                                        color="inherit"
+                                        onClick={() => {
+                                            if (submitting) return;
+                                            setPendingAction(RETARGET_ACTIONS.CURRENT_SLOT);
+                                            setPendingAssignment({
+                                                trackerId: row.trackerId,
+                                                rotatorId: row.rotatorId,
+                                                rigId: row.rigId,
+                                            });
+                                            if (pendingErrorMessage) {
+                                                setPendingErrorMessage('');
+                                            }
+                                        }}
+                                        fullWidth
+                                        disabled={submitting}
                                         sx={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'space-between',
-                                            px: 1,
-                                            py: 0.6,
-                                            borderRadius: 1,
-                                            bgcolor: isSelectedRotator ? 'action.selected' : 'action.hover',
+                                            justifyContent: 'flex-start',
+                                            textTransform: 'none',
+                                            alignItems: 'stretch',
+                                            px: 1.15,
+                                            py: 0.9,
+                                            minHeight: 88,
+                                            borderRadius: 1.6,
+                                            borderWidth: 1.5,
+                                            color: 'text.primary',
+                                            borderColor: (theme) => isSelected
+                                                ? theme.palette.primary.main
+                                                : (theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400'),
+                                            bgcolor: (theme) => isSelected
+                                                ? (theme.palette.mode === 'dark' ? 'rgba(25, 118, 210, 0.18)' : 'rgba(25, 118, 210, 0.08)')
+                                                : 'transparent',
+                                            boxShadow: (theme) => isSelected
+                                                ? (theme.palette.mode === 'dark'
+                                                    ? '0 6px 18px rgba(0, 0, 0, 0.45)'
+                                                    : '0 6px 16px rgba(15, 23, 42, 0.16)')
+                                                : (theme.palette.mode === 'dark'
+                                                    ? '0 1px 4px rgba(0, 0, 0, 0.35)'
+                                                    : '0 1px 3px rgba(15, 23, 42, 0.10)'),
+                                            transition: 'border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease, transform 120ms ease',
+                                            '&:hover': {
+                                                borderColor: (theme) => isSelected
+                                                    ? theme.palette.primary.main
+                                                    : (theme.palette.mode === 'dark' ? 'grey.600' : 'grey.500'),
+                                                bgcolor: (theme) => isSelected
+                                                    ? (theme.palette.mode === 'dark' ? 'rgba(25, 118, 210, 0.24)' : 'rgba(25, 118, 210, 0.12)')
+                                                    : 'transparent',
+                                            },
+                                            '&:active': { transform: 'translateY(1px)' },
                                         }}
                                     >
-                                        <Typography variant="body2" sx={{ minWidth: 72, fontWeight: 700 }}>
-                                            {`Target ${row.targetNumber}`}
-                                        </Typography>
+                                        <Box sx={{ display: 'grid', gap: 0.45, width: '100%', minWidth: 0 }}>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                                                <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                                                    {slotTitle}
+                                                </Typography>
+                                                <Chip
+                                                    size="small"
+                                                    variant="outlined"
+                                                    label={slotLabel}
+                                                    sx={{ height: 20, '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem', fontFamily: 'monospace' } }}
+                                                />
+                                            </Box>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minWidth: 0 }}>
+                                                <Stack direction="row" spacing={0.6} sx={{ alignItems: 'center', minWidth: 0, flexWrap: 'wrap' }}>
+                                                    {row.satName ? (
+                                                        <Typography
+                                                            variant="caption"
+                                                            sx={{
+                                                                minWidth: 0,
+                                                                maxWidth: 220,
+                                                                whiteSpace: 'nowrap',
+                                                                overflow: 'hidden',
+                                                                textOverflow: 'ellipsis',
+                                                                color: 'text.secondary',
+                                                            }}
+                                                            title={row.satName}
+                                                        >
+                                                            {row.satName}
+                                                        </Typography>
+                                                    ) : (
+                                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                            {t('target_retarget_dialog.no_target', { defaultValue: 'No target selected' })}
+                                                        </Typography>
+                                                    )}
+                                                    <Chip
+                                                        size="small"
+                                                        variant="outlined"
+                                                        color={row.noradId ? 'success' : 'default'}
+                                                        label={row.noradId ? `SAT ${row.noradId}` : 'No target'}
+                                                        sx={{ height: 20, '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem' } }}
+                                                    />
+                                                </Stack>
+                                                <Stack
+                                                    direction="row"
+                                                    spacing={0.6}
+                                                    sx={{ flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', ml: 'auto', flexShrink: 0 }}
+                                                >
+                                                    {row.rotatorId !== 'none' ? (
+                                                        <Chip
+                                                            size="small"
+                                                            variant="outlined"
+                                                            title={`${row.rotatorName || row.rotatorId} (${getStatusLabel(row.rotatorStatusLabel)})`}
+                                                            label={(
+                                                                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.65, minWidth: 0 }}>
+                                                                    <Box
+                                                                        component="span"
+                                                                        sx={{
+                                                                            width: 7.5,
+                                                                            height: 7.5,
+                                                                            borderRadius: '50%',
+                                                                            flexShrink: 0,
+                                                                            bgcolor: (theme) => resolveStatusLedColor(theme, row.rotatorStatusColor),
+                                                                            boxShadow: (theme) => `0 0 0 1px ${theme.palette.background.paper}, 0 0 6px ${resolveStatusLedColor(theme, row.rotatorStatusColor)}`,
+                                                                        }}
+                                                                    />
+                                                                    <Box component="span">{row.rotatorName || row.rotatorId}</Box>
+                                                                </Box>
+                                                            )}
+                                                            sx={{
+                                                                height: 20,
+                                                                borderColor: 'divider',
+                                                                '& .MuiChip-label': {
+                                                                    px: 0.8,
+                                                                    fontSize: '0.68rem',
+                                                                },
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <Chip
+                                                            size="small"
+                                                            variant="outlined"
+                                                            label={rotatorLabel}
+                                                            sx={{ height: 20, '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem' } }}
+                                                        />
+                                                    )}
+                                                    {row.rigId !== 'none' ? (
+                                                        <Chip
+                                                            size="small"
+                                                            variant="outlined"
+                                                            title={`${row.rigName || row.rigId} (${getStatusLabel(row.rigStatusLabel)})`}
+                                                            label={(
+                                                                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.65, minWidth: 0 }}>
+                                                                    <Box
+                                                                        component="span"
+                                                                        sx={{
+                                                                            width: 7.5,
+                                                                            height: 7.5,
+                                                                            borderRadius: '50%',
+                                                                            flexShrink: 0,
+                                                                            bgcolor: (theme) => resolveStatusLedColor(theme, row.rigStatusColor),
+                                                                            boxShadow: (theme) => `0 0 0 1px ${theme.palette.background.paper}, 0 0 6px ${resolveStatusLedColor(theme, row.rigStatusColor)}`,
+                                                                        }}
+                                                                    />
+                                                                    <Box component="span">{row.rigName || row.rigId}</Box>
+                                                                </Box>
+                                                            )}
+                                                            sx={{
+                                                                height: 20,
+                                                                borderColor: 'divider',
+                                                                '& .MuiChip-label': {
+                                                                    px: 0.8,
+                                                                    fontSize: '0.68rem',
+                                                                },
+                                                            }}
+                                                        />
+                                                    ) : null}
+                                                </Stack>
+                                            </Box>
+                                        </Box>
+                                    </Button>
+                                );
+                            }) : (
+                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                    {t('target_retarget_dialog.no_slots', { defaultValue: 'No active target slots available to retarget.' })}
+                                </Typography>
+                            )}
+                        </Stack>
+                    </Box>
+
+                    <Divider
+                        sx={{
+                            mx: 0.25,
+                            color: 'text.secondary',
+                            fontWeight: 700,
+                            letterSpacing: 0.6,
+                            textTransform: 'uppercase',
+                            '&::before, &::after': {
+                                borderColor: 'divider',
+                            },
+                        }}
+                    >
+                        {t('target_retarget_dialog.or', { defaultValue: 'or' })}
+                    </Divider>
+
+                    <Box
+                        sx={{
+                            p: 1.25,
+                            borderRadius: 1.5,
+                            background: (theme) => `linear-gradient(135deg, ${theme.palette.secondary.main}1A 0%, ${theme.palette.secondary.main}08 100%)`,
+                        }}
+                    >
+                        <Stack spacing={1}>
+                            <Button
+                                variant="outlined"
+                                color="inherit"
+                                onClick={() => {
+                                    if (submitting) return;
+                                    setPendingAction(RETARGET_ACTIONS.NEW_SLOT);
+                                    if (pendingErrorMessage) {
+                                        setPendingErrorMessage('');
+                                    }
+                                }}
+                                fullWidth
+                                disabled={submitting}
+                                sx={{
+                                    justifyContent: 'flex-start',
+                                    textTransform: 'none',
+                                    alignItems: 'stretch',
+                                    px: 1.15,
+                                    py: 0.9,
+                                    minHeight: 88,
+                                    borderRadius: 1.6,
+                                    borderWidth: 2,
+                                    borderStyle: 'dashed',
+                                    color: 'text.primary',
+                                    borderColor: (theme) => pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                                        ? theme.palette.success.main
+                                        : (theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400'),
+                                    bgcolor: (theme) => pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                                        ? (theme.palette.mode === 'dark' ? 'rgba(76, 175, 80, 0.16)' : 'rgba(76, 175, 80, 0.10)')
+                                        : 'transparent',
+                                    boxShadow: (theme) => pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                                        ? (theme.palette.mode === 'dark'
+                                            ? '0 6px 18px rgba(0, 0, 0, 0.45)'
+                                            : '0 6px 16px rgba(16, 185, 129, 0.18)')
+                                        : (theme.palette.mode === 'dark'
+                                            ? '0 1px 4px rgba(0, 0, 0, 0.35)'
+                                            : '0 1px 3px rgba(15, 23, 42, 0.10)'),
+                                    transition: 'border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease, transform 120ms ease',
+                                    '&:hover': {
+                                        borderColor: (theme) => pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                                            ? theme.palette.success.main
+                                            : (theme.palette.mode === 'dark' ? 'grey.600' : 'grey.500'),
+                                        bgcolor: (theme) => pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                                            ? (theme.palette.mode === 'dark' ? 'rgba(76, 175, 80, 0.22)' : 'rgba(76, 175, 80, 0.14)')
+                                            : 'transparent',
+                                        boxShadow: (theme) => pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                                            ? (theme.palette.mode === 'dark'
+                                                ? '0 8px 22px rgba(0, 0, 0, 0.5)'
+                                                : '0 8px 20px rgba(16, 185, 129, 0.2)')
+                                            : (theme.palette.mode === 'dark'
+                                                ? '0 4px 12px rgba(0, 0, 0, 0.42)'
+                                                : '0 4px 10px rgba(15, 23, 42, 0.12)'),
+                                    },
+                                    '&:active': { transform: 'translateY(1px)' },
+                                }}
+                            >
+                                <Box sx={{ display: 'grid', gap: 0.45, width: '100%', minWidth: 0 }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
                                         <Typography
-                                            variant="caption"
+                                            variant="body2"
                                             sx={{
-                                                flex: 1,
-                                                mx: 1,
-                                                whiteSpace: 'nowrap',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
+                                                fontWeight: 800,
+                                                color: pendingAction === RETARGET_ACTIONS.NEW_SLOT ? 'success.main' : 'text.primary',
                                             }}
                                         >
-                                            {row.rotatorId && row.rotatorId !== 'none'
-                                                ? `${row.rotatorName || row.rotatorId} (${row.rotatorId.slice(0, 6)})`
-                                                : 'No rotator'}
+                                            {t('target_retarget_dialog.option_new_title', { defaultValue: 'Create new target slot' })}
                                         </Typography>
                                         <Chip
                                             size="small"
-                                            variant="outlined"
-                                            color={row.noradId ? 'success' : 'default'}
-                                            label={row.noradId ? `SAT ${row.noradId}` : 'No target'}
-                                            sx={{ height: 20, '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem' } }}
+                                            variant={pendingAction === RETARGET_ACTIONS.NEW_SLOT ? 'filled' : 'outlined'}
+                                            color={pendingAction === RETARGET_ACTIONS.NEW_SLOT ? 'success' : 'default'}
+                                            label={`Slot ${nextTargetSlotId}`}
+                                            sx={{ height: 20, '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem', fontFamily: 'monospace' } }}
                                         />
                                     </Box>
-                                );
-                            })}
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minWidth: 0 }}>
+                                        <Typography
+                                            variant="caption"
+                                            sx={{ color: 'text.secondary', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                        >
+                                            {newTargetLabel}
+                                        </Typography>
+                                        <Stack
+                                            direction="row"
+                                            spacing={0.6}
+                                            sx={{ flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', ml: 'auto', flexShrink: 0 }}
+                                        >
+                                            <Chip
+                                                size="small"
+                                                variant="outlined"
+                                                label={t('target_retarget_dialog.no_rotator', { defaultValue: 'No rotator control' })}
+                                                sx={{ height: 20, '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem' } }}
+                                            />
+                                            <Chip
+                                                size="small"
+                                                variant="outlined"
+                                                label={t('target_retarget_dialog.no_rig', { defaultValue: 'No rig control' })}
+                                                sx={{ height: 20, '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem' } }}
+                                            />
+                                        </Stack>
+                                    </Box>
+                                </Box>
+                            </Button>
                         </Stack>
                     </Box>
-                )}
                 </Box>
+                {pendingErrorMessage && (
+                    <Box
+                        sx={{
+                            mt: 0.75,
+                            px: 1.2,
+                            py: 0.9,
+                            borderRadius: 1.2,
+                            border: '1px solid',
+                            borderColor: 'error.main',
+                            bgcolor: 'error.light',
+                        }}
+                    >
+                        <Typography
+                            variant="caption"
+                            sx={{ color: 'error.contrastText', fontWeight: 700, lineHeight: 1.3 }}
+                        >
+                            {pendingErrorMessage}
+                        </Typography>
+                    </Box>
+                )}
             </DialogContent>
             <DialogActions
                 sx={{
                     bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
                     borderTop: (theme) => `1px solid ${theme.palette.divider}`,
                     px: 3,
-                    py: 2.5,
+                    py: 2,
                     gap: 1.5,
                 }}
             >
                 <Button
                     variant="outlined"
+                    disabled={submitting}
                     onClick={() => closeWithResult(null)}
-                    sx={{
-                        borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400',
-                        '&:hover': {
-                            borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.600' : 'grey.500',
-                            bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
-                        },
+                >
+                    {t('target_retarget_dialog.cancel', { defaultValue: 'Cancel' })}
+                </Button>
+                <Button
+                    color="success"
+                    variant="contained"
+                    disabled={!canConfirm || submitting}
+                    startIcon={submitting ? <CircularProgress color="inherit" size={16} /> : null}
+                    onClick={async () => {
+                        if (submitting) return;
+                        const assignment = pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                            ? {
+                                action: RETARGET_ACTIONS.NEW_SLOT,
+                                trackerId: nextTargetSlotId,
+                                rotatorId: 'none',
+                                rigId: 'none',
+                            }
+                            : {
+                                action: RETARGET_ACTIONS.CURRENT_SLOT,
+                                trackerId: resolveTrackerId(pendingAssignment?.trackerId, DEFAULT_TRACKER_ID),
+                                rotatorId: normalizeRotatorId(pendingAssignment?.rotatorId),
+                                rigId: normalizeRigId(pendingAssignment?.rigId),
+                            };
+                        const submitHandler = submitHandlerRef.current;
+                        if (typeof submitHandler !== 'function') {
+                            closeWithResult(assignment);
+                            return;
+                        }
+                        try {
+                            setSubmitting(true);
+                            setPendingErrorMessage('');
+                            const submitResult = await submitHandler(assignment);
+                            if (submitResult?.success === false) {
+                                setPendingErrorMessage(
+                                    String(
+                                        submitResult?.errorMessage
+                                        || t('target_retarget_dialog.submit_failed', { defaultValue: 'Failed to apply target selection.' })
+                                    ),
+                                );
+                                setSubmitting(false);
+                                return;
+                            }
+                            setSubmitting(false);
+                            closeWithResult(assignment);
+                        } catch (error) {
+                            setPendingErrorMessage(
+                                String(
+                                    error?.message
+                                    || t('target_retarget_dialog.submit_failed', { defaultValue: 'Failed to apply target selection.' })
+                                ),
+                            );
+                            setSubmitting(false);
+                        }
                     }}
                 >
-                    {t('target_rotator_dialog.cancel', { defaultValue: 'Cancel' })}
+                    {submitting
+                        ? t('target_retarget_dialog.submitting', { defaultValue: 'Applying...' })
+                        : pendingAction === RETARGET_ACTIONS.NEW_SLOT
+                        ? t('target_retarget_dialog.confirm_create', { defaultValue: 'Create New Target' })
+                        : t('target_retarget_dialog.confirm_retarget', { defaultValue: 'Retarget Selected Slot' })}
                 </Button>
-                {hasRotators ? (
-                    <Button
-                        color="success"
-                        variant="contained"
-                        disabled={!canConfirm}
-                        onClick={() =>
-                            closeWithResult({
-                                rotatorId: pendingRotatorId,
-                                trackerId: resolveTrackerIdForRotator(pendingRotatorId),
-                            })
-                        }
-                    >
-                        {t('target_rotator_dialog.confirm', { defaultValue: 'Set Target' })}
-                    </Button>
-                ) : (
-                    <Button
-                        color="primary"
-                        variant="contained"
-                        onClick={handleOpenRotatorSetup}
-                        startIcon={<OpenInNewIcon />}
-                    >
-                        {t('target_rotator_dialog.open_rotator_setup', { defaultValue: 'Open Rotator Setup' })}
-                    </Button>
-                )}
             </DialogActions>
         </Dialog>
     );

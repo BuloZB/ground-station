@@ -1,6 +1,6 @@
-[![Tests](https://github.com/sgoudelis/ground-station/actions/workflows/tests.yml/badge.svg)](https://github.com/sgoudelis/ground-station/actions/workflows/tests.yml) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Release](https://github.com/sgoudelis/ground-station/actions/workflows/release-from-images.yml/badge.svg?event=push)](https://github.com/sgoudelis/ground-station/actions/workflows/release-from-images.yml)
-
 # Ground Station
+
+[![Tests](https://github.com/sgoudelis/ground-station/actions/workflows/tests.yml/badge.svg)](https://github.com/sgoudelis/ground-station/actions/workflows/tests.yml) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Release](https://github.com/sgoudelis/ground-station/actions/workflows/release-from-images.yml/badge.svg?event=push)](https://github.com/sgoudelis/ground-station/actions/workflows/release-from-images.yml) [![Last Release](https://img.shields.io/github/release-date/sgoudelis/ground-station)](https://github.com/sgoudelis/ground-station/releases/latest) [![Last Commit](https://img.shields.io/github/last-commit/sgoudelis/ground-station)](https://github.com/sgoudelis/ground-station/commits/main)
 
 
 **Ground Station is a full-featured, open-source software solution for satellite tracking and radio communication.** Designed for amateur radio operators, satellite enthusiasts, and researchers, it provides
@@ -19,10 +19,10 @@ This project was built with the help of Claude Code and Codex.
 
 ---
 
-### Satellite Tracking Console
-<img src="frontend/public/ground station - tracking console.png" alt="Satellite tracking console" width="450"/>
+### Multi-Target Tracking Console
+<img src="frontend/public/ground station - tracking console - multitargets - iss.png" alt="Multi-target tracking console focused on ISS" width="450"/>
 
-*Dedicated tracking interface for the targeted satellite showing orbital parameters, pass predictions, and real-time position data*
+*Multi-target tracking console view showing an active ISS target with per-target control and live tracking telemetry*
 
 ---
 
@@ -87,6 +87,7 @@ This project was built with the help of Claude Code and Codex.
 ## Key Features
 
 *   **Real-time Satellite Tracking:** Track hundreds of satellites with high-precision orbital models. TLE data is automatically updated from CelesTrak and SatNOGS.
+*   **Multi-Target Tracking Fleet:** Run multiple target trackers at the same time, each with its own rig/rotator control path, so you can operate several target-hardware chains in parallel.
 *   **Automated Antenna Rotator Control:** Interface with popular antenna rotators to automatically track satellites as they pass overhead.
 *   **Rig Control (Hamlib):** Control Hamlib-compatible rigs with Doppler correction during satellite passes.
 *   **SDR Integration:** Stream and record live radio signals from a wide range of SDR devices, including RTL-SDR, SoapySDR, and UHD/USRP radios.

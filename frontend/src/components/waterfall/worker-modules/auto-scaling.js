@@ -116,9 +116,19 @@ export function autoScaleDbRange(waterfallHistory, preset = 'medium') {
             minDb = filteredValues.reduce((a, b) => Math.min(a, b), filteredValues[0]);
             maxDb = filteredValues.reduce((a, b) => Math.max(a, b), filteredValues[0]);
 
-            // Minimal padding for tight contrast on weak signals
-            minDb = Math.floor(minDb);
-            maxDb = Math.ceil(maxDb);
+            // Weak preset should stay responsive, but not be overly tight.
+            // Keep this only slightly more relaxed than the original behavior.
+            const weakPaddingDb = 1.5;
+            minDb = Math.floor(minDb - weakPaddingDb);
+            maxDb = Math.ceil(maxDb + weakPaddingDb);
+
+            const weakMinSpanDb = 10;
+            const weakSpan = maxDb - minDb;
+            if (weakSpan < weakMinSpanDb) {
+                const mid = (maxDb + minDb) / 2;
+                minDb = Math.floor(mid - weakMinSpanDb / 2);
+                maxDb = Math.ceil(mid + weakMinSpanDb / 2);
+            }
             break;
         }
     }
@@ -134,6 +144,9 @@ export function autoScaleDbRange(waterfallHistory, preset = 'medium') {
             median: median.toFixed(2),
             min: sortedValues[0].toFixed(2),
             max: sortedValues[sortedValues.length - 1].toFixed(2),
+            rangeMin: minDb.toFixed(2),
+            rangeMax: maxDb.toFixed(2),
+            rangeSpan: (maxDb - minDb).toFixed(2),
             samples: allValues.length,
             preset
         }

@@ -69,6 +69,25 @@ import { resolveTabHardwareLedStatus } from "../common/hardware-status.js";
 const TARGET_SLOT_ID_PATTERN = /^target-(\d+)$/;
 const ADD_TARGET_TAB_VALUE = '__add-target__';
 
+const normalizeAssignedResourceId = (value) => {
+    const normalized = String(value ?? '').trim();
+    if (!normalized || normalized.toLowerCase() === 'none') {
+        return '';
+    }
+    return normalized;
+};
+
+const resolveObservationTrackerId = (observation) => {
+    const resolved = String(
+        observation?.tracker_id
+        || observation?.runtime_tracker_id
+        || observation?.active_tracker_id
+        || observation?.id
+        || ''
+    ).trim();
+    return resolved;
+};
+
 const parseTargetSlotNumber = (trackerId = '') => {
     const match = String(trackerId || '').match(TARGET_SLOT_ID_PATTERN);
     if (!match) {
@@ -232,8 +251,6 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
     const {
         trackingState,
         trackerId,
-        selectedRadioRig,
-        selectedTransmitter,
     } = useSelector((state) => state.targetSatTrack);
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const schedulerObservations = useSelector((state) => state.scheduler?.observations || []);
@@ -266,7 +283,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         const running = schedulerObservations.filter((obs) => obs?.status === 'running');
         return new Set(
             running
-                .map((obs) => String(obs?.id || '').trim())
+                .map((obs) => resolveObservationTrackerId(obs))
                 .filter((value) => value.length > 0)
         );
     }, [schedulerObservations]);
@@ -281,6 +298,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
 
     const emitTrackingErrorToast = useCallback((error, fallbackMessage, options = {}) => {
         const suppressLimitToast = Boolean(options?.suppressLimitToast);
+        const suppressToast = Boolean(options?.suppressToast);
         const errorCode = String(error?.error || error?.code || '').trim();
         let message = '';
         if (errorCode === 'tracker_slot_limit_reached') {
@@ -290,14 +308,16 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
             } else {
                 message = 'Target limit reached. Delete an existing target first.';
             }
-            if (!suppressLimitToast) {
+            if (!suppressLimitToast && !suppressToast) {
                 toast.error(message);
             }
             return message;
         } else {
             message = error?.message || String(error) || fallbackMessage;
         }
-        toast.error(message);
+        if (!suppressToast) {
+            toast.error(message);
+        }
         return message;
     }, []);
 
@@ -437,19 +457,19 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         const normalizedRotatorId = createSelectedRotatorId || 'none';
         const nextTransmitters = getTransmittersFromSatellite(createSelectedSatellite);
 
+        // New targets must always start disconnected, regardless of the currently active target state.
         const payload = {
-            ...trackingState,
             tracker_id: trackerSlotId,
             norad_id: createSelectedSatellite.norad_id,
             group_id: selectedGroupId,
             rig_id: normalizedRigId,
             rotator_id: normalizedRotatorId,
             transmitter_id: 'none',
-            rig_state: trackingState?.rig_state || 'disconnected',
-            rotator_state: trackingState?.rotator_state || 'disconnected',
-            rig_vfo: trackingState?.rig_vfo || 'none',
-            vfo1: trackingState?.vfo1 || 'uplink',
-            vfo2: trackingState?.vfo2 || 'downlink',
+            rig_state: 'disconnected',
+            rotator_state: 'disconnected',
+            rig_vfo: 'none',
+            vfo1: 'uplink',
+            vfo2: 'downlink',
         };
 
         try {
@@ -489,44 +509,97 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
             return;
         }
 
-        const selectedAssignment = await requestRotatorForTarget(satellite?.name);
-        if (!selectedAssignment) {
-            return;
-        }
+        await requestRotatorForTarget(satellite?.name, {
+            onSubmit: async (selectedAssignment) => {
+                if (!selectedAssignment) {
+                    return { success: false };
+                }
+                const assignmentAction = String(selectedAssignment?.action || 'retarget_current_slot');
+                const isCreateNewSlot = assignmentAction === 'create_new_slot';
+                const selectedTrackerId = String(selectedAssignment?.trackerId || '');
+                const rotatorId = String(selectedAssignment?.rotatorId || 'none');
+                const assignmentRigId = String(selectedAssignment?.rigId || 'none');
+                if (!selectedTrackerId) {
+                    return { success: false, errorMessage: 'Missing target tracker slot.' };
+                }
 
-        const { rotatorId, trackerId: selectedTrackerId } = selectedAssignment;
-        const selectedGroupId = satellite?.groups?.[0]?.id || trackingState?.group_id || "";
-        const nextTransmitters = getTransmittersFromSatellite(satellite);
+                const selectedTrackerInstance = trackerInstances.find(
+                    (instance) => String(instance?.tracker_id || '') === selectedTrackerId
+                );
+                const selectedTrackerView = trackerViews?.[selectedTrackerId] || {};
+                // Preserve runtime state from the destination slot to avoid cross-slot state leakage.
+                const selectedTrackerState = selectedTrackerView?.trackingState || selectedTrackerInstance?.tracking_state || {};
+                const selectedGroupId = satellite?.groups?.[0]?.id || selectedTrackerState?.group_id || trackingState?.group_id || "";
+                const nextTransmitters = getTransmittersFromSatellite(satellite);
+                const nextRigId = isCreateNewSlot
+                    ? assignmentRigId
+                    : String(
+                        selectedTrackerView?.selectedRadioRig
+                        ?? selectedTrackerState?.rig_id
+                        ?? assignmentRigId
+                        ?? 'none'
+                    );
+                const nextRotatorId = isCreateNewSlot ? 'none' : rotatorId;
+                const nextTransmitterId = isCreateNewSlot
+                    ? 'none'
+                    : String(selectedTrackerState?.transmitter_id || 'none');
 
-        dispatch(setSatelliteId(satellite.norad_id));
-        dispatch(setRotator(rotatorId));
-        dispatch(setTrackerId(selectedTrackerId));
-        dispatch(setAvailableTransmitters(nextTransmitters));
+                const data = isCreateNewSlot
+                    ? {
+                        tracker_id: selectedTrackerId,
+                        norad_id: satellite.norad_id,
+                        group_id: selectedGroupId,
+                        rig_id: nextRigId,
+                        rotator_id: nextRotatorId,
+                        transmitter_id: 'none',
+                        rig_state: 'disconnected',
+                        rotator_state: 'disconnected',
+                        rig_vfo: 'none',
+                        vfo1: 'uplink',
+                        vfo2: 'downlink',
+                    }
+                    : {
+                        ...selectedTrackerState,
+                        tracker_id: selectedTrackerId,
+                        norad_id: satellite.norad_id,
+                        group_id: selectedGroupId,
+                        rig_id: nextRigId,
+                        rotator_id: nextRotatorId,
+                        transmitter_id: nextTransmitterId,
+                    };
 
-        const data = {
-            ...trackingState,
-            tracker_id: selectedTrackerId,
-            norad_id: satellite.norad_id,
-            group_id: selectedGroupId,
-            rig_id: selectedRadioRig,
-            rotator_id: rotatorId,
-            transmitter_id: selectedTransmitter,
-        };
-
-        try {
-            await dispatch(setTrackingStateInBackend({ socket, data })).unwrap();
-            setSearchResetKey((value) => value + 1);
-        } catch (error) {
-            emitTrackingErrorToast(error, 'Failed to set target');
-        }
+                try {
+                    await dispatch(setTrackingStateInBackend({ socket, data })).unwrap();
+                    dispatch(setTrackerId(selectedTrackerId));
+                    dispatch(setSatelliteId(satellite.norad_id));
+                    dispatch(setRotator({ value: nextRotatorId, trackerId: selectedTrackerId }));
+                    dispatch(setRadioRig({ value: nextRigId, trackerId: selectedTrackerId }));
+                    dispatch(setAvailableTransmitters(nextTransmitters));
+                    setSearchResetKey((value) => value + 1);
+                    return { success: true };
+                } catch (error) {
+                    const errorCode = String(error?.error || error?.code || '').trim();
+                    if (errorCode === 'tracker_slot_limit_reached') {
+                        const limitMessage = emitTrackingErrorToast(
+                            error,
+                            'Failed to set target',
+                            { suppressLimitToast: true, suppressToast: true },
+                        );
+                        return { success: false, errorMessage: limitMessage };
+                    }
+                    const message = emitTrackingErrorToast(error, 'Failed to set target');
+                    return { success: false, errorMessage: message };
+                }
+            },
+        });
     }, [
         dispatch,
         emitTrackingErrorToast,
         getTransmittersFromSatellite,
         requestRotatorForTarget,
-        selectedRadioRig,
-        selectedTransmitter,
         socket,
+        trackerInstances,
+        trackerViews,
         trackingState,
     ]);
 
@@ -542,6 +615,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         const satName = view?.satelliteData?.details?.name || 'No satellite';
         const satNorad = effectiveTrackingState?.norad_id || 'none';
         const rotatorId = view?.selectedRotator || instance?.rotator_id || effectiveTrackingState?.rotator_id || 'none';
+        const normalizedTabRotatorId = normalizeAssignedResourceId(rotatorId);
         const rigId = view?.selectedRadioRig || instance?.rig_id || effectiveTrackingState?.rig_id || 'none';
         const rotatorName = String(rotatorId) === 'none'
             ? 'No rotator'
@@ -564,13 +638,15 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
         const linkedObservations = schedulerObservations
             .filter((obs) => obs?.enabled)
             .filter((obs) => {
-                const obsRotatorId = String(obs?.rotator?.id || obs?.rotator_id || 'none');
-                const obsNorad = String(obs?.satellite?.norad_id || 'none');
-                if (obsRotatorId !== 'none' && String(rotatorId) !== 'none') {
-                    return obsRotatorId === String(rotatorId);
+                // Observation ownership should follow tracker/rotator assignment only.
+                // Matching by NORAD can incorrectly mark multiple same-satellite target tabs.
+                const obsRotatorId = normalizeAssignedResourceId(obs?.rotator?.id || obs?.rotator_id);
+                if (obsRotatorId) {
+                    return obsRotatorId === normalizedTabRotatorId;
                 }
-                if (obsNorad !== 'none' && String(satNorad) !== 'none') {
-                    return obsNorad === String(satNorad);
+                const obsTrackerId = resolveObservationTrackerId(obs);
+                if (obsTrackerId) {
+                    return obsTrackerId === String(instanceTrackerId);
                 }
                 return false;
             });
@@ -1195,7 +1271,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                                     },
                                 }}
                             >
-                                <Typography component="span" sx={{ fontSize: '1.6rem', lineHeight: 1, fontWeight: 700 }}>
+                                <Typography component="span" sx={{ fontSize: '1.9rem', lineHeight: 1, fontWeight: 700 }}>
                                     +
                                 </Typography>
                             </IconButton>
@@ -1298,8 +1374,8 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7, maxWidth: 230 }}>
                                                     <Box
                                                         sx={{
-                                                            width: 16,
-                                                            height: 16,
+                                                            width: 18,
+                                                            height: 18,
                                                             borderRadius: '50%',
                                                             bgcolor: option.tabHardwareLed?.bgColor || 'action.disabled',
                                                             border: '1px solid',
@@ -1313,7 +1389,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                                                         {TabHardwareLedIcon ? (
                                                             <TabHardwareLedIcon
                                                                 sx={{
-                                                                    fontSize: '0.58rem',
+                                                                    fontSize: '0.78rem',
                                                                     color: option.tabHardwareLed?.iconColor || 'common.white',
                                                                 }}
                                                             />
@@ -1346,10 +1422,16 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                                                         </Typography>
                                                     </Box>
                                                     <IconButton
+                                                        component="span"
                                                         size="small"
+                                                        aria-label={`Delete ${option.satName} target`}
+                                                        onMouseDown={(event) => {
+                                                            event.preventDefault();
+                                                            event.stopPropagation();
+                                                        }}
                                                         onClick={(event) => handleDeleteTarget(event, option)}
                                                         sx={{
-                                                            p: 0.2,
+                                                            p: 0.3,
                                                             ml: 0.2,
                                                             color: 'inherit',
                                                             '&:hover': {
@@ -1357,7 +1439,7 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                                                             },
                                                         }}
                                                     >
-                                                        <CloseIcon sx={{ fontSize: '0.78rem' }} />
+                                                        <CloseIcon sx={{ fontSize: '0.95rem' }} />
                                                     </IconButton>
                                                 </Box>
                                             </Tooltip>
@@ -1377,17 +1459,17 @@ const TargetSatelliteSelectorBar = React.memo(function TargetSatelliteSelectorBa
                                 value={ADD_TARGET_TAB_VALUE}
                                 label={
                                     <Tooltip title="Add target" arrow>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18 }}>
-                                            <Typography component="span" sx={{ fontSize: '1.75rem', lineHeight: 1, fontWeight: 700 }}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20 }}>
+                                            <Typography component="span" sx={{ fontSize: '2rem', lineHeight: 1, fontWeight: 700 }}>
                                                 +
                                             </Typography>
                                         </Box>
                                     </Tooltip>
                                 }
                                 sx={{
-                                    minWidth: '36px !important',
-                                    maxWidth: '36px !important',
-                                    width: '36px',
+                                    minWidth: '40px !important',
+                                    maxWidth: '40px !important',
+                                    width: '40px',
                                     px: '0 !important',
                                     mr: '0 !important',
                                     '&.Mui-selected': {

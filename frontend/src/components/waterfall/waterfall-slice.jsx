@@ -198,6 +198,9 @@ const initialState = {
     fftWindow: 'hanning',
     fftWindows: ['hanning', 'hamming', 'blackman', 'kaiser', 'bartlett'],
     fftAveraging: 1,
+    fftOverlapPercent: 50,
+    fftOverlapDepth: 16,
+    bandscopeSmoothing: 'medium',
     gain: "none",
     rtlGains: [0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4,
         28.0, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48.0, 49.6],
@@ -251,6 +254,11 @@ const initialState = {
     },
     hasSoapyAgc: false,
     selectedAntenna: 'none',
+    startStreamValidationErrors: {
+        gain: false,
+        sampleRate: false,
+        antenna: false,
+    },
     bookmarks: [],
     showRotatorDottedLines: true,
     autoScalePreset: 'weak',
@@ -494,6 +502,28 @@ export const waterfallSlice = createSlice({
         setSelectedAntenna(state, action) {
             state.selectedAntenna = action.payload;
         },
+        setStartStreamValidationErrors(state, action) {
+            const payload = action.payload || {};
+            state.startStreamValidationErrors = {
+                gain: Boolean(payload.gain),
+                sampleRate: Boolean(payload.sampleRate),
+                antenna: Boolean(payload.antenna),
+            };
+        },
+        clearStartStreamValidationErrors(state) {
+            state.startStreamValidationErrors = {
+                gain: false,
+                sampleRate: false,
+                antenna: false,
+            };
+        },
+        clearStartStreamValidationError(state, action) {
+            const field = action.payload;
+            if (!['gain', 'sampleRate', 'antenna'].includes(field)) {
+                return;
+            }
+            state.startStreamValidationErrors[field] = false;
+        },
         setHasSoapyAgc(state, action) {
             state.hasSoapyAgc = action.payload;
         },
@@ -506,6 +536,15 @@ export const waterfallSlice = createSlice({
         setFFTAveraging: (state, action) => {
             state.fftAveraging = action.payload;
         },
+        setFFTOverlapPercent: (state, action) => {
+            state.fftOverlapPercent = action.payload;
+        },
+        setFFTOverlapDepth: (state, action) => {
+            state.fftOverlapDepth = action.payload;
+        },
+        setBandscopeSmoothing: (state, action) => {
+            state.bandscopeSmoothing = action.payload;
+        },
         updateSDRConfig: (state, action) => {
             // Update all SDR configuration parameters at once
             const config = action.payload;
@@ -514,6 +553,12 @@ export const waterfallSlice = createSlice({
             if (config.gain !== undefined) state.gain = config.gain;
             if (config.fft_size !== undefined) state.fftSize = config.fft_size;
             if (config.fft_window !== undefined) state.fftWindow = config.fft_window;
+            if (config.fft_overlap_percent !== undefined) {
+                state.fftOverlapPercent = config.fft_overlap_percent;
+            }
+            if (config.fft_overlap_depth !== undefined) {
+                state.fftOverlapDepth = config.fft_overlap_depth;
+            }
             if (config.bias_t !== undefined && config.sdr_id) {
                 if (!state.sdrSettingsById[config.sdr_id]) {
                     state.sdrSettingsById[config.sdr_id] = { draft: {}, applied: {} };
@@ -683,6 +728,9 @@ export const {
     setFFTSize,
     setFFTSizeOptions,
     setFFTAveraging,
+    setFFTOverlapPercent,
+    setFFTOverlapDepth,
+    setBandscopeSmoothing,
     updateSDRConfig,
     setGain,
     setSampleRate,
@@ -720,6 +768,9 @@ export const {
     setShowLeftSideWaterFallAccessories,
     setBookMarks,
     setSelectedAntenna,
+    setStartStreamValidationErrors,
+    clearStartStreamValidationErrors,
+    clearStartStreamValidationError,
     setHasSoapyAgc,
     setSelectedTransmitterId,
     setSelectedOffsetMode,

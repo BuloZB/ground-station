@@ -41,6 +41,9 @@ import {
     setFFTSize,
     setFFTSizeOptions,
     setFFTAveraging,
+    setFFTOverlapPercent,
+    setFFTOverlapDepth,
+    setBandscopeSmoothing,
     setGain,
     setSampleRate,
     setCenterFrequency,
@@ -73,6 +76,8 @@ import {
     clearPlaybackRecording,
     setPlaybackStartTime,
     resetPlaybackStartTime,
+    clearStartStreamValidationErrors,
+    clearStartStreamValidationError,
 } from './waterfall-slice.jsx';
 
 import {
@@ -95,6 +100,7 @@ import VfoAccordion from "./vfo-settings/settings-vfo.jsx";
 import RecordingAccordion from "./settings-recording.jsx";
 import PlaybackAccordion from "./settings-playback.jsx";
 import { useTranslation } from 'react-i18next';
+import { selectRunningRigTransmitters } from "../target/transmitter-selectors.js";
 
 const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemainingSecondsRef }, ref) {
     const { t } = useTranslation('waterfall');
@@ -120,6 +126,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         rtlGains,
         fftWindow,
         fftWindows,
+        fftOverlapPercent,
+        fftOverlapDepth,
         expandedPanels,
         selectedSDRId,
         gettingSDRParameters,
@@ -137,12 +145,14 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         hasSoapyAgc,
         selectedTransmitterId,
         fftAveraging,
+        bandscopeSmoothing,
         isRecording,
         recordingDuration,
         recordingName,
         selectedPlaybackRecording,
         playbackRecordingPath,
         playbackStartTime,
+        startStreamValidationErrors,
     } = useSelector(
         (state) => ({
             colorMap: state.waterfall.colorMap,
@@ -164,6 +174,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             rtlGains: state.waterfall.rtlGains,
             fftWindow: state.waterfall.fftWindow,
             fftWindows: state.waterfall.fftWindows,
+            fftOverlapPercent: state.waterfall.fftOverlapPercent,
+            fftOverlapDepth: state.waterfall.fftOverlapDepth ?? 16,
             expandedPanels: state.waterfall.expandedPanels,
             selectedSDRId: state.waterfall.selectedSDRId,
             gettingSDRParameters: state.waterfall.gettingSDRParameters,
@@ -181,12 +193,14 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             hasSoapyAgc: state.waterfall.hasSoapyAgc,
             selectedTransmitterId: state.waterfall.selectedTransmitterId,
             fftAveraging: state.waterfall.fftAveraging,
+            bandscopeSmoothing: state.waterfall.bandscopeSmoothing,
             isRecording: state.waterfall.isRecording,
             recordingDuration: state.waterfall.recordingDuration,
             recordingName: state.waterfall.recordingName,
             selectedPlaybackRecording: state.waterfall.selectedPlaybackRecording,
             playbackRecordingPath: state.waterfall.playbackRecordingPath,
             playbackStartTime: state.waterfall.playbackStartTime,
+            startStreamValidationErrors: state.waterfall.startStreamValidationErrors,
         }),
         shallowEqual
     );
@@ -206,9 +220,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         vfoColors,
     } = useSelector((state) => state.vfo);
 
-    const {
-        rigData,
-    } = useSelector((state) => state.targetSatTrack);
+    const runningTransmitters = useSelector(selectRunningRigTransmitters);
 
     const {
         sdrs
@@ -258,6 +270,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         // No cleanup function - let the ref stay true to prevent any subsequent calls for StrictMode
     }, []);
 
+    const getDefaultFFTOverlapPercentForSDR = useCallback(() => 50, []);
+
     const getValidGainElements = useCallback((sdrId) => {
         const caps = sdrCapabilities?.[sdrId];
         return Array.isArray(caps?.gain_elements?.rx) ? caps.gain_elements.rx : [];
@@ -300,6 +314,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     tunerAgc: tunerAgc,
                     rtlAgc: rtlAgc,
                     fftWindow: fftWindow,
+                    fftOverlapPercent: fftOverlapPercent,
+                    fftOverlapDepth: fftOverlapDepth,
                     antenna: selectedAntenna,
                     soapyAgc: soapyAgc,
                     offsetFrequency: selectedOffsetValue,
@@ -334,6 +350,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             gain,
             fftSize,
             fftWindow,
+            fftOverlapPercent,
+            fftOverlapDepth,
             fftAveraging,
             biasT,
             tunerAgc,
@@ -446,7 +464,12 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         // Check what was selected
         const selectedValue = typeof event === 'object' ? event.target.value : event;
 
+        dispatch(clearStartStreamValidationErrors());
         dispatch(setSelectedSDRId(selectedValue));
+        if (selectedValue && selectedValue !== "none") {
+            const defaultPercent = getDefaultFFTOverlapPercentForSDR();
+            dispatch(setFFTOverlapPercent(defaultPercent));
+        }
 
         if (selectedValue === "none") {
             // Reset UI values since once we get new values from the backend, they might not be valid anymore
@@ -464,7 +487,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     dispatch(setErrorDialogOpen(true));
                 });
         }
-    }, [dispatch, loadSDRParameters, applyLoadedSDRParameters]);
+    }, [dispatch, loadSDRParameters, applyLoadedSDRParameters, getDefaultFFTOverlapPercentForSDR]);
 
     const handleRefreshSDRParameters = useCallback(() => {
         if (!selectedSDRId || selectedSDRId === "none") {
@@ -609,7 +632,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             return;
         }
 
-        const selectedTransmitterMetadata = (rigData?.transmitters || []).find(t => t.id === event.target.value);
+        const selectedTransmitterMetadata = (runningTransmitters || []).find((t) => t.id === event.target.value);
         if (!selectedTransmitterMetadata) {
             return;
         }
@@ -624,7 +647,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
 
         dispatch(setCenterFrequency(newCenterFrequency));
         sendSDRConfigToBackend({centerFrequency: newCenterFrequency});
-    }, [dispatch, rigData, sampleRate, sendSDRConfigToBackend]);
+    }, [dispatch, runningTransmitters, sampleRate, sendSDRConfigToBackend]);
 
     const handleOffsetModeChange = useCallback((event) => {
         const offsetValue = event.target.value;
@@ -650,7 +673,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
     }, [dispatch, sendSDRConfigToBackend]);
 
     const getProperTransmitterId = useCallback(() => {
-        const transmitters = rigData?.transmitters || [];
+        const transmitters = runningTransmitters || [];
         if (transmitters.length > 0 && selectedTransmitterId) {
             if (transmitters.find(t => t.id === selectedTransmitterId)) {
                 return selectedTransmitterId;
@@ -660,7 +683,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         } else {
             return "none";
         }
-    }, [rigData, selectedTransmitterId]);
+    }, [runningTransmitters, selectedTransmitterId]);
 
     const handleSdrAccordionChange = useCallback((event, isExpanded) => {
         const panel = 'sdr';
@@ -690,16 +713,25 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
 
     const handleGainChange = useCallback((value) => {
         dispatch(setGain(value));
+        if (value !== 'none' && value !== null && value !== undefined) {
+            dispatch(clearStartStreamValidationError('gain'));
+        }
         sendSDRConfigToBackend({gain: value});
     }, [dispatch, sendSDRConfigToBackend]);
 
     const handleSampleRateChange = useCallback((value) => {
         dispatch(setSampleRate(value));
+        if (value !== 'none' && value !== null && value !== undefined) {
+            dispatch(clearStartStreamValidationError('sampleRate'));
+        }
         sendSDRConfigToBackend({sampleRate: value});
     }, [dispatch, sendSDRConfigToBackend]);
 
     const handleAntennaChange = useCallback((value) => {
         dispatch(setSelectedAntenna(value));
+        if (value !== 'none' && value !== null && value !== undefined) {
+            dispatch(clearStartStreamValidationError('antenna'));
+        }
         sendSDRConfigToBackend({antenna: value});
     }, [dispatch, sendSDRConfigToBackend]);
 
@@ -929,6 +961,22 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         sendSDRConfigToBackend({ fftAveraging: value });
     }, [dispatch, sendSDRConfigToBackend]);
 
+    const handleFFTOverlapChange = useCallback((value) => {
+        const overlapPercent = Number(value) || 0;
+        dispatch(setFFTOverlapPercent(overlapPercent));
+        sendSDRConfigToBackend({ fftOverlapPercent: overlapPercent });
+    }, [dispatch, sendSDRConfigToBackend]);
+
+    const handleFFTOverlapDepthChange = useCallback((value) => {
+        const overlapDepth = Number(value) || 16;
+        dispatch(setFFTOverlapDepth(overlapDepth));
+        sendSDRConfigToBackend({ fftOverlapDepth: overlapDepth });
+    }, [dispatch, sendSDRConfigToBackend]);
+
+    const handleBandscopeSmoothingChange = useCallback((value) => {
+        dispatch(setBandscopeSmoothing(value));
+    }, [dispatch]);
+
     const handleColorMapChange = useCallback((value) => {
         setLocalColorMap(value);
         dispatch(setColorMap(value));
@@ -1039,6 +1087,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
 
             // Set antenna to "RX" for sigmfplayback
             dispatch(setSelectedAntenna("RX"));
+            dispatch(setFFTOverlapPercent(0));
 
             // Set gain to 0 for playback
             dispatch(setGain(0));
@@ -1064,6 +1113,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     tunerAgc: tunerAgc,
                     rtlAgc: rtlAgc,
                     fftWindow: fftWindow,
+                    fftOverlapPercent: 0,
+                    fftOverlapDepth: fftOverlapDepth,
                     antenna: "RX",
                     soapyAgc: soapyAgc,
                     offsetFrequency: selectedOffsetValue,
@@ -1099,6 +1150,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                 tunerAgc,
                 rtlAgc,
                 fftWindow,
+                fftOverlapPercent,
+                fftOverlapDepth,
                 antenna: selectedAntenna,
                 offsetFrequency: selectedOffsetValue,
                 soapyAgc,
@@ -1201,6 +1254,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     rtlAgc={rtlAgc}
                     onRtlAgcChange={handleRtlAgcChange}
                     isRecording={isRecording}
+                    startStreamValidationErrors={startStreamValidationErrors}
                 />
 
                 <FrequencyControlAccordion
@@ -1208,7 +1262,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     onAccordionChange={handleFreqAccordionChange}
                     centerFrequency={centerFrequency}
                     onCenterFrequencyChange={handleFrequencyDialChange}
-                    availableTransmitters={rigData?.transmitters || []}
+                    availableTransmitters={runningTransmitters || []}
                     getProperTransmitterId={getProperTransmitterId}
                     onTransmitterChange={handleTransmitterChange}
                     selectedOffsetMode={selectedOffsetMode}
@@ -1252,6 +1306,12 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     onFFTWindowChange={handleFFTWindowChange}
                     fftAveraging={fftAveraging}
                     onFFTAveragingChange={handleFFTAveragingChange}
+                    fftOverlapPercent={fftOverlapPercent}
+                    onFFTOverlapChange={handleFFTOverlapChange}
+                    fftOverlapDepth={fftOverlapDepth}
+                    onFFTOverlapDepthChange={handleFFTOverlapDepthChange}
+                    bandscopeSmoothing={bandscopeSmoothing}
+                    onBandscopeSmoothingChange={handleBandscopeSmoothingChange}
                     colorMaps={colorMaps}
                     localColorMap={localColorMap}
                     onColorMapChange={handleColorMapChange}

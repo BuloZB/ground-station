@@ -92,25 +92,24 @@ export function drawBandscope({
     bandscopeCtx.fillStyle = theme.palette.background.default;
     bandscopeCtx.fillRect(0, 0, width, height);
 
-    // Shift the dB range upward by 5 dB to move the line toward the bottom
-    const DB_SHIFT = 5;
     const [minDb, maxDb] = dbRange;
-    const shiftedMinDb = minDb + DB_SHIFT;
-    const shiftedMaxDb = maxDb + DB_SHIFT;
-    const shiftedDbRange = [shiftedMinDb, shiftedMaxDb];
+    const dbRangeDiff = maxDb - minDb;
 
-    // Draw dB marks and labels using shifted range
+    // Visual-only viewport pan: move trace lower in canvas by 20px.
+    // This shifts display position only and does not alter dB values.
+    const linePanPx = 20;
+
+    // Draw dB marks and labels using the current range
     bandscopeCtx.fillStyle = 'white';
     bandscopeCtx.font = '12px Monospace';
     bandscopeCtx.textAlign = 'right';
 
     // Calculate step size based on range
-    const dbRangeDiff = shiftedMaxDb - shiftedMinDb;
     const steps = Math.min(6, dbRangeDiff); // Maximum 10 steps
     const stepSize = Math.ceil(dbRangeDiff / steps);
 
-    for (let db = Math.ceil(shiftedMinDb / stepSize) * stepSize; db <= shiftedMaxDb; db += stepSize) {
-        const y = height - ((db - shiftedMinDb) / (shiftedMaxDb - shiftedMinDb)) * height;
+    for (let db = Math.ceil(minDb / stepSize) * stepSize; db <= maxDb; db += stepSize) {
+        const y = height - ((db - minDb) / (maxDb - minDb)) * height;
 
         // Draw a horizontal dotted grid line with 1px thickness
         bandscopeCtx.strokeStyle = 'rgba(150, 150, 150, 0.4)';
@@ -123,26 +122,27 @@ export function drawBandscope({
         bandscopeCtx.setLineDash([]);
     }
 
-    // Draw the dB axis (y-axis) using shifted range
+    // Draw the dB axis (y-axis) with the true dB range.
     drawDbAxis({
         dBAxisCtx,
         dBAxisCanvas,
         width,
         height,
         topPadding: 0,
-        dbRange: shiftedDbRange,
+        dbRange,
         theme
     });
 
-    // Draw the FFT data as a line graph using smoothed data with shifted range
+    // Draw the FFT data with a visual-only pan.
     drawFftLine({
         ctx: bandscopeCtx,
         fftData: smoothedFftData,
         width,
         height,
-        dbRange: shiftedDbRange,
+        dbRange,
         colorMap,
-        zoomScale
+        zoomScale,
+        linePanPx
     });
 }
 
@@ -264,6 +264,7 @@ function downsampleFftData(fftData, targetPoints) {
  * @param {Array<number>} params.dbRange - [minDb, maxDb]
  * @param {string} params.colorMap - Color map name
  * @param {number} [params.zoomScale=1] - Current horizontal zoom scale
+ * @param {number} [params.linePanPx=0] - Visual-only pan offset in pixels
  */
 export function drawFftLine({
     ctx,
@@ -272,10 +273,19 @@ export function drawFftLine({
     height,
     dbRange,
     colorMap,
-    zoomScale = 1
+    zoomScale = 1,
+    linePanPx = 0
 }) {
     const [minDb, maxDb] = dbRange;
     const graphWidth = width;
+    const mapAmplitudeToY = (amplitude) => {
+        const normalizedValue = Math.max(0, Math.min(1, (amplitude - minDb) / (maxDb - minDb)));
+
+        // Keep the visual pan while preserving full vertical reach:
+        // normalized=1 can still reach y=0 (top), normalized=0 remains near bottom.
+        const y = height - (normalizedValue * (height + linePanPx)) + linePanPx;
+        return Math.min(height, Math.max(0, y));
+    };
 
     // Adaptive target points: use width for small FFTs, cap at reasonable limit for large FFTs
     // This prevents excessive point generation while maintaining visual quality
@@ -339,11 +349,7 @@ export function drawFftLine({
     for (let i = 0; i < downsampledPoints.length; i++) {
         const point = downsampledPoints[i];
         const x = point.x * graphWidth;
-        const amplitude = point.y;
-
-        // Normalize amplitude to canvas height using dB range
-        const normalizedValue = Math.max(0, Math.min(1, (amplitude - minDb) / (maxDb - minDb)));
-        const y = height - (normalizedValue * height);
+        const y = mapAmplitudeToY(point.y);
 
         if (i === 0) {
             ctx.moveTo(x, y);
@@ -353,9 +359,7 @@ export function drawFftLine({
             // Use quadratic curve for smooth interpolation between points
             const prevPoint = downsampledPoints[i - 1];
             const prevX = prevPoint.x * graphWidth;
-            const prevAmplitude = prevPoint.y;
-            const prevNormalizedValue = Math.max(0, Math.min(1, (prevAmplitude - minDb) / (maxDb - minDb)));
-            const prevY = height - (prevNormalizedValue * height);
+            const prevY = mapAmplitudeToY(prevPoint.y);
 
             // Control point is midway between previous and current point
             const cpX = (prevX + x) / 2;
@@ -369,9 +373,7 @@ export function drawFftLine({
     if (downsampledPoints.length > 2) {
         const lastPoint = downsampledPoints[downsampledPoints.length - 1];
         const x = lastPoint.x * graphWidth;
-        const amplitude = lastPoint.y;
-        const normalizedValue = Math.max(0, Math.min(1, (amplitude - minDb) / (maxDb - minDb)));
-        const y = height - (normalizedValue * height);
+        const y = mapAmplitudeToY(lastPoint.y);
         ctx.lineTo(x, y);
     }
 
