@@ -101,6 +101,7 @@ import { createDomTileWaterfallRenderer } from './dom-tile-waterfall-renderer.js
 import { drawBandscope as drawBandscopeModule } from './worker-modules/rendering.js';
 import { updateSmoothedFftData } from './worker-modules/smoothing.js';
 import { useWaterfallEngine } from './waterfall-engine-provider.jsx';
+import { getSmoothingConfig } from './smoothing-presets.js';
 
 const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
     playbackElapsedSecondsRef,
@@ -190,6 +191,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         fftDataOverflowLimit,
         showRotatorDottedLines,
         autoScalePreset,
+        bandscopeSmoothing,
         waterFallScaleX,
         waterFallPositionX,
         sdrSettingsById,
@@ -232,6 +234,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
             fftDataOverflowLimit: state.waterfall.fftDataOverflowLimit,
             showRotatorDottedLines: state.waterfall.showRotatorDottedLines,
             autoScalePreset: state.waterfall.autoScalePreset,
+            bandscopeSmoothing: state.waterfall.bandscopeSmoothing,
             waterFallScaleX: state.waterfall.waterFallScaleX,
             waterFallPositionX: state.waterfall.waterFallPositionX,
             sdrSettingsById: state.waterfall.sdrSettingsById,
@@ -484,9 +487,10 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         domFftHistoryRef.current = [];
         domSmoothedFftRef.current = [];
 
-        const smoothingType = 'weighted';
-        const smoothingStrength = 0.9;
-        const maxFftHistoryLength = 5;
+        const smoothingConfig = getSmoothingConfig(bandscopeSmoothing);
+        const smoothingType = smoothingConfig.smoothingType;
+        const smoothingStrength = smoothingConfig.smoothingStrength;
+        const maxFftHistoryLength = smoothingConfig.historyLength;
 
         const drawTick = () => {
             const fftData = latestDomFftRef.current;
@@ -549,7 +553,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
                 bandscopeTimerRef.current = null;
             }
         };
-    }, [waterfallRendererMode, dbRange, colorMap, waterFallScaleX, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
+    }, [waterfallRendererMode, dbRange, colorMap, waterFallScaleX, bandscopeSmoothing, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
 
     useEffect(() => {
         if (waterfallRendererMode !== 'dom-tiles' || !domTileRendererRef.current) {

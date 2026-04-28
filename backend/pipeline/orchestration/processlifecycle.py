@@ -271,6 +271,7 @@ class ProcessLifecycleManager:
             for param in [
                 "fft_size",
                 "fft_window",
+                "fft_overlap",
                 "sample_rate",
                 "center_freq",
                 "gain",
@@ -301,6 +302,7 @@ class ProcessLifecycleManager:
                     "gain": config.get("gain", sdr_config.get("gain")),
                     "fft_size": config.get("fft_size", sdr_config.get("fft_size")),
                     "fft_window": config.get("fft_window", sdr_config.get("fft_window")),
+                    "fft_overlap": config.get("fft_overlap", sdr_config.get("fft_overlap", True)),
                     "bias_t": config.get("bias_t", sdr_config.get("bias_t", False)),
                     "tuner_agc": config.get("tuner_agc", sdr_config.get("tuner_agc", False)),
                     "rtl_agc": config.get("rtl_agc", sdr_config.get("rtl_agc", False)),
@@ -347,6 +349,7 @@ class ProcessLifecycleManager:
                 rtl_agc=sdr_config.get("rtl_agc", False),
                 fft_window=sdr_config.get("fft_window"),
                 fft_averaging=sdr_config.get("fft_averaging"),
+                fft_overlap=sdr_config.get("fft_overlap", True),
                 recording_path=sdr_config.get("recording_path", ""),
                 serial_number=sdr_config.get("serial_number", 0),
                 host=hostname,

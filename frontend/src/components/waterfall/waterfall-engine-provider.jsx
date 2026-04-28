@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { useSocket } from '../common/socket.jsx';
+import { getSmoothingConfig } from './smoothing-presets.js';
 
 const WaterfallEngineContext = createContext(null);
 
@@ -45,6 +46,7 @@ export const WaterfallEngineProvider = ({ children }) => {
         fftSize,
         showRotatorDottedLines,
         autoScalePreset,
+        bandscopeSmoothing,
         targetFPS,
     } = useSelector((state) => ({
         waterfallRendererMode: state.waterfall.waterfallRendererMode,
@@ -56,6 +58,7 @@ export const WaterfallEngineProvider = ({ children }) => {
         fftSize: state.waterfall.fftSize,
         showRotatorDottedLines: state.waterfall.showRotatorDottedLines,
         autoScalePreset: state.waterfall.autoScalePreset,
+        bandscopeSmoothing: state.waterfall.bandscopeSmoothing,
         targetFPS: state.waterfall.targetFPS,
     }));
 
@@ -269,6 +272,20 @@ export const WaterfallEngineProvider = ({ children }) => {
 
         postWorkerMessage({ cmd: 'setAutoScalePreset', preset: autoScalePreset });
     }, [waterfallRendererMode, autoScalePreset, postWorkerMessage]);
+
+    useEffect(() => {
+        if (waterfallRendererMode !== 'worker') {
+            return;
+        }
+
+        const smoothing = getSmoothingConfig(bandscopeSmoothing);
+        postWorkerMessage({
+            cmd: 'updateSmoothingConfig',
+            historyLength: smoothing.historyLength,
+            smoothingType: smoothing.smoothingType,
+            smoothingStrength: smoothing.smoothingStrength,
+        });
+    }, [waterfallRendererMode, bandscopeSmoothing, postWorkerMessage]);
 
     useEffect(() => {
         if (waterfallRendererMode !== 'worker') {

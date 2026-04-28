@@ -95,9 +95,9 @@ export function drawBandscope({
     const [minDb, maxDb] = dbRange;
     const dbRangeDiff = maxDb - minDb;
 
-    // Visual-only pan for the FFT trace. This is an intentional viewport nudge
-    // (constant pixels), not a dB-dependent bias.
-    const linePanPx = Math.max(6, Math.round(height * 0.08));
+    // Visual-only viewport pan: move trace lower in canvas by 20px.
+    // This shifts display position only and does not alter dB values.
+    const linePanPx = 20;
 
     // Draw dB marks and labels using the current range
     bandscopeCtx.fillStyle = 'white';

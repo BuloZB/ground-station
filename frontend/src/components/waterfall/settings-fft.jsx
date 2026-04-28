@@ -27,6 +27,10 @@ const FftAccordion = ({
                           onFFTWindowChange,
                           fftAveraging,
                           onFFTAveragingChange,
+                          fftOverlap,
+                          onFFTOverlapChange,
+                          bandscopeSmoothing,
+                          onBandscopeSmoothingChange,
                           colorMaps,
                           localColorMap,
                           onColorMapChange,
@@ -100,6 +104,39 @@ const FftAccordion = ({
                                 <MenuItem value={8}>{t('fft.averaging_samples', { count: 8 })}</MenuItem>
                             </Select>
                         </FormControl>
+
+                        <FormControl disabled={gettingSDRParameters}
+                                     sx={{minWidth: 200, marginTop: 0, marginBottom: 1}} fullWidth={true}
+                                     variant="outlined" size="small">
+                            <InputLabel>{t('fft.fft_overlap', { defaultValue: 'FFT Overlap' })}</InputLabel>
+                            <Select
+                                disabled={gettingSDRParameters}
+                                size="small"
+                                value={fftOverlap}
+                                onChange={(e) => onFFTOverlapChange(e.target.value)}
+                                label={t('fft.fft_overlap', { defaultValue: 'FFT Overlap' })} variant={'outlined'}>
+                                <MenuItem value={false}>{t('fft.overlap_off', { defaultValue: 'Off' })}</MenuItem>
+                                <MenuItem value={true}>{t('fft.overlap_on_50', { defaultValue: 'On (50%)' })}</MenuItem>
+                            </Select>
+                        </FormControl>
+
+                        <FormControl disabled={gettingSDRParameters}
+                                     sx={{minWidth: 200, marginTop: 0, marginBottom: 1}} fullWidth={true}
+                                     variant="outlined" size="small">
+                            <InputLabel>{t('fft.bandscope_smoothing', { defaultValue: 'Bandscope Smoothing' })}</InputLabel>
+                            <Select
+                                disabled={gettingSDRParameters}
+                                size="small"
+                                value={bandscopeSmoothing}
+                                onChange={(e) => onBandscopeSmoothingChange(e.target.value)}
+                                label={t('fft.bandscope_smoothing', { defaultValue: 'Bandscope Smoothing' })}
+                                variant={'outlined'}>
+                                <MenuItem value={'off'}>{t('fft.smoothing_off', { defaultValue: 'Off' })}</MenuItem>
+                                <MenuItem value={'low'}>{t('fft.smoothing_low', { defaultValue: 'Low' })}</MenuItem>
+                                <MenuItem value={'medium'}>{t('fft.smoothing_medium', { defaultValue: 'Medium' })}</MenuItem>
+                                <MenuItem value={'high'}>{t('fft.smoothing_high', { defaultValue: 'High' })}</MenuItem>
+                            </Select>
+                        </FormControl>
                         <FormControl disabled={gettingSDRParameters}
                                      sx={{minWidth: 200, marginTop: 0, marginBottom: 1}} fullWidth={true}
                                      variant="outlined"
@@ -138,6 +175,10 @@ function areFftAccordionPropsEqual(prevProps, nextProps) {
         prevProps.onFFTWindowChange === nextProps.onFFTWindowChange &&
         prevProps.fftAveraging === nextProps.fftAveraging &&
         prevProps.onFFTAveragingChange === nextProps.onFFTAveragingChange &&
+        prevProps.fftOverlap === nextProps.fftOverlap &&
+        prevProps.onFFTOverlapChange === nextProps.onFFTOverlapChange &&
+        prevProps.bandscopeSmoothing === nextProps.bandscopeSmoothing &&
+        prevProps.onBandscopeSmoothingChange === nextProps.onBandscopeSmoothingChange &&
         prevProps.colorMaps === nextProps.colorMaps &&
         prevProps.localColorMap === nextProps.localColorMap &&
         prevProps.onColorMapChange === nextProps.onColorMapChange

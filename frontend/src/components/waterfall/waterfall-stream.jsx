@@ -40,6 +40,7 @@ const useWaterfallStream = ({
         fftSize,
         sdrSettingsById,
         fftWindow,
+        fftOverlap,
         selectedAntenna,
         selectedOffsetValue,
         fftAveraging,
@@ -200,6 +201,7 @@ const useWaterfallStream = ({
                 tunerAgc,
                 rtlAgc,
                 fftWindow,
+                fftOverlap,
                 antenna: selectedAntenna,
                 offsetFrequency: selectedOffsetValue,
                 soapyAgc,
@@ -211,7 +213,7 @@ const useWaterfallStream = ({
                 }
             });
         }
-    }, [isStreaming, dispatch, socket, selectedSDRId, centerFrequency, sampleRate, gain, fftSize, biasT, tunerAgc, rtlAgc, fftWindow, selectedAntenna, selectedOffsetValue, soapyAgc, fftAveraging, getAudioState, initializeAudio]);
+    }, [isStreaming, dispatch, socket, selectedSDRId, centerFrequency, sampleRate, gain, fftSize, biasT, tunerAgc, rtlAgc, fftWindow, fftOverlap, selectedAntenna, selectedOffsetValue, soapyAgc, fftAveraging, getAudioState, initializeAudio]);
 
     const stopStreaming = useCallback(async () => {
         if (isStreaming) {

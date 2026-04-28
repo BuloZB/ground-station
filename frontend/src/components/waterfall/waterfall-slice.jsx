@@ -198,6 +198,8 @@ const initialState = {
     fftWindow: 'hanning',
     fftWindows: ['hanning', 'hamming', 'blackman', 'kaiser', 'bartlett'],
     fftAveraging: 1,
+    fftOverlap: true,
+    bandscopeSmoothing: 'medium',
     gain: "none",
     rtlGains: [0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7, 22.9, 25.4,
         28.0, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4, 43.9, 44.5, 48.0, 49.6],
@@ -506,6 +508,12 @@ export const waterfallSlice = createSlice({
         setFFTAveraging: (state, action) => {
             state.fftAveraging = action.payload;
         },
+        setFFTOverlap: (state, action) => {
+            state.fftOverlap = action.payload;
+        },
+        setBandscopeSmoothing: (state, action) => {
+            state.bandscopeSmoothing = action.payload;
+        },
         updateSDRConfig: (state, action) => {
             // Update all SDR configuration parameters at once
             const config = action.payload;
@@ -514,6 +522,7 @@ export const waterfallSlice = createSlice({
             if (config.gain !== undefined) state.gain = config.gain;
             if (config.fft_size !== undefined) state.fftSize = config.fft_size;
             if (config.fft_window !== undefined) state.fftWindow = config.fft_window;
+            if (config.fft_overlap !== undefined) state.fftOverlap = config.fft_overlap;
             if (config.bias_t !== undefined && config.sdr_id) {
                 if (!state.sdrSettingsById[config.sdr_id]) {
                     state.sdrSettingsById[config.sdr_id] = { draft: {}, applied: {} };
@@ -683,6 +692,8 @@ export const {
     setFFTSize,
     setFFTSizeOptions,
     setFFTAveraging,
+    setFFTOverlap,
+    setBandscopeSmoothing,
     updateSDRConfig,
     setGain,
     setSampleRate,
