@@ -22,6 +22,7 @@
 import React, {useState, useEffect, useCallback, useRef, useMemo} from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Box, IconButton } from '@mui/material';
+import { useAudio } from '../../dashboard/audio-provider.jsx';
 import {
     setVFOProperty,
     setSelectedVFO,
@@ -36,6 +37,7 @@ import {
     formatFrequency,
     formatBaudrate
 } from './vfo-utils.js';
+import { resolveVfoAudioStatus, VFO_AUDIO_STATUS } from '../vfo-audio-status.js';
 import {
     useVFODragHandlers,
     useVFOMouseHandlers,
@@ -66,6 +68,7 @@ const VFOMarkersContainer = ({
                                  currentPositionX,
                              }) => {
     const dispatch = useDispatch();
+    const { getVfoSquelchDebug } = useAudio();
     const {
         vfoMarkers,
         maxVFOMarkers,
@@ -100,6 +103,12 @@ const VFOMarkersContainer = ({
     //const height = bandscopeHeight + waterfallHeight;
     const height = bandscopeHeight;
     const [cursor, setCursor] = useState('default');
+    const [vfoSquelchOpen, setVfoSquelchOpen] = useState({
+        1: null,
+        2: null,
+        3: null,
+        4: null,
+    });
 
     // Track the previous VFO active state to detect changes
     const prevVfoActiveRef = useRef({});
@@ -398,6 +407,35 @@ const VFOMarkersContainer = ({
         updateActualWidth();
     }, [interactionActive, allowInteractionMeasure, interactionMeasureTick, updateActualWidth]);
 
+    // Poll squelch gate state from audio diagnostics with change-only updates.
+    useEffect(() => {
+        const readSquelchState = () => {
+            const nextState = { 1: null, 2: null, 3: null, 4: null };
+            for (let vfoNumber = 1; vfoNumber <= 4; vfoNumber += 1) {
+                const debug = getVfoSquelchDebug?.(vfoNumber);
+                if (debug && typeof debug.gate_open === 'boolean') {
+                    nextState[vfoNumber] = Boolean(debug.gate_open);
+                }
+            }
+
+            setVfoSquelchOpen((prevState) => {
+                if (
+                    prevState[1] === nextState[1] &&
+                    prevState[2] === nextState[2] &&
+                    prevState[3] === nextState[3] &&
+                    prevState[4] === nextState[4]
+                ) {
+                    return prevState;
+                }
+                return nextState;
+            });
+        };
+
+        readSquelchState();
+        const interval = setInterval(readSquelchState, 250);
+        return () => clearInterval(interval);
+    }, [getVfoSquelchDebug]);
+
     // Resize backing store only when dimensions actually change.
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -419,7 +457,7 @@ const VFOMarkersContainer = ({
     useEffect(() => {
         renderVFOMarkersDirect();
     }, [vfoActive, vfoMarkers, actualWidth, height,
-        centerFrequency, sampleRate, selectedVFO, streamingVFOs, vfoMuted, containerWidth, currentPositionX, activeDecoders, decoderOutputs, runtimeSnapshot]);
+        centerFrequency, sampleRate, selectedVFO, streamingVFOs, vfoMuted, vfoSquelchOpen, containerWidth, currentPositionX, activeDecoders, decoderOutputs, runtimeSnapshot]);
 
     // Rendering function with cached context
     const renderVFOMarkersDirect = () => {
@@ -512,7 +550,8 @@ const VFOMarkersContainer = ({
                 null, // no morse text
                 false, // not streaming
                 null, // no packet outputs
-                false // not muted
+                false, // not muted
+                VFO_AUDIO_STATUS.NO_AUDIO
             );
         });
 
@@ -592,8 +631,28 @@ const VFOMarkersContainer = ({
 
             // Check if this VFO is muted
             const isMuted = vfoMuted[parseInt(markerIdx)] || false;
+            const isSquelchOpen = vfoSquelchOpen[parseInt(markerIdx)] ?? null;
+            const audioStatus = resolveVfoAudioStatus({
+                isStreaming,
+                isMuted,
+                isSquelchOpen,
+            });
 
-            canvasDrawingUtils.drawVFOLabel(ctx, centerX, labelText, marker.color, lineOpacity, isSelected, isLocked, decoderInfo, morseText, isStreaming, packetOutputs, isMuted);
+            canvasDrawingUtils.drawVFOLabel(
+                ctx,
+                centerX,
+                labelText,
+                marker.color,
+                lineOpacity,
+                isSelected,
+                isLocked,
+                decoderInfo,
+                morseText,
+                isStreaming,
+                packetOutputs,
+                isMuted,
+                audioStatus
+            );
         });
     };
 

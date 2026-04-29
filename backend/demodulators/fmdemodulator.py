@@ -19,9 +19,12 @@ import logging
 import queue
 import threading
 import time
+from collections import deque
+from math import ceil
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+import webrtcvad
 from scipy import signal
 
 from common.audio_queue_config import get_audio_queue_config
@@ -47,6 +50,9 @@ class FMDemodulator(threading.Thread):
     subscriber queue from the IQBroadcaster. This allows multiple VFOs to
     process the same IQ samples without gaps.
     """
+
+    VALID_SQUELCH_MODES = {"carrier", "voice", "hybrid"}
+    VALID_VAD_SENSITIVITIES = {"low", "medium", "high"}
 
     def __init__(
         self,
@@ -79,8 +85,12 @@ class FMDemodulator(threading.Thread):
         # Audio buffer to accumulate samples
         self.audio_buffer = np.array([], dtype=np.float32)
 
-        # Squelch state (for hysteresis)
-        self.squelch_open = False  # Track if squelch is open (signal present)
+        # Carrier squelch state (RF-power/hysteresis gate)
+        self.squelch_open = False
+
+        # Voice squelch state (post-demod audio VAD gate)
+        self.voice_squelch_open = False
+        self.current_squelch_mode = "carrier"
 
         # Processing state
         self.last_sample = 0 + 0j
@@ -100,6 +110,42 @@ class FMDemodulator(threading.Thread):
         self.power_update_rate = 4.0  # Hz - send power measurements 4 times per second
         self.last_power_time = 0.0
         self.last_rf_power_db = None  # Cache last measured power
+
+        # Voice squelch/VAD settings
+        self.vad_sample_rate = 16000
+        self.vad_frame_ms = 20
+        self.vad_frame_samples = int(self.vad_sample_rate * self.vad_frame_ms / 1000.0)
+        self.vad_freq_bins = np.fft.rfftfreq(self.vad_frame_samples, d=1.0 / self.vad_sample_rate)
+        self.vad_open_window_ms = 200
+        self.vad_open_window_frames = max(1, self.vad_open_window_ms // self.vad_frame_ms)
+        self.vad_preroll_ms = 200
+        self.vad_preroll_samples = int(self.audio_sample_rate * self.vad_preroll_ms / 1000.0)
+        self.vad_frame_buffer = np.array([], dtype=np.float32)
+        self.vad_recent_voiced: deque[bool] = deque(maxlen=self.vad_open_window_frames)
+        self.vad_recent_rms: deque[float] = deque(maxlen=50)  # ~1s at 20ms frames
+        self.vad_hangover_frames_remaining = 0
+        self.vad_preroll_buffer = np.array([], dtype=np.float32)
+        self.vad_noise_rms = 0.003
+        self.vad_last_frame_voiced = False
+        self.vad_recent_voiced_ratio = 0.0
+        self.vad_modulation_index = 0.0
+        self.vad_last_stationary_noise = False
+        self.vad_low_modulation_frames = 0
+        self.vad_high_modulation_frames = 0
+        self.vad_last_frame_rms = 0.0
+        self.vad_last_frame_flatness = 1.0
+        self.vad_last_frame_band_ratio_db = 0.0
+        self.vad_last_frame_zcr = 0.0
+        self.vad_last_webrtc_speech = False
+        self.webrtc_vad = webrtcvad.Vad(2)
+        self.last_squelch_debug_log_time = 0.0
+        self.last_audio_overflow_warning_time = 0.0
+        self.last_squelch_debug: Dict[str, Any] = {
+            "mode": "carrier",
+            "gate_open": False,
+            "carrier_open": False,
+            "voice_open": False,
+        }
 
         # Performance monitoring stats
         self.stats: Dict[str, Any] = {
@@ -316,6 +362,356 @@ class FMDemodulator(threading.Thread):
         is_in_band = abs(offset) <= usable_bandwidth
         margin_hz = usable_bandwidth - abs(offset)
         return is_in_band, offset, margin_hz
+
+    def _normalize_squelch_mode(self, squelch_mode: Optional[str]) -> str:
+        if squelch_mode is None:
+            return "carrier"
+        normalized_mode = str(squelch_mode).lower().strip()
+        if normalized_mode not in self.VALID_SQUELCH_MODES:
+            return "carrier"
+        return normalized_mode
+
+    def _normalize_vad_sensitivity(self, vad_sensitivity: Optional[str]) -> str:
+        if vad_sensitivity is None:
+            return "medium"
+        normalized_sensitivity = str(vad_sensitivity).lower().strip()
+        if normalized_sensitivity not in self.VALID_VAD_SENSITIVITIES:
+            return "medium"
+        return normalized_sensitivity
+
+    def _normalize_vad_close_delay(self, close_delay_ms: Optional[int]) -> int:
+        if close_delay_ms is None:
+            return 300
+        try:
+            parsed_close_delay = int(close_delay_ms)
+        except (TypeError, ValueError):
+            parsed_close_delay = 300
+        return max(50, min(500, parsed_close_delay))
+
+    def _get_vad_profile(self, sensitivity: str) -> Dict[str, float]:
+        # "high" means more sensitive voice opening from the user's perspective.
+        profiles = {
+            "low": {
+                # Previous "medium" behavior.
+                "aggressiveness": 1,
+                "open_ratio": 0.45,
+                "close_ratio": 0.15,
+                "mod_open_min": 0.14,
+                "mod_keep_min": 0.08,
+                "mod_stationary_max": 0.09,
+                "rms_multiplier": 2.0,
+                "flatness_max": 0.70,
+                "band_ratio_db_min": 0.5,
+                "zcr_max": 0.35,
+            },
+            "medium": {
+                # Previous "high" behavior.
+                "aggressiveness": 0,
+                "open_ratio": 0.30,
+                "close_ratio": 0.10,
+                "mod_open_min": 0.12,
+                "mod_keep_min": 0.07,
+                "mod_stationary_max": 0.08,
+                "rms_multiplier": 1.7,
+                "flatness_max": 0.80,
+                "band_ratio_db_min": -1.0,
+                "zcr_max": 0.42,
+            },
+            "high": {
+                # New most-sensitive profile.
+                "aggressiveness": 0,
+                "open_ratio": 0.22,
+                "close_ratio": 0.08,
+                "mod_open_min": 0.10,
+                "mod_keep_min": 0.06,
+                "mod_stationary_max": 0.08,
+                "rms_multiplier": 1.5,
+                "flatness_max": 0.86,
+                "band_ratio_db_min": -2.0,
+                "zcr_max": 0.50,
+            },
+        }
+        return profiles.get(sensitivity, profiles["medium"])
+
+    def _apply_carrier_squelch(self, rf_power_db: float, squelch_threshold_db: float) -> bool:
+        squelch_hysteresis_db = 3.0
+        if self.squelch_open:
+            if rf_power_db < (squelch_threshold_db - squelch_hysteresis_db):
+                self.squelch_open = False
+        else:
+            if rf_power_db > (squelch_threshold_db + squelch_hysteresis_db):
+                self.squelch_open = True
+        return self.squelch_open
+
+    def _reset_voice_squelch_state(self) -> None:
+        self.voice_squelch_open = False
+        self.vad_hangover_frames_remaining = 0
+        self.vad_frame_buffer = np.array([], dtype=np.float32)
+        self.vad_recent_voiced.clear()
+        self.vad_recent_rms.clear()
+        self.vad_preroll_buffer = np.array([], dtype=np.float32)
+        self.vad_last_frame_voiced = False
+        self.vad_recent_voiced_ratio = 0.0
+        self.vad_modulation_index = 0.0
+        self.vad_last_stationary_noise = False
+        self.vad_low_modulation_frames = 0
+        self.vad_high_modulation_frames = 0
+        self.vad_last_frame_rms = 0.0
+        self.vad_last_frame_flatness = 1.0
+        self.vad_last_frame_band_ratio_db = 0.0
+        self.vad_last_frame_zcr = 0.0
+        self.vad_last_webrtc_speech = False
+
+    def _update_vad_noise_floor(self, frame_rms: float, frame_voiced: bool) -> None:
+        if frame_voiced:
+            return
+        alpha = 0.95
+        self.vad_noise_rms = (alpha * self.vad_noise_rms) + ((1.0 - alpha) * frame_rms)
+        self.vad_noise_rms = max(1e-4, min(0.2, self.vad_noise_rms))
+
+    def _compute_vad_frame_features(self, frame: np.ndarray) -> Dict[str, float]:
+        frame_rms = float(np.sqrt(np.mean(frame * frame) + 1e-12))
+
+        windowed = frame * np.hanning(len(frame))
+        spectrum = np.abs(np.fft.rfft(windowed)) + 1e-12
+        power_spectrum = spectrum * spectrum
+        flatness = float(np.exp(np.mean(np.log(spectrum))) / np.mean(spectrum))
+
+        speech_mask = (self.vad_freq_bins >= 300.0) & (self.vad_freq_bins <= 3000.0)
+        high_mask = (self.vad_freq_bins > 3500.0) & (self.vad_freq_bins <= 7000.0)
+        speech_energy = float(np.sum(power_spectrum[speech_mask]) + 1e-12)
+        high_energy = float(np.sum(power_spectrum[high_mask]) + 1e-12)
+        band_ratio_db = 10.0 * np.log10(speech_energy / high_energy)
+
+        zero_crossings = np.count_nonzero(np.diff(np.signbit(frame)))
+        zcr = zero_crossings / max(1, len(frame) - 1)
+
+        return {
+            "rms": frame_rms,
+            "flatness": flatness,
+            "band_ratio_db": float(band_ratio_db),
+            "zcr": float(zcr),
+        }
+
+    def _detect_voice_frame(self, frame: np.ndarray, profile: Dict[str, float]) -> bool:
+        frame_features = self._compute_vad_frame_features(frame)
+        frame_rms = frame_features["rms"]
+        flatness = frame_features["flatness"]
+        band_ratio_db = frame_features["band_ratio_db"]
+        zcr = frame_features["zcr"]
+        self.vad_last_frame_rms = frame_rms
+        self.vad_last_frame_flatness = flatness
+        self.vad_last_frame_band_ratio_db = band_ratio_db
+        self.vad_last_frame_zcr = zcr
+
+        dynamic_rms_threshold = max(0.0035, self.vad_noise_rms * float(profile["rms_multiplier"]))
+
+        try:
+            pcm = np.clip(frame, -1.0, 1.0)
+            pcm16 = (pcm * 32767.0).astype(np.int16)
+            webrtc_is_speech = bool(
+                self.webrtc_vad.is_speech(pcm16.tobytes(), self.vad_sample_rate)
+            )
+            self.vad_last_webrtc_speech = webrtc_is_speech
+
+            # Noise-rejection guard for repeater hiss:
+            # broadband noise often gets occasional false positives from WebRTC VAD.
+            looks_like_broadband_noise = flatness > 0.80 and band_ratio_db < 0.0 and zcr > 0.30
+            is_loud_enough = frame_rms > dynamic_rms_threshold
+            final_voiced = webrtc_is_speech and is_loud_enough and not looks_like_broadband_noise
+
+            self._update_vad_noise_floor(frame_rms, final_voiced)
+            return final_voiced
+        except Exception:
+            # Keep decoder resilient to occasional VAD-frame runtime issues.
+            self.vad_last_webrtc_speech = False
+            self._update_vad_noise_floor(frame_rms, False)
+            return False
+
+    def _update_voice_squelch_state(
+        self, audio_44k: np.ndarray, vad_sensitivity: str, vad_close_delay_ms: int
+    ) -> bool:
+        profile = self._get_vad_profile(vad_sensitivity)
+        self.webrtc_vad.set_mode(int(profile["aggressiveness"]))
+
+        hangover_frames = max(1, ceil(vad_close_delay_ms / self.vad_frame_ms))
+        open_modulation_frames_required_by_sensitivity = {
+            "low": max(3, ceil(self.vad_open_window_frames * 0.50)),
+            "medium": max(3, ceil(self.vad_open_window_frames * 0.35)),
+            "high": max(2, ceil(self.vad_open_window_frames * 0.25)),
+        }
+        close_low_modulation_ratio_by_sensitivity = {
+            "low": 0.45,
+            "medium": 0.35,
+            "high": 0.30,
+        }
+        force_close_voiced_ratio_max_by_sensitivity = {
+            "low": 0.28,
+            "medium": 0.25,
+            "high": 0.20,
+        }
+        open_modulation_frames_required = open_modulation_frames_required_by_sensitivity.get(
+            vad_sensitivity, open_modulation_frames_required_by_sensitivity["medium"]
+        )
+        close_low_modulation_frames_required = max(
+            3,
+            ceil(
+                hangover_frames
+                * close_low_modulation_ratio_by_sensitivity.get(
+                    vad_sensitivity, close_low_modulation_ratio_by_sensitivity["medium"]
+                )
+            ),
+        )
+        force_close_voiced_ratio_max = force_close_voiced_ratio_max_by_sensitivity.get(
+            vad_sensitivity, force_close_voiced_ratio_max_by_sensitivity["medium"]
+        )
+        # Use a shorter modulation-history window for low close-delay settings so
+        # noise closure reacts quickly after speech ends.
+        if vad_close_delay_ms <= 100:
+            modulation_window_frames = 8  # ~160 ms
+            modulation_min_frames = 6
+        elif vad_close_delay_ms <= 250:
+            modulation_window_frames = 12  # ~240 ms
+            modulation_min_frames = 8
+        else:
+            modulation_window_frames = 16  # ~320 ms
+            modulation_min_frames = 10
+        # For very short close delays, prioritize fast closure on stationary/noise-like
+        # audio over voiced-ratio smoothing so the control feels responsive.
+        enforce_force_close_voiced_ratio = vad_close_delay_ms >= 200
+        stationary_frames_required = max(3, ceil(self.vad_open_window_frames * 0.30))
+
+        audio_16k = signal.resample_poly(audio_44k, up=160, down=441).astype(np.float32)
+        self.vad_frame_buffer = np.concatenate([self.vad_frame_buffer, audio_16k])
+
+        while len(self.vad_frame_buffer) >= self.vad_frame_samples:
+            frame = self.vad_frame_buffer[: self.vad_frame_samples]
+            self.vad_frame_buffer = self.vad_frame_buffer[self.vad_frame_samples :]
+
+            frame_voiced = self._detect_voice_frame(frame, profile)
+            frame_rms = self.vad_last_frame_rms
+            self.vad_recent_rms.append(frame_rms)
+            if len(self.vad_recent_rms) >= modulation_min_frames:
+                recent_rms_tail = list(self.vad_recent_rms)[-modulation_window_frames:]
+                recent_rms_arr = np.array(recent_rms_tail, dtype=np.float32)
+                rms_mean = float(np.mean(recent_rms_arr) + 1e-12)
+                rms_std = float(np.std(recent_rms_arr))
+                self.vad_modulation_index = rms_std / rms_mean
+            else:
+                self.vad_modulation_index = 0.0
+
+            modulation_ready = len(self.vad_recent_rms) >= modulation_min_frames
+            stationary_modulation_max = float(profile["mod_stationary_max"])
+            stationary_modulation = (
+                modulation_ready and self.vad_modulation_index <= stationary_modulation_max
+            )
+            low_modulation = modulation_ready and self.vad_modulation_index <= float(
+                profile["mod_keep_min"]
+            )
+            high_modulation = modulation_ready and self.vad_modulation_index >= float(
+                profile["mod_open_min"]
+            )
+            # Track sustained stationary/low modulation for close decisions.
+            if stationary_modulation:
+                self.vad_low_modulation_frames += 1
+            else:
+                self.vad_low_modulation_frames = 0
+
+            if high_modulation and frame_voiced:
+                self.vad_high_modulation_frames += 1
+            else:
+                self.vad_high_modulation_frames = 0
+
+            # Reject persistent stationary "always voiced" noise.
+            tentative_voiced_ratio = (
+                sum(self.vad_recent_voiced) + (1 if frame_voiced else 0)
+            ) / max(1, len(self.vad_recent_voiced) + 1)
+            stationary_noise = (
+                modulation_ready
+                and tentative_voiced_ratio >= 0.45
+                and self.vad_low_modulation_frames >= stationary_frames_required
+                and stationary_modulation
+            )
+            self.vad_last_stationary_noise = bool(stationary_noise)
+            if stationary_noise or stationary_modulation or low_modulation:
+                frame_voiced = False
+
+            self.vad_last_frame_voiced = frame_voiced
+            self.vad_recent_voiced.append(frame_voiced)
+            voiced_ratio = sum(self.vad_recent_voiced) / len(self.vad_recent_voiced)
+            self.vad_recent_voiced_ratio = voiced_ratio
+
+            if frame_voiced:
+                self.vad_hangover_frames_remaining = hangover_frames
+            elif self.vad_hangover_frames_remaining > 0:
+                self.vad_hangover_frames_remaining -= 1
+
+            if not self.voice_squelch_open:
+                if (
+                    len(self.vad_recent_voiced) >= self.vad_open_window_frames
+                    and modulation_ready
+                    and voiced_ratio >= float(profile["open_ratio"])
+                    and self.vad_high_modulation_frames >= open_modulation_frames_required
+                ):
+                    self.voice_squelch_open = True
+                    self.vad_hangover_frames_remaining = hangover_frames
+            else:
+                force_low_modulation_close = (
+                    modulation_ready
+                    and self.vad_low_modulation_frames >= close_low_modulation_frames_required
+                )
+                if enforce_force_close_voiced_ratio:
+                    force_low_modulation_close = (
+                        force_low_modulation_close and voiced_ratio <= force_close_voiced_ratio_max
+                    )
+                natural_close = (
+                    self.vad_hangover_frames_remaining == 0
+                    and voiced_ratio <= float(profile["close_ratio"])
+                    and self.vad_modulation_index < float(profile["mod_open_min"])
+                )
+                if force_low_modulation_close or natural_close:
+                    self.voice_squelch_open = False
+                    self.vad_hangover_frames_remaining = 0
+
+        return self.voice_squelch_open
+
+    def _append_preroll(self, audio: np.ndarray) -> None:
+        if self.vad_preroll_samples <= 0:
+            return
+        self.vad_preroll_buffer = np.concatenate([self.vad_preroll_buffer, audio])
+        if len(self.vad_preroll_buffer) > self.vad_preroll_samples:
+            self.vad_preroll_buffer = self.vad_preroll_buffer[-self.vad_preroll_samples :]
+
+    def _apply_voice_squelch(
+        self, audio: np.ndarray, vad_sensitivity: str, vad_close_delay_ms: int
+    ) -> np.ndarray:
+        was_open = self.voice_squelch_open
+        is_open = self._update_voice_squelch_state(audio, vad_sensitivity, vad_close_delay_ms)
+
+        if is_open:
+            if not was_open and len(self.vad_preroll_buffer) > 0:
+                audio_with_preroll = np.concatenate([self.vad_preroll_buffer, audio])
+                self.vad_preroll_buffer = np.array([], dtype=np.float32)
+                return audio_with_preroll
+            self.vad_preroll_buffer = np.array([], dtype=np.float32)
+            return audio
+
+        self._append_preroll(audio)
+        return np.zeros_like(audio)
+
+    def _build_squelch_debug(
+        self,
+        squelch_mode: str,
+        carrier_open: bool,
+        voice_open: bool,
+        gate_open: bool,
+    ) -> Dict[str, Any]:
+        return {
+            "mode": squelch_mode,
+            "gate_open": bool(gate_open),
+            "carrier_open": bool(carrier_open),
+            "voice_open": bool(voice_open),
+        }
 
     def run(self):
         """Main demodulator loop."""
@@ -538,45 +934,100 @@ class FMDemodulator(threading.Thread):
                 if num_output_samples > 0:
                     audio = signal.resample(deemphasized, num_output_samples)
 
-                    # Apply amplification to boost low audio levels
-                    # Adjust this gain factor if audio is still too quiet or too loud
-                    audio_gain = 3.0  # 3x amplification (adjustable)
-                    audio = audio * audio_gain
-
-                    # Soft clipping instead of normalization (preserves relative levels)
-                    # Only clip values that exceed [-1, 1] range
-                    audio = np.clip(audio, -0.95, 0.95)
-
                     # NOTE: Volume is applied by WebAudioStreamer, not here
                     # This allows per-session volume control
 
-                    # Apply squelch based on RF signal strength (measured earlier)
-                    # Get squelch threshold from VFO state (works in both normal and internal mode)
+                    # Resolve squelch settings from active VFO. Internal mode still reads live VFO
+                    # values so automation can tune squelch behavior without restarting demod.
                     if self.internal_mode:
-                        # In internal mode, get VFO state for squelch settings
                         vfo_state_for_squelch = self._get_active_vfo()
-                        if vfo_state_for_squelch:
-                            squelch_threshold_db = vfo_state_for_squelch.squelch
-                        else:
-                            squelch_threshold_db = -200  # Fallback if no VFO state
                     else:
-                        squelch_threshold_db = vfo_state.squelch  # e.g., -150 dB
+                        vfo_state_for_squelch = vfo_state
 
-                    squelch_hysteresis_db = 3  # 3 dB hysteresis to prevent flutter
-
-                    # Apply squelch with hysteresis
-                    if self.squelch_open:
-                        # Squelch is open - close if RF power drops below (threshold - hysteresis)
-                        if rf_power_db < (squelch_threshold_db - squelch_hysteresis_db):
-                            self.squelch_open = False
-                            audio = np.zeros_like(audio)  # Mute
+                    if vfo_state_for_squelch:
+                        squelch_threshold_db = vfo_state_for_squelch.squelch
+                        squelch_mode = self._normalize_squelch_mode(
+                            getattr(vfo_state_for_squelch, "squelch_mode", "carrier")
+                        )
+                        vad_sensitivity = self._normalize_vad_sensitivity(
+                            getattr(vfo_state_for_squelch, "vad_sensitivity", "medium")
+                        )
+                        vad_close_delay_ms = self._normalize_vad_close_delay(
+                            getattr(vfo_state_for_squelch, "vad_close_delay_ms", 300)
+                        )
                     else:
-                        # Squelch is closed - open if RF power rises above (threshold + hysteresis)
-                        if rf_power_db > (squelch_threshold_db + squelch_hysteresis_db):
-                            self.squelch_open = True
-                            # Let audio through
-                        else:
-                            audio = np.zeros_like(audio)  # Keep muted
+                        squelch_threshold_db = -200
+                        squelch_mode = "carrier"
+                        vad_sensitivity = "medium"
+                        vad_close_delay_ms = 300
+
+                    if squelch_mode != self.current_squelch_mode:
+                        # Avoid stale frame/hangover state when switching squelch strategies.
+                        self._reset_voice_squelch_state()
+                        self.current_squelch_mode = squelch_mode
+
+                    carrier_open = self._apply_carrier_squelch(rf_power_db, squelch_threshold_db)
+                    voice_open = self.voice_squelch_open
+
+                    if squelch_mode == "carrier":
+                        voice_open = False
+                        if not carrier_open:
+                            audio = np.zeros_like(audio)
+                        gate_open = carrier_open
+                    elif squelch_mode == "voice":
+                        audio = self._apply_voice_squelch(
+                            audio,
+                            vad_sensitivity=vad_sensitivity,
+                            vad_close_delay_ms=vad_close_delay_ms,
+                        )
+                        voice_open = self.voice_squelch_open
+                        gate_open = voice_open
+                    else:  # hybrid
+                        audio = self._apply_voice_squelch(
+                            audio,
+                            vad_sensitivity=vad_sensitivity,
+                            vad_close_delay_ms=vad_close_delay_ms,
+                        )
+                        voice_open = self.voice_squelch_open
+                        if not carrier_open:
+                            audio = np.zeros_like(audio)
+                        gate_open = carrier_open and voice_open
+
+                    if should_update_ui_power:
+                        self.last_squelch_debug = self._build_squelch_debug(
+                            squelch_mode=squelch_mode,
+                            carrier_open=carrier_open,
+                            voice_open=voice_open,
+                            gate_open=gate_open,
+                        )
+
+                    with self.stats_lock:
+                        self.stats["squelch_mode"] = squelch_mode
+                        self.stats["squelch_gate_open"] = gate_open
+                        self.stats["carrier_squelch_open"] = carrier_open
+                        self.stats["voice_squelch_open"] = voice_open
+
+                    if (
+                        logger.isEnabledFor(logging.DEBUG)
+                        and current_time - self.last_squelch_debug_log_time >= 1.0
+                    ):
+                        self.last_squelch_debug_log_time = current_time
+                        logger.debug(
+                            "Squelch[%s:%s] mode=%s gate=%s carrier=%s voice=%s rf=%.1fdB thr=%.1fdB",
+                            self.session_id,
+                            self.vfo_number,
+                            squelch_mode,
+                            gate_open,
+                            carrier_open,
+                            voice_open,
+                            rf_power_db,
+                            squelch_threshold_db,
+                        )
+
+                    # Apply amplification and clipping AFTER squelch, so VAD sees
+                    # unclipped audio and doesn't over-trigger on broadband hiss.
+                    audio_gain = 3.0  # 3x amplification (adjustable)
+                    audio = np.clip(audio * audio_gain, -0.95, 0.95)
 
                     # Convert to float32
                     audio = audio.astype(np.float32)
@@ -585,19 +1036,40 @@ class FMDemodulator(threading.Thread):
                     self.audio_buffer = np.concatenate([self.audio_buffer, audio])
 
                     # CRITICAL: Limit buffer size to prevent unbounded growth
-                    # If buffer grows too large (>10 chunks), drop oldest data
-                    max_buffer_samples = (
+                    # Base cap for low-latency steady-state operation.
+                    base_max_buffer_samples = (
                         self.target_chunk_size * self.audio_cfg.demod_audio_internal_buffer_chunks
                     )
+                    # Voice/hybrid squelch can release a burst that includes pre-roll.
+                    # Allow enough bounded headroom so a normal squelch transition
+                    # does not immediately trigger overflow warnings.
+                    voice_burst_headroom_samples = max(
+                        self.vad_preroll_samples + (self.target_chunk_size * 2),
+                        len(audio) + self.target_chunk_size,
+                    )
+                    voice_burst_headroom_samples = min(
+                        base_max_buffer_samples * 3,
+                        voice_burst_headroom_samples,
+                    )
+                    if self.current_squelch_mode in {"voice", "hybrid"}:
+                        max_buffer_samples = max(
+                            base_max_buffer_samples, voice_burst_headroom_samples
+                        )
+                    else:
+                        max_buffer_samples = base_max_buffer_samples
+
                     if len(self.audio_buffer) > max_buffer_samples:
                         # Keep only the most recent data
                         self.audio_buffer = self.audio_buffer[-max_buffer_samples:]
                         # Only log warning if not in internal mode (used by decoders like SSTV)
                         if not self.internal_mode:
-                            logger.warning(
-                                f"Audio buffer overflow ({len(self.audio_buffer)} samples), "
-                                f"dropping old audio to prevent lag buildup"
-                            )
+                            now = time.time()
+                            if now - self.last_audio_overflow_warning_time >= 5.0:
+                                self.last_audio_overflow_warning_time = now
+                                logger.warning(
+                                    f"Audio buffer overflow ({len(self.audio_buffer)} samples), "
+                                    f"dropping old audio to prevent lag buildup"
+                                )
                         else:
                             logger.debug(
                                 f"Audio buffer overflow ({len(self.audio_buffer)} samples), "
@@ -616,6 +1088,7 @@ class FMDemodulator(threading.Thread):
                             "audio": chunk,
                             "vfo_number": self.vfo_number,  # Tag audio with VFO number
                             "rf_power_db": self.last_rf_power_db,  # Include latest power measurement
+                            "squelch_debug": dict(self.last_squelch_debug),
                         }
 
                         # Always output audio (UI handles muting, transcription always active)
@@ -633,6 +1106,9 @@ class FMDemodulator(threading.Thread):
                             logger.debug(
                                 f"Audio queue full, dropping chunk for session {self.session_id}"
                             )
+                            # Also collapse any queued backlog so we don't repeatedly
+                            # overflow internal buffering while the consumer catches up.
+                            self.audio_buffer = self.audio_buffer[-self.target_chunk_size :]
                             break  # Exit while loop to process next IQ samples
                         except Exception as e:
                             logger.warning(f"Could not queue audio: {str(e)}")

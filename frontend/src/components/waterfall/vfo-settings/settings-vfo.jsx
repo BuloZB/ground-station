@@ -11,15 +11,18 @@ import { Box, Tabs, Tab } from "@mui/material";
 import LockIcon from '@mui/icons-material/Lock';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeMuteIcon from '@mui/icons-material/VolumeMute';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import { useTranslation } from 'react-i18next';
 import { VfoTabPanel } from './vfo-tab-panel.jsx';
 import { TransmittersDialog, TranscriptionParamsDialog } from './vfo-dialogs.jsx';
 import DecoderParamsDialog from '../decoder-params-dialog.jsx';
+import { resolveVfoAudioStatus, VFO_AUDIO_STATUS } from '../vfo-audio-status.js';
 import {
     useVfoAudioState,
     useVfoDecoderInfo,
     useVfoWheelHandlers,
     useVfoSatelliteData,
+    useVfoSquelchState,
     useVfoStreamingState
 } from './vfo-hooks.js';
 
@@ -57,6 +60,7 @@ const VfoAccordion = ({
     } = useVfoSatelliteData();
 
     const { streamingVFOs, vfoMutedRedux } = useVfoStreamingState();
+    const { vfoSquelchOpen } = useVfoSquelchState();
 
     // Set up wheel event handlers for sliders
     useVfoWheelHandlers(vfoMarkers, vfoActive, onVFOPropertyChange);
@@ -110,13 +114,23 @@ const VfoAccordion = ({
                         }
                     }}
                 >
-                    {[0, 1, 2, 3].map((index) => (
-                        <Tab
+                    {[0, 1, 2, 3].map((index) => {
+                        const vfoNumber = index + 1;
+                        const isStreaming = streamingVFOs.includes(vfoNumber);
+                        const isMuted = Boolean(vfoMutedRedux[vfoNumber]);
+                        const audioStatus = resolveVfoAudioStatus({
+                            isStreaming,
+                            isMuted,
+                            isSquelchOpen: vfoSquelchOpen[vfoNumber],
+                        });
+
+                        return (
+                            <Tab
                             key={index}
                             label={
                                 <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
-                                    {index + 1}
-                                    {vfoMarkers[index + 1]?.lockedTransmitterId && vfoMarkers[index + 1]?.lockedTransmitterId !== 'none' && (
+                                    {vfoNumber}
+                                    {vfoMarkers[vfoNumber]?.lockedTransmitterId && vfoMarkers[vfoNumber]?.lockedTransmitterId !== 'none' && (
                                         <LockIcon
                                             sx={{
                                                 position: 'absolute',
@@ -127,7 +141,7 @@ const VfoAccordion = ({
                                             }}
                                         />
                                     )}
-                                    {!streamingVFOs.includes(index + 1) && (
+                                    {audioStatus === VFO_AUDIO_STATUS.NO_AUDIO && (
                                         <VolumeMuteIcon
                                             sx={{
                                                 position: 'absolute',
@@ -139,7 +153,7 @@ const VfoAccordion = ({
                                             }}
                                         />
                                     )}
-                                    {streamingVFOs.includes(index + 1) && vfoMutedRedux[index + 1] && (
+                                    {audioStatus === VFO_AUDIO_STATUS.MUTED && (
                                         <VolumeMuteIcon
                                             sx={{
                                                 position: 'absolute',
@@ -151,7 +165,19 @@ const VfoAccordion = ({
                                             }}
                                         />
                                     )}
-                                    {streamingVFOs.includes(index + 1) && !vfoMutedRedux[index + 1] && (
+                                    {audioStatus === VFO_AUDIO_STATUS.SQUELCHED && (
+                                        <VolumeOffIcon
+                                            sx={{
+                                                position: 'absolute',
+                                                bottom: -2,
+                                                right: -6,
+                                                fontSize: '0.75rem',
+                                                pointerEvents: 'none',
+                                                color: 'warning.main',
+                                            }}
+                                        />
+                                    )}
+                                    {audioStatus === VFO_AUDIO_STATUS.PLAYING && (
                                         <VolumeUpIcon
                                             sx={{
                                                 position: 'absolute',
@@ -163,9 +189,9 @@ const VfoAccordion = ({
                                             }}
                                         />
                                     )}
-                                    {vfoActive[index + 1] && (
+                                    {vfoActive[vfoNumber] && (
                                         <Box
-                                            aria-label={`VFO ${index + 1} active`}
+                                            aria-label={`VFO ${vfoNumber} active`}
                                             sx={{
                                                 position: 'absolute',
                                                 top: -4,
@@ -190,7 +216,8 @@ const VfoAccordion = ({
                                 },
                             }}
                         />
-                    ))}
+                        );
+                    })}
                 </Tabs>
 
                 {/* VFO Tab Panel (render only active tab for performance) */}

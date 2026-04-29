@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ground-station"
 version = "0.1.0"
 description = "Full-featured, open-source software solution for satellite tracking, radio communication, and data decoding"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = {text = "GPL-3.0-only"}
 authors = [
@@ -98,6 +98,7 @@ dependencies = [
     "typing_extensions>=4.12.2",
     "urllib3>=2.6.3",
     "uvicorn>=0.34.0",
+    "webrtcvad-wheels>=2.0.14",
     "websocket-client>=1.8.0",
     "websockets>=14.0",
     "wsproto>=1.2.0",
@@ -136,6 +137,11 @@ ground-station = "app:main"
 # ============================================================================
 # Tool configurations
 # ============================================================================
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+exclude = ["tests*", "venv*", ".venv*"]
 
 [tool.black]
 line-length = 100

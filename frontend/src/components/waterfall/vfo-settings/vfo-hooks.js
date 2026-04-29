@@ -158,3 +158,49 @@ export const useVfoStreamingState = () => {
         vfoMutedRedux
     };
 };
+
+/**
+ * Hook to get per-VFO squelch gate state from audio diagnostics.
+ * `true` = gate open, `false` = gate closed (squelched), `null` = unknown/not yet available.
+ */
+export const useVfoSquelchState = () => {
+    const { getVfoSquelchDebug } = useAudio();
+    const [vfoSquelchOpen, setVfoSquelchOpen] = React.useState({
+        1: null,
+        2: null,
+        3: null,
+        4: null,
+    });
+
+    React.useEffect(() => {
+        const readSquelchState = () => {
+            const nextState = { 1: null, 2: null, 3: null, 4: null };
+            for (let vfoNumber = 1; vfoNumber <= 4; vfoNumber += 1) {
+                const debug = getVfoSquelchDebug?.(vfoNumber);
+                if (debug && typeof debug.gate_open === 'boolean') {
+                    nextState[vfoNumber] = Boolean(debug.gate_open);
+                }
+            }
+
+            setVfoSquelchOpen((prevState) => {
+                if (
+                    prevState[1] === nextState[1] &&
+                    prevState[2] === nextState[2] &&
+                    prevState[3] === nextState[3] &&
+                    prevState[4] === nextState[4]
+                ) {
+                    return prevState;
+                }
+                return nextState;
+            });
+        };
+
+        readSquelchState();
+        const interval = setInterval(readSquelchState, 250);
+        return () => clearInterval(interval);
+    }, [getVfoSquelchDebug]);
+
+    return {
+        vfoSquelchOpen,
+    };
+};

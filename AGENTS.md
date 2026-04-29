@@ -44,3 +44,8 @@
 - Add code comments more proactively when touching logic that is not immediately obvious.
 - Keep comments brief and clear (avoid verbose explanations).
 - Focus comments on intent and non-obvious behavior, not line-by-line narration.
+
+## Linting / Quality Check Timing
+- Do **not** run linters/formatters/type-checkers on every small iterative change during feature development.
+- Run linting/quality checks once at the end of feature development, or immediately before committing.
+- If linting is intentionally skipped during intermediate steps, rely on the automated CI flow to run full checks.

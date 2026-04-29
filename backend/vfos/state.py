@@ -20,6 +20,9 @@ class VFOState:
     selected: bool = False
     volume: int = 50
     squelch: int = -150
+    squelch_mode: str = "carrier"  # carrier, voice, hybrid
+    vad_sensitivity: str = "medium"  # low, medium, high
+    vad_close_delay_ms: int = 300  # 50-500 ms hangover
     transcription_enabled: bool = False  # Enable/disable transcription for this VFO
     transcription_provider: str = "gemini"  # Transcription provider (gemini, deepgram)
     transcription_language: str = "auto"  # Language code for transcription (auto-detect by default)
@@ -37,6 +40,10 @@ class VFOManager:
 
     # Internal observation namespace prefix
     INTERNAL_PREFIX = "internal:"
+    SQUELCH_MODES = {"carrier", "voice", "hybrid"}
+    VAD_SENSITIVITY_LEVELS = {"low", "medium", "high"}
+    VAD_CLOSE_DELAY_MS_MIN = 50
+    VAD_CLOSE_DELAY_MS_MAX = 500
 
     def __new__(cls):
         if cls._instance is None:
@@ -72,6 +79,9 @@ class VFOManager:
         selected: Optional[bool] = None,
         volume: Optional[int] = None,
         squelch: Optional[int] = None,
+        squelch_mode: Optional[str] = None,
+        vad_sensitivity: Optional[str] = None,
+        vad_close_delay_ms: Optional[int] = None,
         transcription_enabled: Optional[bool] = None,
         transcription_provider: Optional[str] = None,
         transcription_language: Optional[str] = None,
@@ -121,6 +131,31 @@ class VFOManager:
         # check squelch
         if squelch is not None:
             vfo_state.squelch = squelch
+
+        # Check squelch mode
+        if squelch_mode is not None:
+            normalized_squelch_mode = str(squelch_mode).lower().strip()
+            if normalized_squelch_mode in self.SQUELCH_MODES:
+                vfo_state.squelch_mode = normalized_squelch_mode
+
+        # Check VAD sensitivity
+        if vad_sensitivity is not None:
+            normalized_vad_sensitivity = str(vad_sensitivity).lower().strip()
+            if normalized_vad_sensitivity in self.VAD_SENSITIVITY_LEVELS:
+                vfo_state.vad_sensitivity = normalized_vad_sensitivity
+
+        # Check VAD close delay
+        if vad_close_delay_ms is not None:
+            try:
+                parsed_close_delay = int(vad_close_delay_ms)
+            except (TypeError, ValueError):
+                parsed_close_delay = vfo_state.vad_close_delay_ms
+
+            clamped_close_delay = max(
+                self.VAD_CLOSE_DELAY_MS_MIN,
+                min(self.VAD_CLOSE_DELAY_MS_MAX, parsed_close_delay),
+            )
+            vfo_state.vad_close_delay_ms = clamped_close_delay
 
         # check if selected
         if selected is not None:
@@ -332,6 +367,9 @@ class VFOManager:
         decoder: str = "none",
         locked_transmitter_id: str = "none",
         squelch: int = -150,
+        squelch_mode: str = "carrier",
+        vad_sensitivity: str = "medium",
+        vad_close_delay_ms: int = 300,
         volume: int = 50,
         session_key: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -352,6 +390,9 @@ class VFOManager:
             locked_transmitter_id: Transmitter ID for doppler tracking (default: "none")
             squelch: Squelch level in dB (default: -150, wide open)
             volume: Audio volume 0-100 (default: 50)
+            squelch_mode: Squelch mode (carrier, voice, hybrid)
+            vad_sensitivity: Voice squelch sensitivity (low, medium, high)
+            vad_close_delay_ms: Voice squelch close delay in milliseconds
             session_key: Optional suffix to identify the internal session
             session_id: Optional full internal session ID override
 
@@ -384,6 +425,9 @@ class VFOManager:
             selected=False,  # Not relevant for internal VFOs
             volume=volume,
             squelch=squelch,
+            squelch_mode=squelch_mode,
+            vad_sensitivity=vad_sensitivity,
+            vad_close_delay_ms=vad_close_delay_ms,
             decoder=decoder,
             locked_transmitter_id=locked_transmitter_id,
             parameters_enabled=True,

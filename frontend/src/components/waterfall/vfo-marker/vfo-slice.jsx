@@ -263,6 +263,9 @@ export const vfoSlice = createSlice({
                     state.vfoMarkers[vfoNum].mode = vfoState.modulation;
                     state.vfoMarkers[vfoNum].volume = vfoState.volume;
                     state.vfoMarkers[vfoNum].squelch = vfoState.squelch;
+                    state.vfoMarkers[vfoNum].squelchMode = vfoState.squelch_mode || 'carrier';
+                    state.vfoMarkers[vfoNum].vadSensitivity = vfoState.vad_sensitivity || 'medium';
+                    state.vfoMarkers[vfoNum].vadCloseDelayMs = vfoState.vad_close_delay_ms ?? 300;
                     // Note: lockedTransmitterId is UI-only, not synced from backend
 
                     // Update transcription fields if present

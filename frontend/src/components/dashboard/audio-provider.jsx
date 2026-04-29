@@ -21,7 +21,8 @@ const AudioContext = createContext({
     flushAudioBuffers: () => {},
     getAudioBufferLength: () => {},
     getVfoAudioLevel: () => {},
-    getVfoRfPower: () => {}
+    getVfoRfPower: () => {},
+    getVfoSquelchDebug: () => null
 });
 
 export const useAudio = () => {
@@ -56,6 +57,7 @@ export const AudioProvider = ({ children }) => {
     const vfoVolumeRef = useRef({}); // { 1: 1.0, 2: 1.0, ... } - individual VFO volumes
     const vfoAudioLevelRef = useRef({}); // { 1: 0.0, 2: 0.0, ... } - RMS audio levels
     const vfoRfPowerRef = useRef({}); // { 1: -100, 2: -100, ... } - RF power in dB
+    const vfoSquelchDebugRef = useRef({}); // { 1: {...}, 2: {...}, ... } - squelch diagnostics
 
     // Callback ref to handle audio from workers - must be defined before workers
     const playProcessedAudioRef = useRef(null);
@@ -253,6 +255,9 @@ export const AudioProvider = ({ children }) => {
         if (audioData.rf_power_db !== undefined && audioData.rf_power_db !== null) {
             vfoRfPowerRef.current[vfoNumber] = audioData.rf_power_db;
         }
+        if (audioData.squelch_debug !== undefined && audioData.squelch_debug !== null) {
+            vfoSquelchDebugRef.current[vfoNumber] = audioData.squelch_debug;
+        }
 
         // Send to the correct VFO worker for processing
         const worker = vfoWorkersRef.current[vfoNumber];
@@ -418,6 +423,12 @@ export const AudioProvider = ({ children }) => {
         return vfoRfPowerRef.current[vfoNumber] || null;
     }, []);
 
+    // Get VFO squelch diagnostics
+    const getVfoSquelchDebug = useCallback((vfoNumber) => {
+        if (vfoNumber < 1 || vfoNumber > 4) return null;
+        return vfoSquelchDebugRef.current[vfoNumber] || null;
+    }, []);
+
     // Register flush callback for use by middleware
     useEffect(() => {
         registerFlushCallback(flushAudioBuffers);
@@ -472,8 +483,9 @@ export const AudioProvider = ({ children }) => {
         flushAudioBuffers,
         getAudioBufferLength,
         getVfoAudioLevel,
-        getVfoRfPower
-    }), [audioEnabled, volume, initializeAudio, playAudioSamples, setAudioVolume, setVfoMute, setVfoVolume, stopAudio, getAudioState, flushAudioBuffers, getAudioBufferLength, getVfoAudioLevel, getVfoRfPower]);
+        getVfoRfPower,
+        getVfoSquelchDebug
+    }), [audioEnabled, volume, initializeAudio, playAudioSamples, setAudioVolume, setVfoMute, setVfoVolume, stopAudio, getAudioState, flushAudioBuffers, getAudioBufferLength, getVfoAudioLevel, getVfoRfPower, getVfoSquelchDebug]);
 
     return (
         <AudioContext.Provider value={value}>

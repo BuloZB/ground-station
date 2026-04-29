@@ -28,6 +28,7 @@ import {
     getDemodulatorConfig,
     getDecoderConfig
 } from './vfo-config.js';
+import { resolveVfoAudioStatus, VFO_AUDIO_STATUS } from '../vfo-audio-status.js';
 
 /**
  * Drawing utilities for VFO markers on the waterfall canvas
@@ -83,7 +84,21 @@ export const canvasDrawingUtils = {
         ctx.fill();
     },
 
-    drawVFOLabel: (ctx, centerX, labelText, color, opacity, isSelected, locked = false, decoderInfo = null, morseText = null, isStreaming = false, bpskOutputs = null, isMuted = false) => {
+    drawVFOLabel: (
+        ctx,
+        centerX,
+        labelText,
+        color,
+        opacity,
+        isSelected,
+        locked = false,
+        decoderInfo = null,
+        morseText = null,
+        isStreaming = false,
+        bpskOutputs = null,
+        isMuted = false,
+        audioStatus = null
+    ) => {
         ctx.font = 'bold 12px Monospace';
         const textMetrics = ctx.measureText(labelText);
 
@@ -129,28 +144,22 @@ export const canvasDrawingUtils = {
         const textY = 17; // Always use same text position
         ctx.fillText(labelText, centerX + textOffset, textY);
 
-        // Draw speaker icon with three states:
-        // 1. Gray speaker (no waves): No audio data reached browser
-        // 2. Green speaker (no waves): Audio reached, muted from UI
-        // 3. Green speaker with sound waves: Audio reached and playing
+        // Draw speaker icon with shared audio status logic.
         const iconX = centerX + (labelWidth / 2) - 20;
         const iconY = 7;
 
-        // Determine icon state and color
-        let iconColor, iconState;
-        if (!isStreaming) {
-            // State 1: No audio data
-            iconColor = '#888888'; // Gray
-            iconState = 'no-audio';
-        } else if (isMuted) {
-            // State 2: Audio available but muted by UI
-            iconColor = '#00ff00'; // Green
-            iconState = 'muted';
-        } else {
-            // State 3: Audio streaming and playing
-            iconColor = '#00ff00'; // Green
-            iconState = 'playing';
-        }
+        const resolvedAudioStatus = audioStatus || resolveVfoAudioStatus({
+            isStreaming,
+            isMuted,
+            isSquelchOpen: null,
+        });
+        const iconColorByStatus = {
+            [VFO_AUDIO_STATUS.NO_AUDIO]: '#888888',
+            [VFO_AUDIO_STATUS.MUTED]: '#00ff00',
+            [VFO_AUDIO_STATUS.SQUELCHED]: '#ffb300',
+            [VFO_AUDIO_STATUS.PLAYING]: '#00ff00',
+        };
+        const iconColor = iconColorByStatus[resolvedAudioStatus] || '#888888';
 
         // Draw speaker body (same for all states)
         ctx.fillStyle = iconColor;
@@ -165,9 +174,11 @@ export const canvasDrawingUtils = {
         ctx.closePath();
         ctx.fill();
 
-        // Draw sound waves only for playing state
-        if (iconState === 'playing') {
-            // Draw sound waves for playing state
+        // Draw sound waves for playing and squelched states
+        if (
+            resolvedAudioStatus === VFO_AUDIO_STATUS.PLAYING
+            || resolvedAudioStatus === VFO_AUDIO_STATUS.SQUELCHED
+        ) {
             ctx.strokeStyle = iconColor;
             ctx.lineWidth = 1.2;
             ctx.beginPath();
@@ -177,7 +188,17 @@ export const canvasDrawingUtils = {
             ctx.arc(iconX + 9, iconY + 6, 6, -Math.PI/4, Math.PI/4);
             ctx.stroke();
         }
-        // No additional drawing for 'muted' and 'no-audio' states (just the speaker body)
+
+        // For squelched state, overlay a diagonal slash to match UI icon semantics.
+        if (resolvedAudioStatus === VFO_AUDIO_STATUS.SQUELCHED) {
+            ctx.strokeStyle = iconColor;
+            ctx.lineWidth = 1.8;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(iconX - 1, iconY - 1);
+            ctx.lineTo(iconX + 15, iconY + 13);
+            ctx.stroke();
+        }
 
         // Draw secondary decoder label if decoder is active
         if (decoderInfo) {

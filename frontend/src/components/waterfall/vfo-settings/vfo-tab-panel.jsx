@@ -82,13 +82,17 @@ const VfoTabPanelComponent = ({
                 <SquelchSlider
                     vfoIndex={vfoIndex}
                     vfoActive={vfoActive[vfoIndex]}
-                    squelch={vfo?.squelch || -150}
+                    mode={vfo?.mode}
+                    squelch={vfo?.squelch ?? -150}
+                    squelchMode={vfo?.squelchMode ?? 'carrier'}
+                    vadSensitivity={vfo?.vadSensitivity ?? 'medium'}
+                    vadCloseDelayMs={vfo?.vadCloseDelayMs ?? 300}
                     onVFOPropertyChange={onVFOPropertyChange}
                 />
                 <VolumeSlider
                     vfoIndex={vfoIndex}
                     vfoActive={vfoActive[vfoIndex]}
-                    volume={vfo?.volume || 50}
+                    volume={vfo?.volume ?? 50}
                     muted={vfoMuted[vfoIndex]}
                     onVFOPropertyChange={onVFOPropertyChange}
                     onMuteToggle={onMuteToggle}
