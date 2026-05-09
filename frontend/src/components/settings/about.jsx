@@ -47,7 +47,7 @@ const AboutPage = () => {
     const versionInfo = useSelector((state) => state.version?.data);
 
     const featureItems = [
-        'Real-time Satellite Tracking: Track hundreds of satellites with high-precision orbital models. TLE data is automatically updated from CelesTrak and SatNOGS.',
+        'Real-time Satellite Tracking: Track hundreds of satellites with high-precision orbital models. Orbital data is automatically updated from CelesTrak and SatNOGS.',
         'Automated Antenna Rotator Control: Interface with popular antenna rotators to automatically track satellites as they pass overhead.',
         'SDR Integration: Stream and record live radio signals from a wide range of SDR devices, including RTL-SDR, SoapySDR, and UHD/USRP radios.',
         'IQ Recording and Playback: Record raw IQ data in SigMF format with complete metadata and replay recordings through a virtual SDR device for analysis.',
@@ -57,13 +57,6 @@ const AboutPage = () => {
         'SatDump Integration: Decode weather satellite images from METEOR-M2 (LRPT and HRPT) via SatDump workflows.',
         'Performance Monitoring: Visualize signal processing flow, queue health, throughput, and component statistics.',
         'Responsive Web Interface: Control the full station from desktop, tablet, or phone through a unified web interface.',
-    ];
-
-    const plannedFeatures = [
-        'Additional Decoders: AFSK packet decoder.',
-        'Additional Decoders: LoRa decoders.',
-        'Additional Decoders: NOAA APT weather satellite images.',
-        'Additional Decoders: Additional telemetry formats.',
     ];
 
     const backendTechnologies = [
@@ -95,7 +88,7 @@ const AboutPage = () => {
     ];
 
     return (
-        <Paper elevation={3} sx={{ p: 2, mt: 0 }}>
+        <Paper elevation={3} sx={{ p: 2, mt: 0, borderRadius: 0 }}>
             <Stack spacing={2}>
                 <Card elevation={1} sx={{ p: 2 }}>
                     <Grid container spacing={2} columns={12} alignItems="center">
@@ -198,20 +191,6 @@ const AboutPage = () => {
 
                     <Grid size={{ xs: 12, lg: 5 }}>
                         <Stack spacing={2}>
-                            <Card elevation={1} sx={{ p: 2 }}>
-                                <Typography variant="h6" sx={{ fontWeight: 700, color: 'secondary.main' }}>
-                                    {t('about.roadmap_title', { defaultValue: 'Roadmap' })}
-                                </Typography>
-                                <Divider sx={{ my: 1.5 }} />
-                                <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
-                                    {plannedFeatures.map((feature, index) => (
-                                        <Box component="li" key={index} sx={{ mb: 1 }}>
-                                            <Typography variant="body2">{feature}</Typography>
-                                        </Box>
-                                    ))}
-                                </Box>
-                            </Card>
-
                             <Card elevation={1} sx={{ p: 2 }}>
                                 <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
                                     {t('about.sdr_support_title', { defaultValue: 'SDR Device Support' })}

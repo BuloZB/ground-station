@@ -23,8 +23,11 @@ from typing import Any, Dict, List, Optional
 
 import psutil
 
+from celestial.observermath import compute_observer_sky_position
+from celestial.solarsystem import compute_body_position_heliocentric_au
 from common.arguments import arguments as args
 from common.constants import DictKeys, SocketEvents
+from orbits import CentralBody, OrbitServiceError, get_propagation_input
 from tracker.contracts import require_tracker_id
 from tracker.data import compiled_satellite_data_from_inputs
 from tracker.ipc import (
@@ -102,6 +105,7 @@ class SatelliteTracker:
         self.current_vfo2 = "downlink"
         self.current_rotator_state = "disconnected"
         self.current_rig_state = "disconnected"
+        self.current_target_type = "satellite"
         self.current_norad_id = None
         self.current_group_id = None
 
@@ -225,12 +229,298 @@ class SatelliteTracker:
         self.input_location: Optional[Dict[str, Any]] = None
         self.input_transmitters: List[Dict[str, Any]] = []
         self.input_satellite: Optional[Dict[str, Any]] = None
+        self.input_target_ephemeris: Optional[Dict[str, Any]] = None
         self.input_map_settings: Dict[str, Any] = {}
         self.input_hardware: Dict[str, Any] = {}
 
     def in_tracking_state(self) -> bool:
         """Check if rotator is currently in tracking state."""
         return self.current_rotator_state == "tracking"
+
+    @staticmethod
+    def _normalize_target_type(tracking_state: Dict[str, Any]) -> str:
+        target_type = str(tracking_state.get("target_type") or "").strip().lower()
+        if target_type in {"satellite", "mission", "body"}:
+            return target_type
+        if str(tracking_state.get("command") or "").strip():
+            return "mission"
+        if str(tracking_state.get("body_id") or "").strip():
+            return "body"
+        return "satellite"
+
+    @staticmethod
+    def _parse_iso_utc(value: Any) -> Optional[datetime]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(text)
+        except Exception:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @classmethod
+    def _interpolate_mission_position(
+        cls, payload: Dict[str, Any], epoch: datetime
+    ) -> Optional[List[float]]:
+        raw_positions = payload.get("orbit_samples_xyz_au")
+        if not isinstance(raw_positions, list) or not raw_positions:
+            return None
+
+        positions: List[List[float]] = []
+        for item in raw_positions:
+            if not isinstance(item, list) or len(item) < 3:
+                continue
+            try:
+                positions.append([float(item[0]), float(item[1]), float(item[2])])
+            except (TypeError, ValueError):
+                continue
+        if not positions:
+            return None
+
+        if len(positions) == 1:
+            return positions[0]
+
+        raw_times = payload.get("orbit_sample_times_utc")
+        if not isinstance(raw_times, list) or len(raw_times) != len(positions):
+            return None
+        time_position_pairs: List[tuple[datetime, List[float]]] = []
+        for raw_time, position in zip(raw_times, positions):
+            parsed_time = cls._parse_iso_utc(raw_time)
+            if parsed_time is None:
+                return None
+            time_position_pairs.append((parsed_time, position))
+
+        ordered = sorted(time_position_pairs, key=lambda item: item[0])
+        first_time, first_pos = ordered[0]
+        last_time, last_pos = ordered[-1]
+        if first_time is None or last_time is None:
+            return None
+        if epoch <= first_time:
+            return [float(first_pos[0]), float(first_pos[1]), float(first_pos[2])]
+        if epoch >= last_time:
+            return [float(last_pos[0]), float(last_pos[1]), float(last_pos[2])]
+
+        for index in range(1, len(ordered)):
+            left_time, left_pos = ordered[index - 1]
+            right_time, right_pos = ordered[index]
+            if left_time is None or right_time is None:
+                continue
+            if epoch > right_time:
+                continue
+            span_seconds = (right_time - left_time).total_seconds()
+            if span_seconds <= 1e-9:
+                return [float(left_pos[0]), float(left_pos[1]), float(left_pos[2])]
+            ratio = max(0.0, min(1.0, (epoch - left_time).total_seconds() / span_seconds))
+            return [
+                float(left_pos[0]) + ((float(right_pos[0]) - float(left_pos[0])) * ratio),
+                float(left_pos[1]) + ((float(right_pos[1]) - float(left_pos[1])) * ratio),
+                float(left_pos[2]) + ((float(right_pos[2]) - float(left_pos[2])) * ratio),
+            ]
+        return [float(last_pos[0]), float(last_pos[1]), float(last_pos[2])]
+
+    @staticmethod
+    def _build_non_satellite_data(
+        *,
+        target_type: str,
+        target_name: str,
+        az_deg: float,
+        el_deg: float,
+        command: Optional[str] = None,
+        body_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "details": {
+                "name": target_name,
+                "target_type": target_type,
+                "command": command,
+                "body_id": body_id,
+                "norad_id": None,
+                "is_geostationary": False,
+            },
+            "position": {
+                "lat": 0.0,
+                "lon": 0.0,
+                "alt": 0.0,
+                "az": float(az_deg),
+                "el": float(el_deg),
+            },
+            "paths": {"past": [], "future": []},
+            "coverage": [],
+            "transmitters": [],
+            "error": False,
+        }
+
+    def _resolve_target_context(
+        self,
+        tracking_state: Dict[str, Any],
+        location: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        target_type = self._normalize_target_type(tracking_state)
+
+        try:
+            observer_lat = float(location["lat"])
+            observer_lon = float(location["lon"])
+        except (TypeError, ValueError, KeyError):
+            logger.warning("Invalid observer location in tracker loop")
+            return None
+
+        now_epoch = datetime.now(timezone.utc)
+        input_payload = dict(self.input_target_ephemeris or {})
+
+        if target_type == "satellite":
+            norad_id = tracking_state.get("norad_id")
+            if not norad_id:
+                logger.warning("No norad id found in satellite tracking state, skipping iteration")
+                return None
+            if not input_payload or input_payload.get("norad_id") != norad_id:
+                logger.warning("No matching satellite ephemeris provided, skipping iteration")
+                return None
+
+            satellite_data = compiled_satellite_data_from_inputs(
+                input_payload,
+                self.input_location,
+                self.input_transmitters,
+                self.input_map_settings,
+            )
+            if satellite_data.get("error"):
+                logger.warning(
+                    "Could not compute satellite details for satellite %s",
+                    norad_id,
+                )
+                return None
+
+            try:
+                propagation_input = get_propagation_input(
+                    input_payload, central_body=CentralBody.EARTH
+                )
+            except OrbitServiceError as e:
+                logger.warning("Invalid satellite ephemeris payload for tracker loop: %s", e)
+                return None
+
+            satellite_tles = [propagation_input.tle1, propagation_input.tle2]
+            satellite_name = str(input_payload.get("name") or norad_id)
+            skypoint = (
+                float(satellite_data["position"]["az"]),
+                float(satellite_data["position"]["el"]),
+            )
+            return {
+                "target_type": "satellite",
+                "target_name": satellite_name,
+                "target_id": str(norad_id),
+                "skypoint": skypoint,
+                "satellite_data": satellite_data,
+                "satellite_tles": satellite_tles,
+            }
+
+        try:
+            earth_position = compute_body_position_heliocentric_au("earth", now_epoch)
+        except Exception as e:
+            logger.warning("Failed computing earth heliocentric position: %s", e)
+            return None
+
+        if target_type == "mission":
+            command = str(
+                tracking_state.get("command") or input_payload.get("command") or ""
+            ).strip()
+            if not command:
+                logger.warning("Mission target is missing Horizons command")
+                return None
+
+            position_xyz_au = self._interpolate_mission_position(input_payload, now_epoch)
+            if not position_xyz_au:
+                raw_position = input_payload.get("position_xyz_au")
+                if isinstance(raw_position, list) and len(raw_position) >= 3:
+                    try:
+                        position_xyz_au = [
+                            float(raw_position[0]),
+                            float(raw_position[1]),
+                            float(raw_position[2]),
+                        ]
+                    except (TypeError, ValueError):
+                        position_xyz_au = None
+            if not position_xyz_au:
+                logger.warning(
+                    "Mission target '%s' has no position samples available in worker context",
+                    command,
+                )
+                return None
+
+            observer_view = compute_observer_sky_position(
+                target_heliocentric_xyz_au=position_xyz_au,
+                earth_heliocentric_xyz_au=earth_position,
+                epoch=now_epoch,
+                observer_lat_deg=observer_lat,
+                observer_lon_deg=observer_lon,
+            )
+            sky_position = observer_view.get("sky_position") or {}
+            az_deg = float(sky_position.get("az_deg", 0.0))
+            el_deg = float(sky_position.get("el_deg", 0.0))
+            target_name = (
+                str(
+                    tracking_state.get("target_name") or input_payload.get("name") or command
+                ).strip()
+                or command
+            )
+            return {
+                "target_type": "mission",
+                "target_name": target_name,
+                "target_id": command,
+                "skypoint": (az_deg, el_deg),
+                "satellite_data": self._build_non_satellite_data(
+                    target_type="mission",
+                    target_name=target_name,
+                    az_deg=az_deg,
+                    el_deg=el_deg,
+                    command=command,
+                ),
+                "satellite_tles": None,
+            }
+
+        body_id = (
+            str(tracking_state.get("body_id") or input_payload.get("body_id") or "").strip().lower()
+        )
+        if not body_id:
+            logger.warning("Body target is missing body_id")
+            return None
+        try:
+            body_position = compute_body_position_heliocentric_au(body_id, now_epoch)
+        except Exception as e:
+            logger.warning("Failed computing body '%s' position: %s", body_id, e)
+            return None
+
+        observer_view = compute_observer_sky_position(
+            target_heliocentric_xyz_au=body_position,
+            earth_heliocentric_xyz_au=earth_position,
+            epoch=now_epoch,
+            observer_lat_deg=observer_lat,
+            observer_lon_deg=observer_lon,
+        )
+        sky_position = observer_view.get("sky_position") or {}
+        az_deg = float(sky_position.get("az_deg", 0.0))
+        el_deg = float(sky_position.get("el_deg", 0.0))
+        target_name = (
+            str(tracking_state.get("target_name") or input_payload.get("name") or body_id).strip()
+            or body_id
+        )
+        return {
+            "target_type": "body",
+            "target_name": target_name,
+            "target_id": body_id,
+            "skypoint": (az_deg, el_deg),
+            "satellite_data": self._build_non_satellite_data(
+                target_type="body",
+                target_name=target_name,
+                az_deg=az_deg,
+                el_deg=el_deg,
+                body_id=body_id,
+            ),
+            "satellite_tles": None,
+        }
 
     async def run(self):
         """Main tracking loop."""
@@ -297,49 +587,51 @@ class SatelliteTracker:
 
                 initial_tracking_state = dict(tracking_state)
 
-                if not tracking_state.get("norad_id"):
-                    logger.warning(
-                        "No norad id found in satellite tracking state, skipping iteration"
-                    )
-                    continue
-
                 if not self.input_location:
                     logger.warning("No location provided to tracker, skipping iteration")
                     continue
                 location = self.input_location
 
-                if not self.input_satellite or self.input_satellite.get(
-                    "norad_id"
-                ) != tracking_state.get("norad_id"):
-                    logger.warning("No matching satellite ephemeris provided, skipping iteration")
+                target_context = self._resolve_target_context(tracking_state, location)
+                if not target_context:
                     continue
 
-                tracker = tracking_state
+                tracker = dict(tracking_state)
+                target_type = target_context["target_type"]
+                if target_type != "satellite":
+                    # Mission/body tracking is rotator-only. Keep rig state stopped and
+                    # clear transmitter selection to prevent CAT retune attempts.
+                    tracker["target_type"] = target_type
+                    tracker["rig_state"] = "stopped"
+                    tracker["transmitter_id"] = "none"
+                    updated_tracking_state = dict(self.input_tracking_state or {})
+                    updated_tracking_state.update(
+                        {
+                            "target_type": target_type,
+                            "rig_state": "stopped",
+                            "transmitter_id": "none",
+                        }
+                    )
+                    self.input_tracking_state = updated_tracking_state
 
-                # Get a data dict that contains all the information for the target satellite
-                self.satellite_data = compiled_satellite_data_from_inputs(
-                    self.input_satellite,
-                    self.input_location,
-                    self.input_transmitters,
-                    self.input_map_settings,
-                )
-                assert not self.satellite_data["error"], (
-                    f"Could not compute satellite details for satellite "
-                    f"{tracking_state.get('norad_id')}"
-                )
-
-                satellite_tles = [
-                    self.input_satellite["tle1"],
-                    self.input_satellite["tle2"],
-                ]
-                satellite_name = self.input_satellite["name"]
+                self.satellite_data = target_context["satellite_data"]
+                satellite_tles = target_context.get("satellite_tles")
+                satellite_name = target_context["target_name"]
+                skypoint = target_context["skypoint"]
 
                 # Update current state variables
-                self.current_norad_id = tracker.get("norad_id", None)
-                self.current_group_id = tracker.get("group_id", None)
+                self.current_target_type = target_type
+                self.current_norad_id = (
+                    tracker.get("norad_id", None) if target_type == "satellite" else None
+                )
+                self.current_group_id = (
+                    tracker.get("group_id", None) if target_type == "satellite" else None
+                )
                 self.current_rotator_id = tracker.get("rotator_id", "none")
                 self.current_rig_id = tracker.get("rig_id", "none")
-                self.current_transmitter_id = tracker.get("transmitter_id", "none")
+                self.current_transmitter_id = (
+                    tracker.get("transmitter_id", "none") if target_type == "satellite" else "none"
+                )
                 self.current_rig_vfo = tracker.get("rig_vfo", "none")
                 self.current_vfo1 = tracker.get("vfo1", "uplink")
                 self.current_vfo2 = tracker.get("vfo2", "downlink")
@@ -365,34 +657,40 @@ class SatelliteTracker:
                 except Exception as e:
                     logger.warning(f"Rig communication failed, continuing tracking: {e}")
 
-                # Work on sky coordinates
-                skypoint = (
-                    self.satellite_data["position"]["az"],
-                    self.satellite_data["position"]["el"],
-                )
-
                 # Check position limits
                 self.rotator_handler.check_position_limits(skypoint, satellite_name)
 
-                # Handle transmitter tracking
-                await self.rig_handler.handle_transmitter_tracking(satellite_tles, location)
+                if target_type == "satellite" and satellite_tles:
+                    # Handle transmitter tracking
+                    await self.rig_handler.handle_transmitter_tracking(satellite_tles, location)
 
-                # Calculate doppler shift for all active transmitters
-                await self.rig_handler.calculate_all_transmitters_doppler(satellite_tles, location)
-                transmitters = self.rig_data.get("transmitters") or []
-                transmitter_count = len(transmitters) if isinstance(transmitters, list) else 0
-                logger.debug(
-                    "Target #%s %s az=%.4f el=%.4f tx=%s dopplers=%s",
-                    self.current_norad_id,
-                    satellite_name,
-                    skypoint[0],
-                    skypoint[1],
-                    self.current_transmitter_id,
-                    transmitter_count,
-                )
+                    # Calculate doppler shift for all active transmitters
+                    await self.rig_handler.calculate_all_transmitters_doppler(
+                        satellite_tles, location
+                    )
+                    transmitters = self.rig_data.get("transmitters") or []
+                    transmitter_count = len(transmitters) if isinstance(transmitters, list) else 0
+                    logger.debug(
+                        "Target #%s %s az=%.4f el=%.4f tx=%s dopplers=%s",
+                        self.current_norad_id,
+                        satellite_name,
+                        skypoint[0],
+                        skypoint[1],
+                        self.current_transmitter_id,
+                        transmitter_count,
+                    )
 
-                # Control rig frequency
-                await self.rig_handler.control_rig_frequency()
+                    # Control rig frequency
+                    await self.rig_handler.control_rig_frequency()
+                else:
+                    self.rig_handler.apply_non_satellite_target_idle()
+                    logger.debug(
+                        "Target %s:%s az=%.4f el=%.4f (rotator-only mode)",
+                        target_type,
+                        target_context["target_id"],
+                        skypoint[0],
+                        skypoint[1],
+                    )
 
                 # Control rotator position
                 await self.rotator_handler.control_rotator_position(skypoint)
@@ -476,6 +774,7 @@ class SatelliteTracker:
         elif msg_type == TRACKER_MSG_SET_TRANSMITTERS:
             self.input_transmitters = list(payload.get("items", []))
         elif msg_type == TRACKER_MSG_SET_SATELLITE_EPHEMERIS:
+            self.input_target_ephemeris = dict(payload)
             self.input_satellite = dict(payload)
         elif msg_type == TRACKER_MSG_SET_MAP_SETTINGS:
             self.input_map_settings = dict(payload)

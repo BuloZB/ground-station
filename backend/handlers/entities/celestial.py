@@ -217,7 +217,13 @@ async def get_celestial_scene(
     """Fetch current celestial scene for one-time UI render data."""
     logger.debug(f"Fetching celestial scene, data: {data}")
     payload = await _build_scene_payload(data, logger)
-    scene = await build_celestial_scene(data=payload, logger=logger, force_refresh=False)
+    scene = await build_celestial_scene(
+        data=payload,
+        logger=logger,
+        force_refresh=False,
+        # Scene reads should resolve the requested projection window, not only cache-only fallbacks.
+        allow_network_fetch=True,
+    )
     return cast(Dict[str, Any], scene)
 
 
@@ -246,6 +252,8 @@ async def get_celestial_tracks(
         data=payload,
         logger=logger,
         force_refresh=False,
+        # Projection changes (e.g. 1d -> 1m) must fetch matching vectors on cache miss.
+        allow_network_fetch=True,
         per_row_callback=emit_partial_row,
     )
     return cast(Dict[str, Any], tracks)
@@ -257,7 +265,13 @@ async def refresh_celestial_now(
     """Force-refresh celestial scene and broadcast live update event."""
     logger.info(f"Force refreshing celestial scene, data: {data}")
     payload = await _build_scene_payload(data, logger)
-    scene = await build_celestial_scene(data=payload, logger=logger, force_refresh=True)
+    scene = await build_celestial_scene(
+        data=payload,
+        logger=logger,
+        force_refresh=True,
+        # Explicit user refresh should bypass cache-only mode and fetch fresh vectors.
+        allow_network_fetch=True,
+    )
     if scene.get("success"):
         scene_data_obj = scene.get("data")
         scene_data = cast(
@@ -342,6 +356,8 @@ async def refresh_monitored_celestial_now(
             data=payload,
             logger=logger,
             force_refresh=True,
+            # Explicit user refresh should bypass cache-only mode and fetch fresh vectors.
+            allow_network_fetch=True,
             per_row_callback=emit_partial_row,
         )
         if not tracks.get("success"):

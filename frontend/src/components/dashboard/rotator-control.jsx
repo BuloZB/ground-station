@@ -265,7 +265,7 @@ const RotatorControl = React.memo(function RotatorControl({ trackerId: trackerId
         : isRotatorCommandBusy
         ? 'Command in progress'
         : !canStartTracking(effectiveTrackingState, effectiveSatelliteId, effectiveSelectedRotatorValue)
-            ? 'Select satellite and rotator, then connect first'
+            ? 'Select a target and rotator, then connect first'
             : null;
 
     const stopDisabled = !hasTargets || isRotatorCommandBusy || !canStopTracking(effectiveTrackingState, effectiveSatelliteId, effectiveSelectedRotatorValue);

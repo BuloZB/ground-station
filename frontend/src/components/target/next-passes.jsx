@@ -38,6 +38,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
 import AccessTimeFilledIcon from '@mui/icons-material/AccessTimeFilled';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
+import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import {
     fetchNextPasses,
     updateSatellitePassesWithElevationCurves,
@@ -49,6 +50,15 @@ import {
 import {calculateElevationCurvesForPasses} from '../../utils/elevation-curve-calculator.js';
 import TargetPassesTableSettingsDialog from './target-passes-table-settings-dialog.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
+import CelestialPasses from '../celestial/celestial-passes.jsx';
+import { fetchCelestialTracks, fetchSolarSystemScene } from '../celestial/celestial-slice.jsx';
+import {
+    buildTargetCelestialPayload,
+    buildTargetKeyFromTrackingState,
+    filterPassesForTargetWindow,
+    normalizeTargetType,
+    resolveTargetDisplayName,
+} from './celestial-target-utils.js';
 
 const getPassStatus = (row, now = new Date()) => {
     const startDate = new Date(row?.event_start);
@@ -69,6 +79,17 @@ const getPassStatusPriority = (status) => {
         default:
             return 3;
     }
+};
+
+const getPassCurveKey = (pass) => {
+    const explicitId = String(pass?.id || '').trim();
+    if (explicitId) {
+        return explicitId;
+    }
+    const noradId = String(pass?.norad_id ?? '').trim();
+    const start = String(pass?.event_start ?? '').trim();
+    const end = String(pass?.event_end ?? '').trim();
+    return `${noradId}|${start}|${end}`;
 };
 
 const getPassBackgroundColor = (color, theme, coefficient) => ({
@@ -507,7 +528,14 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
     const {socket} = useSocket();
     const dispatch = useDispatch();
     const { t } = useTranslation('target');
+    const theme = useTheme();
+    const isCompactHeader = useMediaQuery(theme.breakpoints.down('lg'));
+    const isTightHeader = useMediaQuery(theme.breakpoints.down('md'));
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
+    const trackingState = useSelector((state) => state.targetSatTrack?.trackingState || {});
+    const satelliteDetails = useSelector((state) => state.targetSatTrack?.satelliteData?.details || {});
+    const celestialState = useSelector((state) => state.celestial || {});
+    const monitoredRows = useSelector((state) => state.celestialMonitored?.monitored || []);
     const [containerHeight, setContainerHeight] = useState(0);
     const containerRef = useRef(null);
     const {
@@ -524,15 +552,57 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
     } = useSelector(state => state.targetSatTrack);
     const hasTargets = trackerInstances.length > 0;
     const { location } = useSelector(state => state.location);
+    const targetType = normalizeTargetType(trackingState);
+    const isSatelliteTarget = targetType === 'satellite';
+    const targetKey = useMemo(
+        () => buildTargetKeyFromTrackingState(trackingState),
+        [trackingState],
+    );
+    const nonSatelliteTargetName = useMemo(() => {
+        return resolveTargetDisplayName({
+            trackingState,
+            satelliteDetails,
+            monitoredRows,
+            celestialRows: celestialState?.celestialTracks?.celestial || [],
+        });
+    }, [celestialState?.celestialTracks?.celestial, monitoredRows, satelliteDetails, trackingState]);
     const minHeight = 200;
     const maxHeight = 400;
     const hasLoadedFromStorageRef = useRef(false);
     const isLoadingRef = useRef(false);
+    const curveCalcInFlightRef = useRef(false);
+    const curveCalcTimeoutRef = useRef(null);
+    const attemptedCurvePassKeysRef = useRef(new Set());
     const [quickFilterPreset, setQuickFilterPreset] = useState('all');
     const [filterNowMs, setFilterNowMs] = useState(() => Date.now());
+    const nonSatellitePayload = useMemo(
+        () => buildTargetCelestialPayload({
+            trackingState,
+            targetName: nonSatelliteTargetName,
+            nextPassesHours,
+        }),
+        [nextPassesHours, nonSatelliteTargetName, trackingState],
+    );
+    const nonSatellitePasses = useMemo(
+        () => filterPassesForTargetWindow({
+            passes: celestialState?.celestialTracks?.celestial_passes || [],
+            targetKey,
+            nextPassesHours,
+            nowMs: filterNowMs,
+        }),
+        [celestialState?.celestialTracks?.celestial_passes, filterNowMs, nextPassesHours, targetKey],
+    );
+    const nonSatelliteTracks = useMemo(() => {
+        const rows = Array.isArray(celestialState?.celestialTracks?.celestial)
+            ? celestialState.celestialTracks.celestial
+            : [];
+        if (!targetKey) return [];
+        return rows.filter((row) => String(row?.target_key || '').trim() === targetKey);
+    }, [celestialState?.celestialTracks?.celestial, targetKey]);
 
     // Load column visibility from localStorage on mount
     useEffect(() => {
+        if (!isSatelliteTarget) return;
         // Prevent double loading (React StrictMode or component remounting)
         if (isLoadingRef.current || hasLoadedFromStorageRef.current) {
             return;
@@ -555,10 +625,11 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
             }
         };
         loadColumnVisibility();
-    }, []);
+    }, [dispatch, isSatelliteTarget]);
 
     // Persist column visibility to localStorage whenever it changes (but not on initial load)
     useEffect(() => {
+        if (!isSatelliteTarget) return;
         if (passesTableColumnVisibility && hasLoadedFromStorageRef.current) {
             try {
                 localStorage.setItem('target-passes-table-column-visibility', JSON.stringify(passesTableColumnVisibility));
@@ -566,7 +637,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
                 console.error('Failed to save target passes table column visibility:', e);
             }
         }
-    }, [passesTableColumnVisibility]);
+    }, [passesTableColumnVisibility, isSatelliteTarget]);
 
     useEffect(() => {
         const intervalId = setInterval(() => {
@@ -575,48 +646,151 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
         return () => clearInterval(intervalId);
     }, []);
 
+    useEffect(() => {
+        attemptedCurvePassKeysRef.current.clear();
+        curveCalcInFlightRef.current = false;
+        if (curveCalcTimeoutRef.current != null) {
+            clearTimeout(curveCalcTimeoutRef.current);
+            curveCalcTimeoutRef.current = null;
+        }
+    }, [satelliteId, isSatelliteTarget]);
+
     const handleRefreshPasses = () => {
-        if (satelliteId) {
+        if (isSatelliteTarget && satelliteId) {
             dispatch(fetchNextPasses({
                 socket,
                 noradId: satelliteId,
                 hours: nextPassesHours,
                 forceRecalculate: true
             }));
+            return;
+        }
+        if (!isSatelliteTarget && nonSatellitePayload) {
+            Promise.all([
+                dispatch(fetchSolarSystemScene({ socket, payload: nonSatellitePayload })),
+                dispatch(fetchCelestialTracks({ socket, payload: nonSatellitePayload })),
+            ]);
         }
     };
 
-    // Calculate elevation curves when passes are received or satellite changes
+    // Keep client-side curve calculation as a guarded fallback.
+    // Backend now provides curves, but this protects against empty legacy payloads.
     useEffect(() => {
-        // Check if location is valid (not null)
-        const isLocationValid = location && location.lat != null && location.lon != null;
-
-        if (satellitePasses && satellitePasses.length > 0 && isLocationValid && satelliteData && satelliteData.details) {
-            // Check if elevation curves need to be calculated (if any pass has empty elevation_curve)
-            const needsCalculation = satellitePasses.some(pass => !pass.elevation_curve || pass.elevation_curve.length === 0);
-
-            if (needsCalculation) {
-                // Create satellite lookup from satelliteData
-                const satelliteLookup = {
-                    [satelliteData.details.norad_id]: {
-                        norad_id: satelliteData.details.norad_id,
-                        tle1: satelliteData.details.tle1,
-                        tle2: satelliteData.details.tle2
-                    }
-                };
-
-                // Calculate elevation curves in the background
-                setTimeout(() => {
-                    const passesWithCurves = calculateElevationCurvesForPasses(
-                        satellitePasses,
-                        { lat: location.lat, lon: location.lon },
-                        satelliteLookup
-                    );
-                    dispatch(updateSatellitePassesWithElevationCurves(passesWithCurves));
-                }, 0);
-            }
+        if (!isSatelliteTarget) {
+            return undefined;
         }
-    }, [satellitePasses, location, satelliteData, satelliteId, dispatch]);
+        if (curveCalcInFlightRef.current) {
+            return undefined;
+        }
+        const isLocationValid = location && location.lat != null && location.lon != null;
+        if (!isLocationValid) {
+            return undefined;
+        }
+        if (!satelliteData?.details?.norad_id || !satelliteData?.details?.tle1 || !satelliteData?.details?.tle2) {
+            return undefined;
+        }
+        if (!Array.isArray(satellitePasses) || satellitePasses.length === 0) {
+            return undefined;
+        }
+
+        const pendingPasses = satellitePasses.filter((pass) => {
+            const existingCurve = pass?.elevation_curve;
+            if (Array.isArray(existingCurve) && existingCurve.length > 0) {
+                return false;
+            }
+            const curveKey = getPassCurveKey(pass);
+            if (!curveKey) {
+                return false;
+            }
+            return !attemptedCurvePassKeysRef.current.has(curveKey);
+        });
+
+        if (pendingPasses.length === 0) {
+            return undefined;
+        }
+
+        const pendingPassKeys = pendingPasses.map((pass) => getPassCurveKey(pass)).filter(Boolean);
+        const satelliteLookup = {
+            [satelliteData.details.norad_id]: {
+                norad_id: satelliteData.details.norad_id,
+                tle1: satelliteData.details.tle1,
+                tle2: satelliteData.details.tle2,
+            },
+        };
+        let cancelled = false;
+
+        curveCalcTimeoutRef.current = setTimeout(() => {
+            curveCalcTimeoutRef.current = null;
+            if (cancelled || curveCalcInFlightRef.current) {
+                return;
+            }
+            curveCalcInFlightRef.current = true;
+            for (const curveKey of pendingPassKeys) {
+                attemptedCurvePassKeysRef.current.add(curveKey);
+            }
+
+            try {
+                const recalculatedPendingPasses = calculateElevationCurvesForPasses(
+                    pendingPasses,
+                    { lat: location.lat, lon: location.lon },
+                    satelliteLookup
+                );
+                const updatedCurvesByPassKey = new Map();
+                for (const pass of recalculatedPendingPasses) {
+                    const curveKey = getPassCurveKey(pass);
+                    const nextCurve = pass?.elevation_curve;
+                    if (!curveKey || !Array.isArray(nextCurve) || nextCurve.length === 0) {
+                        continue;
+                    }
+                    updatedCurvesByPassKey.set(curveKey, nextCurve);
+                }
+                if (updatedCurvesByPassKey.size === 0 || cancelled) {
+                    return;
+                }
+
+                let hasUpdates = false;
+                const mergedPasses = satellitePasses.map((pass) => {
+                    const curveKey = getPassCurveKey(pass);
+                    const nextCurve = updatedCurvesByPassKey.get(curveKey);
+                    if (!nextCurve) {
+                        return pass;
+                    }
+                    const existingCurve = Array.isArray(pass?.elevation_curve) ? pass.elevation_curve : [];
+                    if (existingCurve.length === nextCurve.length && existingCurve.length > 0) {
+                        return pass;
+                    }
+                    hasUpdates = true;
+                    return {
+                        ...pass,
+                        elevation_curve: nextCurve,
+                    };
+                });
+
+                if (hasUpdates && !cancelled) {
+                    dispatch(updateSatellitePassesWithElevationCurves(mergedPasses));
+                }
+            } finally {
+                curveCalcInFlightRef.current = false;
+            }
+        }, 0);
+
+        return () => {
+            cancelled = true;
+            if (curveCalcTimeoutRef.current != null) {
+                clearTimeout(curveCalcTimeoutRef.current);
+                curveCalcTimeoutRef.current = null;
+            }
+        };
+    }, [
+        dispatch,
+        isSatelliteTarget,
+        location?.lat,
+        location?.lon,
+        satelliteData?.details?.norad_id,
+        satelliteData?.details?.tle1,
+        satelliteData?.details?.tle2,
+        satellitePasses,
+    ]);
 
     useEffect(() => {
         const target = containerRef.current;
@@ -687,6 +861,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
     }, [dispatch, applyDefaultSort]);
 
     useEffect(() => {
+        if (!isSatelliteTarget) return undefined;
         const handleKeyboardShortcuts = (event) => {
             if (!event.altKey) return;
             if (event.key === '1') handleQuickPreset('all');
@@ -698,7 +873,35 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
         };
         window.addEventListener('keydown', handleKeyboardShortcuts);
         return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
-    }, [handleQuickPreset]);
+    }, [handleQuickPreset, isSatelliteTarget]);
+
+    const useIconQuickFilters = isCompactHeader;
+    const quickFilterButtonSx = useMemo(() => ({
+        minHeight: isTightHeader ? 20 : (isCompactHeader ? 22 : 24),
+        height: isTightHeader ? 20 : (isCompactHeader ? 22 : 24),
+        py: 0,
+        px: isTightHeader ? 0.7 : (isCompactHeader ? 0.85 : 1),
+        lineHeight: 1.05,
+        fontSize: isTightHeader ? '0.64rem' : (isCompactHeader ? '0.68rem' : '0.72rem'),
+        minWidth: useIconQuickFilters ? 30 : 'auto',
+    }), [isCompactHeader, isTightHeader, useIconQuickFilters]);
+    const titleIconButtonSx = useMemo(
+        () => ({ padding: isTightHeader ? '1px' : '2px' }),
+        [isTightHeader]
+    );
+
+    if (!isSatelliteTarget) {
+        return (
+            <CelestialPasses
+                passes={nonSatellitePasses}
+                tracks={nonSatelliteTracks}
+                loading={Boolean(celestialState?.tracksLoading)}
+                gridEditable={gridEditable}
+                onRefresh={handleRefreshPasses}
+                refreshDisabled={!socket || !nonSatellitePayload || Boolean(celestialState?.tracksLoading)}
+            />
+        );
+    }
 
     return (
         <>
@@ -717,8 +920,16 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
                 }}
             >
                 <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', height: '100%'}}>
-                    <Box sx={{display: 'flex', alignItems: 'center'}}>
-                        <Typography variant="subtitle2" sx={{fontWeight: 'bold'}}>
+                    <Box sx={{display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, pr: 1}}>
+                        <Typography
+                            variant="subtitle2"
+                            sx={{
+                                fontWeight: 'bold',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                            }}
+                        >
                             {hasTargets
                                 ? t('next_passes.title', { name: satelliteData['details']['name'], hours: nextPassesHours })
                                 : 'Next Passes'}
@@ -726,31 +937,55 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
                     </Box>
                     {hasTargets && (
                     <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                        <Tooltip title="Alt+1">
+                        <Tooltip title="All passes (Alt+1)">
                             <span>
-                                <Button size="small" variant={quickFilterPreset === 'all' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('all')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
-                                    All
+                                <Button
+                                    size="small"
+                                    variant={quickFilterPreset === 'all' ? 'contained' : 'outlined'}
+                                    onClick={() => handleQuickPreset('all')}
+                                    sx={quickFilterButtonSx}
+                                    aria-label="All passes"
+                                >
+                                    {useIconQuickFilters ? <DoneAllIcon sx={{ fontSize: isTightHeader ? '0.82rem' : '0.9rem' }} /> : 'All'}
                                 </Button>
                             </span>
                         </Tooltip>
-                        <Tooltip title="Alt+2">
+                        <Tooltip title="Live passes (Alt+2)">
                             <span>
-                                <Button size="small" variant={quickFilterPreset === 'live' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('live')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
-                                    Live
+                                <Button
+                                    size="small"
+                                    variant={quickFilterPreset === 'live' ? 'contained' : 'outlined'}
+                                    onClick={() => handleQuickPreset('live')}
+                                    sx={quickFilterButtonSx}
+                                    aria-label="Live passes"
+                                >
+                                    {useIconQuickFilters ? <RadioButtonCheckedIcon sx={{ fontSize: isTightHeader ? '0.82rem' : '0.9rem' }} /> : 'Live'}
                                 </Button>
                             </span>
                         </Tooltip>
-                        <Tooltip title="Alt+3">
+                        <Tooltip title="Live or next 30 minutes (Alt+3)">
                             <span>
-                                <Button size="small" variant={quickFilterPreset === 'next30' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('next30')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
-                                    Next 30m
+                                <Button
+                                    size="small"
+                                    variant={quickFilterPreset === 'next30' ? 'contained' : 'outlined'}
+                                    onClick={() => handleQuickPreset('next30')}
+                                    sx={quickFilterButtonSx}
+                                    aria-label="Next 30 minutes"
+                                >
+                                    {useIconQuickFilters ? <AccessTimeFilledIcon sx={{ fontSize: isTightHeader ? '0.82rem' : '0.9rem' }} /> : 'Next 30m'}
                                 </Button>
                             </span>
                         </Tooltip>
-                        <Tooltip title="Alt+4">
+                        <Tooltip title="Highest elevation first (Alt+4)">
                             <span>
-                                <Button size="small" variant={quickFilterPreset === 'highEl' ? 'contained' : 'outlined'} onClick={() => handleQuickPreset('highEl')} sx={{ minHeight: 24, height: 24, py: 0, px: 1, lineHeight: 1.1, fontSize: '0.72rem' }}>
-                                    High El
+                                <Button
+                                    size="small"
+                                    variant={quickFilterPreset === 'highEl' ? 'contained' : 'outlined'}
+                                    onClick={() => handleQuickPreset('highEl')}
+                                    sx={quickFilterButtonSx}
+                                    aria-label="Highest elevation first"
+                                >
+                                    {useIconQuickFilters ? <ArrowUpwardRoundedIcon sx={{ fontSize: isTightHeader ? '0.82rem' : '0.9rem' }} /> : 'High El'}
                                 </Button>
                             </span>
                         </Tooltip>
@@ -759,7 +994,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
                                 <IconButton
                                     size="small"
                                     onClick={handleOpenSettings}
-                                    sx={{ padding: '2px' }}
+                                    sx={titleIconButtonSx}
                                 >
                                     <SettingsIcon fontSize="small" />
                                 </IconButton>
@@ -771,7 +1006,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
                                     size="small"
                                     onClick={handleRefreshPasses}
                                     disabled={passesLoading || !satelliteId}
-                                    sx={{ padding: '2px' }}
+                                    sx={titleIconButtonSx}
                                 >
                                     <RefreshIcon fontSize="small" />
                                 </IconButton>

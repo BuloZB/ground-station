@@ -254,6 +254,14 @@ def _planet_state(name: str, day_offset: float) -> Dict[str, object]:
     )
     z_helio = radius * (sin(true_anomaly + w_rad) * sin(i_rad))
 
+    # These legacy Earth elements describe the Sun's geocentric vector in the
+    # classic low-precision formula set. Convert to Earth's heliocentric vector
+    # so downstream geocentric subtraction (target - earth) has the correct sign.
+    if name == "earth":
+        x_helio = -x_helio
+        y_helio = -y_helio
+        z_helio = -z_helio
+
     phase = (true_anomaly % (2.0 * pi)) / (2.0 * pi)
 
     return {
@@ -338,6 +346,8 @@ def _saturn_moon_saturncentric_position_au(moon_id: str, day_offset: float) -> L
 
 
 def _body_position_au(name: str, day_offset: float) -> List[float]:
+    if name == "sun":
+        return [0.0, 0.0, 0.0]
     if name == "moon":
         earth_state = _planet_state("earth", day_offset)
         earth_pos = cast(List[float], earth_state["position_xyz_au"])
@@ -526,3 +536,22 @@ def compute_solar_system_snapshot(
     }
 
     return meta, planets
+
+
+def compute_body_position_heliocentric_au(body_id: str, epoch: datetime) -> List[float]:
+    """Compute heliocentric ecliptic position for one supported body at epoch."""
+    normalized_id = str(body_id or "").strip().lower()
+    if not normalized_id:
+        raise ValueError("body_id is required")
+
+    supported_bodies = {
+        "sun",
+        "moon",
+        *_PLANET_ELEMENTS.keys(),
+        *_JUPITER_MOONS.keys(),
+        *_SATURN_MOONS.keys(),
+    }
+    if normalized_id not in supported_bodies:
+        raise ValueError(f"Unsupported body_id '{normalized_id}'")
+
+    return _body_position_au(normalized_id, _days_since_j2000(epoch))

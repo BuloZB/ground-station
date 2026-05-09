@@ -228,10 +228,14 @@ const SatelliteInfoPopover = () => {
                 const view = trackerViews?.[instanceTrackerId] || {};
                 const tracking = view?.trackingState || {};
                 const rotator = view?.rotatorData || {};
-                const noradId = tracking?.norad_id ?? null;
+                const rawNoradId = tracking?.norad_id;
+                const parsedNoradId = Number(rawNoradId);
+                const noradId = Number.isFinite(parsedNoradId) && parsedNoradId > 0
+                    ? parsedNoradId
+                    : null;
                 return {
                     tracker_id: instanceTrackerId,
-                    norad_id: noradId == null ? null : Number(noradId),
+                    norad_id: noradId,
                     min_elevation: Number.isFinite(Number(rotator?.minel)) ? Number(rotator.minel) : 0,
                 };
             })
@@ -833,7 +837,12 @@ const SatelliteInfoPopover = () => {
                                                     textOverflow: 'ellipsis',
                                                 }}
                                             >
-                                                {`${row.satName} (NORAD ${row.satNorad})`}
+                                                {(row.satNorad !== null
+                                                    && row.satNorad !== undefined
+                                                    && String(row.satNorad).trim() !== ''
+                                                    && String(row.satNorad).toLowerCase() !== 'none')
+                                                    ? `${row.satName} (${row.satNorad})`
+                                                    : row.satName}
                                             </Typography>
                                         </Stack>
 

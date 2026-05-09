@@ -24,7 +24,9 @@ import {
     TextField,
     Tooltip,
     Typography,
+    useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import ListAltIcon from '@mui/icons-material/ListAlt';
@@ -64,6 +66,15 @@ const HOUR_OPTIONS = [
     { value: 4320, label: '6mo' },
     { value: 8760, label: '1y' },
 ];
+const PAST_HOUR_OPTIONS = [{ value: 0, label: '0h' }, ...HOUR_OPTIONS];
+const coercePastHours = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+const coerceFutureHours = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 24;
+};
 const DIALOG_PAPER_SX = {
     bgcolor: 'background.paper',
     border: (theme) => `1px solid ${theme.palette.divider}`,
@@ -146,12 +157,13 @@ const getMissionStatusMeta = (status, statusLabel = '') => {
 };
 
 const CelestialTopBar = ({
-    projectionPastHours = 24,
+    projectionPastHours = 0,
     projectionFutureHours = 24,
     onProjectionPastHoursChange,
     onProjectionFutureHoursChange,
 }) => {
     const dispatch = useDispatch();
+    const theme = useTheme();
     const { socket } = useSocket();
     const { timezone, locale } = useUserTimeSettings();
     const monitoredState = useSelector((state) => state.celestialMonitored);
@@ -164,6 +176,7 @@ const CelestialTopBar = ({
         formError,
         saveLoading,
     } = monitoredState || {};
+    const compactActionButtons = useMediaQuery(theme.breakpoints.down('md'));
     const form = {
         targetType: String(rawForm?.targetType || 'mission'),
         displayName: String(rawForm?.displayName || ''),
@@ -449,8 +462,8 @@ const CelestialTopBar = ({
                         socket,
                         ids: [createdId],
                         payload: {
-                            past_hours: Number(projectionPastHours) || 24,
-                            future_hours: Number(projectionFutureHours) || 24,
+                            past_hours: coercePastHours(projectionPastHours),
+                            future_hours: coerceFutureHours(projectionFutureHours),
                             step_minutes: 60,
                         },
                     }),
@@ -470,8 +483,8 @@ const CelestialTopBar = ({
                 socket,
                 ids: [],
                 payload: {
-                    past_hours: Number(projectionPastHours) || 24,
-                    future_hours: Number(projectionFutureHours) || 24,
+                    past_hours: coercePastHours(projectionPastHours),
+                    future_hours: coerceFutureHours(projectionFutureHours),
                     step_minutes: 60,
                 },
             }),
@@ -621,7 +634,7 @@ const CelestialTopBar = ({
                                     },
                                 }}
                             >
-                                {HOUR_OPTIONS.map((option) => (
+                                {PAST_HOUR_OPTIONS.map((option) => (
                                     <MenuItem key={`past-${option.value}`} value={option.value}>
                                         {option.label}
                                     </MenuItem>
@@ -657,33 +670,77 @@ const CelestialTopBar = ({
                     </Stack>
                 </Stack>
 
-                <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
-                    <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<AddIcon />}
-                        onClick={() => dispatch(openAddDialog())}
-                        disabled={!socket || celestialLoading}
-                    >
-                        Add
-                    </Button>
-                    <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<ListAltIcon />}
-                        onClick={() => dispatch(openManageDialog())}
-                    >
-                        Manage
-                    </Button>
-                    <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<RefreshIcon />}
-                        disabled={!socket || celestialLoading || enabledCount === 0}
-                        onClick={handleRefreshAll}
-                    >
-                        Refresh All
-                    </Button>
+                <Stack direction="row" spacing={0.5} sx={{ ml: 'auto' }}>
+                    <Tooltip title="Add">
+                        <span>
+                            {compactActionButtons ? (
+                                <IconButton
+                                    size="small"
+                                    onClick={() => dispatch(openAddDialog())}
+                                    disabled={!socket || celestialLoading}
+                                    aria-label="Add"
+                                >
+                                    <AddIcon fontSize="small" />
+                                </IconButton>
+                            ) : (
+                                <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={<AddIcon />}
+                                    onClick={() => dispatch(openAddDialog())}
+                                    disabled={!socket || celestialLoading}
+                                >
+                                    Add
+                                </Button>
+                            )}
+                        </span>
+                    </Tooltip>
+                    <Tooltip title="Manage">
+                        <span>
+                            {compactActionButtons ? (
+                                <IconButton
+                                    size="small"
+                                    onClick={() => dispatch(openManageDialog())}
+                                    aria-label="Manage"
+                                >
+                                    <ListAltIcon fontSize="small" />
+                                </IconButton>
+                            ) : (
+                                <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={<ListAltIcon />}
+                                    onClick={() => dispatch(openManageDialog())}
+                                >
+                                    Manage
+                                </Button>
+                            )}
+                        </span>
+                    </Tooltip>
+                    <Tooltip title="Refresh All">
+                        <span>
+                            {compactActionButtons ? (
+                                <IconButton
+                                    size="small"
+                                    disabled={!socket || celestialLoading || enabledCount === 0}
+                                    onClick={handleRefreshAll}
+                                    aria-label="Refresh All"
+                                >
+                                    <RefreshIcon fontSize="small" />
+                                </IconButton>
+                            ) : (
+                                <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={<RefreshIcon />}
+                                    disabled={!socket || celestialLoading || enabledCount === 0}
+                                    onClick={handleRefreshAll}
+                                >
+                                    Refresh All
+                                </Button>
+                            )}
+                        </span>
+                    </Tooltip>
                 </Stack>
             </Box>
 
@@ -716,7 +773,7 @@ const CelestialTopBar = ({
                                 }}
                             >
                                 <MenuItem value="mission">Mission / Spacecraft</MenuItem>
-                                <MenuItem value="body">Planet / Moon</MenuItem>
+                                <MenuItem value="body">Solar Body</MenuItem>
                             </Select>
                         </FormControl>
 
@@ -1197,7 +1254,7 @@ const CelestialTopBar = ({
                                 }
                             >
                                 <MenuItem value="mission">Mission / Spacecraft</MenuItem>
-                                <MenuItem value="body">Planet / Moon</MenuItem>
+                                <MenuItem value="body">Solar Body</MenuItem>
                             </Select>
                         </FormControl>
                         <TextField

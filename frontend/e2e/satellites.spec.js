@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('TLE Sources', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/satellites/tlesources');
+    await page.goto('/satellites/orbital-sources');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -14,7 +14,7 @@ test.describe('TLE Sources', () => {
     await page.waitForTimeout(2000);
 
     // Verify we're on the TLE sources page
-    expect(page.url()).toContain('/satellites/tlesources');
+    expect(page.url()).toContain('/satellites/orbital-sources');
   });
 
   test('should have TLE source management controls', async ({ page }) => {
@@ -135,9 +135,9 @@ test.describe('Satellite Groups', () => {
 test.describe('Satellite Navigation Flow', () => {
   test('should navigate between satellite pages', async ({ page }) => {
     // TLE Sources
-    await page.goto('/satellites/tlesources');
+    await page.goto('/satellites/orbital-sources');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/satellites/tlesources');
+    expect(page.url()).toContain('/satellites/orbital-sources');
 
     // Satellites
     await page.goto('/satellites/satellites');
@@ -205,7 +205,9 @@ test.describe('Satellite List CRUD', () => {
     await expect(row).toBeVisible();
     await row.getByRole('checkbox').check({ force: true });
 
-    await page.getByRole('button', { name: /^edit$/i }).click();
+    const toolbarEditButton = page.getByRole('button').filter({ hasText: /^edit$/i }).first();
+    await expect(toolbarEditButton).toBeEnabled();
+    await toolbarEditButton.click();
     const editDialog = page.getByRole('dialog', { name: /edit satellite/i });
     await expect(editDialog).toBeVisible();
     await editDialog.getByRole('textbox', { name: /^name$/i }).fill(updatedName);
@@ -229,7 +231,7 @@ test.describe('Satellite List CRUD', () => {
 
 test.describe('TLE Sources CRUD', () => {
   test('should allow adding, editing, and deleting a TLE source', async ({ page }) => {
-    await page.goto('/satellites/tlesources');
+    await page.goto('/satellites/orbital-sources');
     await page.waitForLoadState('domcontentloaded');
 
     const sourceName = `E2E Source ${Date.now()}`;
@@ -248,7 +250,9 @@ test.describe('TLE Sources CRUD', () => {
     await expect(row).toBeVisible();
     await row.getByRole('checkbox').check({ force: true });
 
-    await page.getByRole('button', { name: /^edit$/i }).click();
+    const toolbarEditButton = page.getByRole('button').filter({ hasText: /^edit$/i }).first();
+    await expect(toolbarEditButton).toBeEnabled();
+    await toolbarEditButton.click();
     const editDialog = page.getByRole('dialog');
     await editDialog.getByLabel(/name/i).fill(updatedName);
     await editDialog.getByRole('button', { name: /edit|submit|save/i }).click();

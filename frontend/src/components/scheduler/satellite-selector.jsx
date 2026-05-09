@@ -36,6 +36,8 @@ import {
     Paper,
     Box,
 } from '@mui/material';
+import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
+import FolderSharedOutlinedIcon from '@mui/icons-material/FolderSharedOutlined';
 import Autocomplete from '@mui/material/Autocomplete';
 import { useSocket } from '../common/socket.jsx';
 import {
@@ -52,6 +54,14 @@ import {
 } from './scheduler-slice.jsx';
 
 const SATELLITE_NUMBER_LIMIT = 150;
+
+const getGroupOptionIcon = (groupType) => {
+    const normalizedType = String(groupType || '').toLowerCase();
+    if (normalizedType === 'user') {
+        return <FolderSharedOutlinedIcon fontSize="small" sx={{ color: 'primary.main' }} />;
+    }
+    return <FolderOutlinedIcon fontSize="small" sx={{ color: 'text.secondary' }} />;
+};
 
 const SatelliteGroupDropdown = ({ onSatelliteSelect, disabled = false }) => {
     const dispatch = useDispatch();
@@ -107,11 +117,14 @@ const SatelliteGroupDropdown = ({ onSatelliteSelect, disabled = false }) => {
                                 value={group.id}
                                 disabled={group.satellite_ids.length > SATELLITE_NUMBER_LIMIT}
                             >
-                                {group.name} ({group.satellite_ids.length})
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                    {getGroupOptionIcon(group.type)}
+                                    <span>{group.name} ({group.satellite_ids.length})</span>
+                                </Stack>
                             </MenuItem>
                         ))
                 )}
-                <ListSubheader>TLE Groups</ListSubheader>
+                <ListSubheader>Orbital Source Groups</ListSubheader>
                 {satGroups
                     .filter(group => group.type === 'system')
                     .map((group) => (
@@ -120,7 +133,10 @@ const SatelliteGroupDropdown = ({ onSatelliteSelect, disabled = false }) => {
                             value={group.id}
                             disabled={group.satellite_ids.length > SATELLITE_NUMBER_LIMIT}
                         >
-                            {group.name} ({group.satellite_ids.length})
+                            <Stack direction="row" spacing={1} alignItems="center">
+                                {getGroupOptionIcon(group.type)}
+                                <span>{group.name} ({group.satellite_ids.length})</span>
+                            </Stack>
                         </MenuItem>
                     ))}
             </Select>

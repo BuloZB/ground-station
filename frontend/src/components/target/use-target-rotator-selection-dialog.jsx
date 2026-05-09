@@ -264,11 +264,11 @@ export function useTargetRotatorSelectionDialog() {
         };
     }, [activeTrackerId, selectedRadioRig, selectedRotator, usageRows]);
 
-    const requestRotatorForTarget = React.useCallback((satelliteName = '', options = {}) => {
+    const requestRotatorForTarget = React.useCallback((targetName = '', options = {}) => {
         return new Promise((resolve) => {
             resolverRef.current = resolve;
             submitHandlerRef.current = typeof options?.onSubmit === 'function' ? options.onSubmit : null;
-            setPendingSatelliteName(satelliteName || '');
+            setPendingSatelliteName(targetName || '');
             setPendingErrorMessage(String(options?.errorMessage || '').trim());
             setSubmitting(false);
             setPendingAction(RETARGET_ACTIONS.CURRENT_SLOT);
@@ -281,7 +281,7 @@ export function useTargetRotatorSelectionDialog() {
     const canConfirm = pendingAction === RETARGET_ACTIONS.NEW_SLOT
         ? Boolean(nextTargetSlotId)
         : Boolean(resolveTrackerId(pendingAssignment?.trackerId, DEFAULT_TRACKER_ID));
-    const satelliteLabel = pendingSatelliteName || t('target_retarget_dialog.this_satellite', { defaultValue: 'this satellite' });
+    const targetLabel = pendingSatelliteName || t('target_retarget_dialog.this_target', { defaultValue: 'this target' });
     const newTargetLabel = t(
         'target_retarget_dialog.new_target_slot',
         { defaultValue: `New target (${nextTargetSlotId})`, slot: nextTargetSlotId },
@@ -323,7 +323,7 @@ export function useTargetRotatorSelectionDialog() {
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
                     <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                         <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
-                            {t('target_retarget_dialog.title', { defaultValue: 'Retarget Satellite' })}
+                            {t('target_retarget_dialog.title', { defaultValue: 'Retarget Target' })}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.2 }}>
                             {t('target_retarget_dialog.subtitle', { defaultValue: 'Choose to retarget the active slot or create a new one' })}
@@ -344,9 +344,9 @@ export function useTargetRotatorSelectionDialog() {
                             <Trans
                                 ns="target"
                                 i18nKey="target_retarget_dialog.description"
-                                defaults="Choose which slot should track <satellite>{{satellite}}</satellite>."
-                                values={{ satellite: satelliteLabel }}
-                                components={{ satellite: <strong /> }}
+                                defaults="Choose which slot should track <target>{{target}}</target>."
+                                values={{ target: targetLabel }}
+                                components={{ target: <strong /> }}
                             />
                         </DialogContentText>
                         <Stack spacing={1}>

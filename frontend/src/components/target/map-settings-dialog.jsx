@@ -24,8 +24,6 @@ import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import MapSettingsIsland from "../common/map-settings.jsx";
-import DialogActions from "@mui/material/DialogActions";
-import {Button} from "@mui/material";
 import React from "react";
 import { useTranslation } from 'react-i18next';
 import {
@@ -44,7 +42,6 @@ import {
     setOpenMapSettingsDialog,
     setShowGrid,
 } from "./target-slice.jsx";
-import {setOpenAddDialog} from "../hardware/camera-slice.jsx";
 
 function MapSettingsIslandDialog({updateBackend}) {
     const dispatch = useDispatch();
@@ -72,10 +69,43 @@ function MapSettingsIslandDialog({updateBackend}) {
 
     return (
         <>
-            <Dialog open={openMapSettingsDialog} onClose={handleCloseDialog} fullWidth maxWidth="sm">
-                <DialogTitle>{t('map_settings.title')}</DialogTitle>
-                <DialogContent>
+            <Dialog
+                open={openMapSettingsDialog}
+                onClose={handleCloseDialog}
+                fullWidth
+                maxWidth="sm"
+                PaperProps={{
+                    sx: {
+                        bgcolor: 'background.paper',
+                        border: (theme) => `1px solid ${theme.palette.divider}`,
+                        borderRadius: 2,
+                    },
+                }}
+            >
+                <DialogTitle
+                    sx={{
+                        bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+                        borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+                        fontSize: '1.125rem',
+                        fontWeight: 'bold',
+                        py: 2.2,
+                    }}
+                >
+                    {t('map_settings.title')}
+                </DialogTitle>
+                <DialogContent
+                    sx={{
+                        bgcolor: 'background.paper',
+                        p: 0,
+                        height: '72vh',
+                        maxHeight: '72vh',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                    }}
+                >
                     <MapSettingsIsland
+                        open={openMapSettingsDialog}
                         initialShowPastOrbitPath={showPastOrbitPath}
                         initialShowFutureOrbitPath={showFutureOrbitPath}
                         initialShowSatelliteCoverage={showSatelliteCoverage}
@@ -89,6 +119,21 @@ function MapSettingsIslandDialog({updateBackend}) {
                         initialShowTooltip={showTooltip}
                         initialShowGrid={showGrid}
                         initialShowTerminatorLine={showTerminatorLine}
+                        defaultSettings={{
+                            showPastOrbitPath: true,
+                            showFutureOrbitPath: true,
+                            showSatelliteCoverage: true,
+                            showSunIcon: true,
+                            showMoonIcon: true,
+                            showTerminatorLine: true,
+                            showTooltip: true,
+                            showGrid: true,
+                            pastOrbitLineColor: '#33C833',
+                            futureOrbitLineColor: '#E4971E',
+                            satelliteCoverageColor: '#112EED',
+                            orbitProjectionDuration: 60 * 24,
+                            tileLayerID: 'satellite',
+                        }}
                         handleShowPastOrbitPath={(value)=>{dispatch(setShowPastOrbitPath(value))}}
                         handleShowFutureOrbitPath={(value)=>{dispatch(setShowFutureOrbitPath(value))}}
                         handleShowSatelliteCoverage={(value)=>{dispatch(setShowSatelliteCoverage(value))}}
@@ -102,13 +147,10 @@ function MapSettingsIslandDialog({updateBackend}) {
                         handleShowTooltip={(value)=>{dispatch(setShowTooltip(value))}}
                         handleTileLayerID={(value)=>{dispatch(setTileLayerID(value))}}
                         handleShowGrid={(value)=>{dispatch(setShowGrid(value))}}
+                        onCancel={handleCloseDialog}
                         updateBackend={updateBackend}
                     />
                 </DialogContent>
-
-                <DialogActions style={{padding: '0px 24px 20px 20px'}}>
-                    <Button onClick={handleCloseDialog}>{t('map_settings.close')}</Button>
-                </DialogActions>
             </Dialog>
         </>
     );

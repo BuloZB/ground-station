@@ -122,6 +122,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
     const domTileRendererRef = useRef(null);
     const latestDomFftRef = useRef(null);
     const bandscopeTimerRef = useRef(null);
+    const drawDomBandscopeRef = useRef(null);
     const domFftHistoryRef = useRef([]);
     const domSmoothedFftRef = useRef([]);
     const dottedLineImageDataRef = useRef(null);
@@ -192,6 +193,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         showRotatorDottedLines,
         autoScalePreset,
         bandscopeSmoothing,
+        bandscopeRateLimitEnabled,
         waterFallScaleX,
         waterFallPositionX,
         sdrSettingsById,
@@ -235,6 +237,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
             showRotatorDottedLines: state.waterfall.showRotatorDottedLines,
             autoScalePreset: state.waterfall.autoScalePreset,
             bandscopeSmoothing: state.waterfall.bandscopeSmoothing,
+            bandscopeRateLimitEnabled: state.waterfall.bandscopeRateLimitEnabled,
             waterFallScaleX: state.waterfall.waterFallScaleX,
             waterFallPositionX: state.waterfall.waterFallPositionX,
             sdrSettingsById: state.waterfall.sdrSettingsById,
@@ -294,7 +297,9 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
 
     const targetFPSRef = useRef(targetFPS);
     const waterfallControlRef = useRef(null);
-    const lastRotatorEventRef = useRef("");
+    // Keep track of the last event key we sent to the worker.
+    // Initialize from Redux to avoid replaying the current event on remount.
+    const lastRotatorEventRef = useRef(lastRotatorEvent || "");
     const [scrollFactor, setScrollFactor] = useState(1);
     const accumulatedRowsRef = useRef(0);
     const [bandscopeAxisYWidth, setBandscopeAxisYWidth] = useState(60);
@@ -402,16 +407,23 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
     }, []);
 
     useEffect(() => {
-        if (waterfallRendererMode === 'worker' && workerRef.current && lastRotatorEvent) {
-            // Format event with decorative dashes for waterfall display
-            const formattedEvent = getRotatorEventDisplay(lastRotatorEvent);
-
-            workerRef.current.postMessage({
-                cmd: 'rotatorEvent',
-                event: formattedEvent,
-            });
+        if (waterfallRendererMode !== 'worker' || !workerRef.current || !lastRotatorEvent) {
+            return;
         }
-    }, [lastRotatorEvent, waterfallRendererMode]);
+
+        // Post only on event transitions, not on mount/remount with the same key.
+        if (lastRotatorEventRef.current === lastRotatorEvent) {
+            return;
+        }
+
+        // Format event with decorative dashes for waterfall display
+        const formattedEvent = getRotatorEventDisplay(lastRotatorEvent);
+        workerRef.current.postMessage({
+            cmd: 'rotatorEvent',
+            event: formattedEvent,
+        });
+        lastRotatorEventRef.current = lastRotatorEvent;
+    }, [lastRotatorEvent, waterfallRendererMode, workerRef]);
 
     useEffect(() => {
         if (waterfallRendererMode !== 'dom-tiles') {
@@ -455,6 +467,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
                 clearInterval(bandscopeTimerRef.current);
                 bandscopeTimerRef.current = null;
             }
+            drawDomBandscopeRef.current = null;
             return;
         }
 
@@ -545,15 +558,31 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
             });
         };
 
-        bandscopeTimerRef.current = setInterval(drawTick, 200);
+        drawDomBandscopeRef.current = drawTick;
+
+        if (bandscopeRateLimitEnabled) {
+            bandscopeTimerRef.current = setInterval(drawTick, 200);
+        }
 
         return () => {
             if (bandscopeTimerRef.current) {
                 clearInterval(bandscopeTimerRef.current);
                 bandscopeTimerRef.current = null;
             }
+            drawDomBandscopeRef.current = null;
         };
-    }, [waterfallRendererMode, dbRange, colorMap, waterFallScaleX, bandscopeSmoothing, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
+    }, [
+        waterfallRendererMode,
+        bandscopeRateLimitEnabled,
+        dbRange,
+        colorMap,
+        waterFallScaleX,
+        bandscopeSmoothing,
+        theme.palette.background,
+        theme.palette.border,
+        theme.palette.overlay,
+        theme.palette.text,
+    ]);
 
     useEffect(() => {
         if (waterfallRendererMode !== 'dom-tiles' || !domTileRendererRef.current) {
@@ -621,6 +650,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
                 dbRange,
                 fftSize,
                 showRotatorDottedLines,
+                bandscopeRateLimitEnabled,
                 timezone,
                 theme: {
                     palette: {
@@ -668,6 +698,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         dbRange,
         fftSize,
         showRotatorDottedLines,
+        bandscopeRateLimitEnabled,
         timezone,
         theme.palette.background,
         theme.palette.border,
@@ -786,7 +817,10 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
         }
         latestDomFftRef.current = fftData;
         domTileRendererRef.current.pushFrame(fftData);
-    }, [waterfallRendererMode]);
+        if (!bandscopeRateLimitEnabled && drawDomBandscopeRef.current) {
+            drawDomBandscopeRef.current();
+        }
+    }, [waterfallRendererMode, bandscopeRateLimitEnabled]);
 
     const { startStreaming, stopStreaming, playButtonEnabledOrNot } = useWaterfallStream({
         workerRef,
@@ -810,6 +844,7 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
             dbRange,
             fftSize,
             zoomScale: waterFallScaleX,
+            bandscopeRateLimitEnabled,
             timezone,
             theme: {
                 palette: {
@@ -835,7 +870,19 @@ const MainWaterfallDisplay = React.memo(function MainWaterfallDisplay({
                 }
             }
         });
-    }, [waterfallRendererMode, colorMap, dbRange, fftSize, waterFallScaleX, timezone, theme.palette.background, theme.palette.border, theme.palette.overlay, theme.palette.text]);
+    }, [
+        waterfallRendererMode,
+        colorMap,
+        dbRange,
+        fftSize,
+        waterFallScaleX,
+        bandscopeRateLimitEnabled,
+        timezone,
+        theme.palette.background,
+        theme.palette.border,
+        theme.palette.overlay,
+        theme.palette.text,
+    ]);
 
     useEffect(() => {
         if (waterfallRendererMode !== 'worker') return;

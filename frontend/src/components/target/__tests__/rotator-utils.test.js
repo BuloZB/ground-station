@@ -232,6 +232,34 @@ describe('canStartTracking', () => {
     expect(canStartTracking(trackingState, satelliteId, selectedRotator)).toBe(false);
   });
 
+  it('should return true for mission targets with command and no satellite id', () => {
+    const trackingState = {
+      rotator_state: 'stopped',
+      target_type: 'mission',
+      command: 'Voyager 1',
+      body_id: null,
+      norad_id: null,
+    };
+    const satelliteId = '';
+    const selectedRotator = 'rotator1';
+
+    expect(canStartTracking(trackingState, satelliteId, selectedRotator)).toBe(true);
+  });
+
+  it('should return true for body targets with body_id and no satellite id', () => {
+    const trackingState = {
+      rotator_state: 'stopped',
+      target_type: 'body',
+      command: null,
+      body_id: 'rhea',
+      norad_id: null,
+    };
+    const satelliteId = '';
+    const selectedRotator = 'rotator1';
+
+    expect(canStartTracking(trackingState, satelliteId, selectedRotator)).toBe(true);
+  });
+
   it('should return false when no rotator selected', () => {
     const trackingState = { rotator_state: 'stopped' };
     const satelliteId = '25544';
@@ -288,6 +316,34 @@ describe('canStopTracking', () => {
     const selectedRotator = 'rotator1';
 
     expect(canStopTracking(trackingState, satelliteId, selectedRotator)).toBe(false);
+  });
+
+  it('should return true for mission targets while tracking with no satellite id', () => {
+    const trackingState = {
+      rotator_state: 'tracking',
+      target_type: 'mission',
+      command: 'Voyager 1',
+      body_id: null,
+      norad_id: null,
+    };
+    const satelliteId = '';
+    const selectedRotator = 'rotator1';
+
+    expect(canStopTracking(trackingState, satelliteId, selectedRotator)).toBe(true);
+  });
+
+  it('should return true for body targets while tracking with no satellite id', () => {
+    const trackingState = {
+      rotator_state: 'tracking',
+      target_type: 'body',
+      command: null,
+      body_id: 'rhea',
+      norad_id: null,
+    };
+    const satelliteId = '';
+    const selectedRotator = 'rotator1';
+
+    expect(canStopTracking(trackingState, satelliteId, selectedRotator)).toBe(true);
   });
 
   it('should return false when no rotator selected', () => {

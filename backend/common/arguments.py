@@ -96,8 +96,23 @@ if os.environ.get("ALEMBIC_CONTEXT"):
         max_tracker_targets=10,
         enable_soapy_discovery=False,
         runonce_soapy_discovery=True,
+        orbital_sync_satellite_metadata_urls=["http://db.satnogs.org/api/satellites/?format=json"],
+        orbital_sync_transmitter_urls=["http://db.satnogs.org/api/transmitters/?format=json"],
         tle_sync_satellite_metadata_urls=["http://db.satnogs.org/api/satellites/?format=json"],
         tle_sync_transmitter_urls=["http://db.satnogs.org/api/transmitters/?format=json"],
+        celestial_periodic_sync_enabled=True,
+        celestial_periodic_sync_interval_minutes=60,
+        celestial_sync_past_hours=1,
+        celestial_sync_future_hours=24,
+        celestial_sync_step_minutes=60,
+        celestial_runtime_cache_ttl_seconds=120,
+        celestial_vector_db_ttl_seconds=2 * 60 * 60,
+        celestial_vector_epoch_bucket_minutes=60,
+        celestial_computed_epoch_bucket_seconds=60,
+        celestial_dynamic_cache_min_seconds=2 * 60,
+        celestial_dynamic_cache_max_seconds=6 * 60 * 60,
+        celestial_sky_motion_accuracy_target_deg=0.25,
+        celestial_sky_motion_safety_factor=0.5,
     )
 else:
     _raw_args = parser.parse_args()
@@ -121,6 +136,12 @@ else:
         file_track_interval_ms = int(float(_file_config["track_interval"]) * 1000)
 
     cli_track_interval_ms = _raw_args.track_interval_ms
+    orbital_sync_satellite_metadata_urls = _file_config.get(
+        "orbital_sync_satellite_metadata_urls"
+    ) or _file_config.get("tle_sync_satellite_metadata_urls")
+    orbital_sync_transmitter_urls = _file_config.get(
+        "orbital_sync_transmitter_urls"
+    ) or _file_config.get("tle_sync_transmitter_urls")
 
     arguments = argparse.Namespace(
         host=_pick(_raw_args.host, "host"),
@@ -136,8 +157,31 @@ else:
         max_tracker_targets=_pick(_raw_args.max_tracker_targets, "max_tracker_targets"),
         enable_soapy_discovery=_pick(_raw_args.enable_soapy_discovery, "enable_soapy_discovery"),
         runonce_soapy_discovery=_pick(_raw_args.runonce_soapy_discovery, "runonce_soapy_discovery"),
-        tle_sync_satellite_metadata_urls=_file_config.get("tle_sync_satellite_metadata_urls"),
-        tle_sync_transmitter_urls=_file_config.get("tle_sync_transmitter_urls"),
+        orbital_sync_satellite_metadata_urls=orbital_sync_satellite_metadata_urls,
+        orbital_sync_transmitter_urls=orbital_sync_transmitter_urls,
+        tle_sync_satellite_metadata_urls=orbital_sync_satellite_metadata_urls,
+        tle_sync_transmitter_urls=orbital_sync_transmitter_urls,
+        celestial_periodic_sync_enabled=_file_config.get("celestial_periodic_sync_enabled"),
+        celestial_periodic_sync_interval_minutes=_file_config.get(
+            "celestial_periodic_sync_interval_minutes"
+        ),
+        celestial_sync_past_hours=_file_config.get("celestial_sync_past_hours"),
+        celestial_sync_future_hours=_file_config.get("celestial_sync_future_hours"),
+        celestial_sync_step_minutes=_file_config.get("celestial_sync_step_minutes"),
+        celestial_runtime_cache_ttl_seconds=_file_config.get("celestial_runtime_cache_ttl_seconds"),
+        celestial_vector_db_ttl_seconds=_file_config.get("celestial_vector_db_ttl_seconds"),
+        celestial_vector_epoch_bucket_minutes=_file_config.get(
+            "celestial_vector_epoch_bucket_minutes"
+        ),
+        celestial_computed_epoch_bucket_seconds=_file_config.get(
+            "celestial_computed_epoch_bucket_seconds"
+        ),
+        celestial_dynamic_cache_min_seconds=_file_config.get("celestial_dynamic_cache_min_seconds"),
+        celestial_dynamic_cache_max_seconds=_file_config.get("celestial_dynamic_cache_max_seconds"),
+        celestial_sky_motion_accuracy_target_deg=_file_config.get(
+            "celestial_sky_motion_accuracy_target_deg"
+        ),
+        celestial_sky_motion_safety_factor=_file_config.get("celestial_sky_motion_safety_factor"),
     )
 
 if getattr(arguments, "temp_db", False):

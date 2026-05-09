@@ -13,6 +13,13 @@ from typing import Dict, List, Optional
 
 _BODY_CATALOG: List[Dict[str, object]] = [
     {
+        "body_id": "sun",
+        "name": "Sun",
+        "body_type": "star",
+        "parent_body_id": None,
+        "sort_order": 0,
+    },
+    {
         "body_id": "mercury",
         "name": "Mercury",
         "body_type": "planet",
@@ -159,3 +166,38 @@ def get_celestial_body(body_id: str) -> Optional[Dict[str, object]]:
         return None
     entry = _BODY_BY_ID.get(key)
     return dict(entry) if entry else None
+
+
+def search_celestial_bodies(query: str, limit: int = 20) -> List[Dict[str, object]]:
+    """Search body catalog by display name and body identifiers."""
+    entries = list_celestial_bodies()
+    needle = (query or "").strip().lower()
+
+    if not needle:
+        return entries[: max(1, limit)]
+
+    scored: List[tuple[int, Dict[str, object]]] = []
+
+    for entry in entries:
+        body_id = str(entry.get("body_id") or "").strip().lower()
+        name = str(entry.get("name") or "").strip().lower()
+        body_type = str(entry.get("body_type") or "").strip().lower()
+        parent_body_id = str(entry.get("parent_body_id") or "").strip().lower()
+
+        score = -1
+        if needle == body_id or needle == name:
+            score = 100
+        elif body_id.startswith(needle) or name.startswith(needle):
+            score = 75
+        elif needle in body_id or needle in name:
+            score = 45
+        elif needle == body_type or needle == parent_body_id:
+            score = 30
+        elif needle in body_type or needle in parent_body_id:
+            score = 15
+
+        if score >= 0:
+            scored.append((score, entry))
+
+    scored.sort(key=lambda row: (-row[0], str(row[1].get("name") or row[1].get("body_id") or "")))
+    return [dict(entry) for _, entry in scored[: max(1, limit)]]

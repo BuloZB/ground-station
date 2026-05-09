@@ -26,11 +26,16 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, cast
 
 import crud
+import crud.celestialvectors as crud_celestial_vectors
+from celestial.bodycatalog import get_celestial_body
+from celestial.horizons import fetch_celestial_vectors
 from common.constants import RigStates, RotatorStates, TrackerCommandScopes, TrackerCommandStatus
 from db import AsyncSessionLocal
+from orbits import CentralBody, OrbitServiceError, build_satellite_ephemeris_payload
 from tracker.contracts import get_tracking_state_name, require_tracker_id
 from tracker.ipc import (
     TRACKER_MSG_COMMAND,
@@ -81,6 +86,80 @@ class TrackerManager:
         message = build_tracker_message(msg_type, payload)
         message["tracker_id"] = self.tracker_id
         self.queue_to_tracker.put(message)
+
+    @staticmethod
+    def _normalize_target_type(tracking_state: Dict[str, Any]) -> str:
+        target_type = str(tracking_state.get("target_type") or "").strip().lower()
+        if target_type in {"satellite", "mission", "body"}:
+            return target_type
+        if str(tracking_state.get("command") or "").strip():
+            return "mission"
+        if str(tracking_state.get("body_id") or "").strip():
+            return "body"
+        return "satellite"
+
+    async def _build_mission_ephemeris_payload(
+        self,
+        dbsession,
+        *,
+        tracking_state: Dict[str, Any],
+        map_settings: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        command = str(tracking_state.get("command") or "").strip()
+        if not command:
+            return None
+
+        payload: Optional[Dict[str, Any]] = None
+        cached = (
+            await crud_celestial_vectors.fetch_latest_celestial_vectors_cache_entry_for_command(
+                dbsession,
+                command=command,
+                valid_only=False,
+                as_of=datetime.now(timezone.utc),
+            )
+        )
+        if cached.get("success") and isinstance(cached.get("data"), dict):
+            cached_payload = (cached["data"] or {}).get("payload")
+            if isinstance(cached_payload, dict):
+                payload = dict(cached_payload)
+
+        if payload is None:
+            duration_minutes_raw = (map_settings or {}).get("orbitProjectionDuration", 240)
+            try:
+                duration_minutes = max(60, int(duration_minutes_raw))
+            except (TypeError, ValueError):
+                duration_minutes = 240
+            future_hours = max(1, min(24 * 30, int(duration_minutes / 60)))
+            past_hours = max(1, min(24, int(max(1, future_hours / 4))))
+            try:
+                payload = await asyncio.to_thread(
+                    fetch_celestial_vectors,
+                    command,
+                    datetime.now(timezone.utc),
+                    past_hours,
+                    future_hours,
+                    60,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "_build_mission_ephemeris_payload: failed loading vectors for command '%s': %s",
+                    command,
+                    exc,
+                )
+                return None
+        if not isinstance(payload, dict):
+            return None
+
+        return {
+            "target_type": "mission",
+            "name": str(tracking_state.get("target_name") or command).strip() or command,
+            "command": command,
+            "position_xyz_au": payload.get("position_xyz_au"),
+            "orbit_samples_xyz_au": payload.get("orbit_samples_xyz_au") or [],
+            "orbit_sample_times_utc": payload.get("orbit_sample_times_utc") or [],
+            "source": payload.get("source", "horizons"),
+            "fetched_at_utc": payload.get("fetched_at_utc"),
+        }
 
     async def _ensure_tracking_state(self) -> Optional[Dict[str, Any]]:
         if self.current_tracking_state:
@@ -365,15 +444,12 @@ class TrackerManager:
         sat = satellites["data"][0]
         logger.info("notify_tle_updated: sending TLE update for norad_id=%s", norad_id)
         logger.debug("notify_tle_updated: sending TLE update for norad_id=%s", norad_id)
-        self._send_to_tracker(
-            TRACKER_MSG_SET_SATELLITE_EPHEMERIS,
-            {
-                "norad_id": sat.get("norad_id"),
-                "name": sat.get("name"),
-                "tle1": sat.get("tle1"),
-                "tle2": sat.get("tle2"),
-            },
-        )
+        try:
+            payload = build_satellite_ephemeris_payload(sat, central_body=CentralBody.EARTH)
+        except OrbitServiceError as e:
+            logger.error("notify_tle_updated: invalid orbit data for norad_id=%s (%s)", norad_id, e)
+            return
+        self._send_to_tracker(TRACKER_MSG_SET_SATELLITE_EPHEMERIS, payload)
 
     async def notify_tracking_inputs_from_db(self, norad_id: int) -> None:
         if not norad_id:
@@ -404,15 +480,16 @@ class TrackerManager:
                 return
         if satellites.get("success") and satellites.get("data"):
             sat = satellites["data"][0]
-            self._send_to_tracker(
-                TRACKER_MSG_SET_SATELLITE_EPHEMERIS,
-                {
-                    "norad_id": sat.get("norad_id"),
-                    "name": sat.get("name"),
-                    "tle1": sat.get("tle1"),
-                    "tle2": sat.get("tle2"),
-                },
-            )
+            try:
+                payload = build_satellite_ephemeris_payload(sat, central_body=CentralBody.EARTH)
+            except OrbitServiceError as e:
+                logger.error(
+                    "notify_tracking_inputs_from_db: invalid orbit data for norad_id=%s (%s)",
+                    norad_id,
+                    e,
+                )
+            else:
+                self._send_to_tracker(TRACKER_MSG_SET_SATELLITE_EPHEMERIS, payload)
         if transmitters.get("success"):
             self._send_to_tracker(
                 TRACKER_MSG_SET_TRANSMITTERS,
@@ -488,30 +565,65 @@ class TrackerManager:
             )
             map_settings = (map_settings_reply.get("data") or {}).get("value", {})
             self._send_to_tracker(TRACKER_MSG_SET_MAP_SETTINGS, map_settings)
+            target_type = self._normalize_target_type(tracking_state)
+            if target_type == "satellite":
+                norad_id = tracking_state.get("norad_id")
+                if norad_id:
+                    satellites = await crud.satellites.fetch_satellites(
+                        dbsession, norad_id=norad_id
+                    )
+                    if satellites.get("success") and satellites.get("data"):
+                        sat = satellites["data"][0]
+                        try:
+                            payload = build_satellite_ephemeris_payload(
+                                sat, central_body=CentralBody.EARTH
+                            )
+                        except OrbitServiceError as e:
+                            logger.error(
+                                "_sync_tracker_context: invalid orbit data for norad_id=%s (%s)",
+                                norad_id,
+                                e,
+                            )
+                        else:
+                            self._send_to_tracker(TRACKER_MSG_SET_SATELLITE_EPHEMERIS, payload)
 
-            norad_id = tracking_state.get("norad_id")
-            if norad_id:
-                satellites = await crud.satellites.fetch_satellites(dbsession, norad_id=norad_id)
-                if satellites.get("success") and satellites.get("data"):
-                    sat = satellites["data"][0]
+                    transmitters = await crud.transmitters.fetch_transmitters_for_satellite(
+                        dbsession, norad_id=norad_id
+                    )
+                    if transmitters.get("success"):
+                        self._send_to_tracker(
+                            TRACKER_MSG_SET_TRANSMITTERS,
+                            {"items": transmitters.get("data", [])},
+                        )
+            elif target_type == "mission":
+                mission_payload = await self._build_mission_ephemeris_payload(
+                    dbsession,
+                    tracking_state=tracking_state,
+                    map_settings=map_settings,
+                )
+                if mission_payload:
+                    self._send_to_tracker(TRACKER_MSG_SET_SATELLITE_EPHEMERIS, mission_payload)
+                else:
+                    logger.warning(
+                        "_sync_tracker_context: no mission ephemeris payload available for tracker '%s'",
+                        self.tracker_id,
+                    )
+                # Mission tracking currently drives only rotator control, not rig doppler/tuning.
+                self._send_to_tracker(TRACKER_MSG_SET_TRANSMITTERS, {"items": []})
+            elif target_type == "body":
+                body_id = str(tracking_state.get("body_id") or "").strip().lower()
+                if body_id:
+                    body = get_celestial_body(body_id) or {}
+                    body_name = str(body.get("name") or body_id).strip() or body_id
                     self._send_to_tracker(
                         TRACKER_MSG_SET_SATELLITE_EPHEMERIS,
                         {
-                            "norad_id": sat.get("norad_id"),
-                            "name": sat.get("name"),
-                            "tle1": sat.get("tle1"),
-                            "tle2": sat.get("tle2"),
+                            "target_type": "body",
+                            "body_id": body_id,
+                            "name": body_name,
                         },
                     )
-
-                transmitters = await crud.transmitters.fetch_transmitters_for_satellite(
-                    dbsession, norad_id=norad_id
-                )
-                if transmitters.get("success"):
-                    self._send_to_tracker(
-                        TRACKER_MSG_SET_TRANSMITTERS,
-                        {"items": transmitters.get("data", [])},
-                    )
+                self._send_to_tracker(TRACKER_MSG_SET_TRANSMITTERS, {"items": []})
 
             rig_id = tracking_state.get("rig_id")
             rotator_id = tracking_state.get("rotator_id")
@@ -541,7 +653,7 @@ class TrackerManager:
             return cast(str, TrackerCommandScopes.ROTATOR)
         if {"rig_state", "rig_id", "rig_vfo", "vfo1", "vfo2", "transmitter_id"} & keys:
             return cast(str, TrackerCommandScopes.RIG)
-        if {"norad_id", "group_id"} & keys:
+        if {"norad_id", "group_id", "target_type", "command", "body_id"} & keys:
             return cast(str, TrackerCommandScopes.TARGET)
         return cast(str, TrackerCommandScopes.TRACKING)
 

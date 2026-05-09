@@ -64,6 +64,24 @@ class RigHandler:
         except (TypeError, ValueError):
             return 0.0
 
+    def apply_non_satellite_target_idle(self) -> None:
+        """Reset rig telemetry when tracking a non-satellite target.
+
+        Mission/body tracking currently drives only rotator control and never writes
+        frequency commands to rig hardware.
+        """
+        self.tracker.rig_data["transmitter_id"] = "none"
+        self.tracker.rig_data["original_freq"] = 0
+        self.tracker.rig_data["downlink_observed_freq"] = 0
+        self.tracker.rig_data["doppler_shift"] = 0
+        self.tracker.rig_data["uplink_freq"] = 0
+        self.tracker.rig_data["uplink_observed_freq"] = 0
+        self.tracker.rig_data["uplink_doppler_shift"] = 0
+        self.tracker.rig_data["transmitters"] = []
+        self.tracker.rig_data["tracking"] = False
+        self.tracker.rig_data["tuning"] = False
+        self.tracker.rig_data["stopped"] = True
+
     def _apply_radio_mode_to_targets(
         self,
         mode: str,

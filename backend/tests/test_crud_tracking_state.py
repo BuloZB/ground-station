@@ -107,6 +107,52 @@ class TestTrackingStateCRUD:
         assert result["data"]["value"]["norad_id"] == 25544
         assert "group_id" not in result["data"]["value"]
 
+    async def test_set_tracking_state_new_mission_target_without_norad(self, db_session):
+        """Mission trackers can be created without NORAD/group fields."""
+        tracking_data = {
+            "name": "satellite-tracking:mission-slot",
+            "value": {
+                "target_type": "mission",
+                "command": "Voyager 1",
+                "rotator_state": "disconnected",
+                "rig_state": "stopped",
+                "rotator_id": "none",
+                "rig_id": "none",
+                "transmitter_id": "none",
+            },
+        }
+
+        result = await set_tracking_state(db_session, tracking_data)
+
+        assert result["success"] is True
+        assert result["data"]["name"] == "satellite-tracking:mission-slot"
+        assert result["data"]["value"]["target_type"] == "mission"
+        assert result["data"]["value"]["command"] == "Voyager 1"
+        assert result["data"]["value"].get("norad_id") is None
+
+    async def test_set_tracking_state_new_body_target_without_norad(self, db_session):
+        """Body trackers can be created without NORAD/group fields."""
+        tracking_data = {
+            "name": "satellite-tracking:body-slot",
+            "value": {
+                "target_type": "body",
+                "body_id": "mars",
+                "rotator_state": "disconnected",
+                "rig_state": "stopped",
+                "rotator_id": "none",
+                "rig_id": "none",
+                "transmitter_id": "none",
+            },
+        }
+
+        result = await set_tracking_state(db_session, tracking_data)
+
+        assert result["success"] is True
+        assert result["data"]["name"] == "satellite-tracking:body-slot"
+        assert result["data"]["value"]["target_type"] == "body"
+        assert result["data"]["value"]["body_id"] == "mars"
+        assert result["data"]["value"].get("norad_id") is None
+
     async def test_set_tracking_state_update_existing(self, db_session):
         """Test updating existing tracking state."""
         # Create initial state

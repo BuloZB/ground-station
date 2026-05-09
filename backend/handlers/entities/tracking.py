@@ -46,6 +46,7 @@ from tracker.stateupdate import update_tracking_state_with_ownership
 from tracking.events import fetch_next_events_for_satellite
 
 TARGET_TRACKER_ID_PATTERN = re.compile(r"^target-(\d+)$")
+ALLOWED_TRACKER_TARGET_TYPES = {"satellite", "mission", "body"}
 
 
 def _tracker_id_required_response() -> Dict[str, Any]:
@@ -58,13 +59,18 @@ def _tracker_id_required_response() -> Dict[str, Any]:
 
 def _missing_new_tracker_fields(value: Dict[str, Any]) -> list[str]:
     required_fields = [
-        "norad_id",
-        "group_id",
         "rotator_state",
         "rig_state",
         "rig_id",
         "rotator_id",
     ]
+    target_type = _infer_target_type_from_value(value) or "satellite"
+    if target_type == "mission":
+        required_fields.extend(["command"])
+    elif target_type == "body":
+        required_fields.extend(["body_id"])
+    else:
+        required_fields.extend(["norad_id", "group_id"])
     missing: list[str] = []
     for field in required_fields:
         field_value = value.get(field)
@@ -75,6 +81,66 @@ def _missing_new_tracker_fields(value: Dict[str, Any]) -> list[str]:
             if field_value is None:
                 missing.append(field)
     return missing
+
+
+def _infer_target_type_from_value(value: Dict[str, Any]) -> str:
+    explicit_target_type = str(value.get("target_type") or "").strip().lower()
+    if explicit_target_type:
+        return explicit_target_type
+    if str(value.get("command") or "").strip():
+        return "mission"
+    if str(value.get("body_id") or "").strip():
+        return "body"
+    if value.get("norad_id") not in (None, "", 0):
+        return "satellite"
+    return ""
+
+
+def _normalize_target_update_payload(value: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(value or {})
+    target_type = _infer_target_type_from_value(payload)
+    if not target_type:
+        return {"success": True, "value": payload}
+    if target_type not in ALLOWED_TRACKER_TARGET_TYPES:
+        return {
+            "success": False,
+            "error": "invalid_target_type",
+            "message": "target_type must be one of: satellite, mission, body",
+        }
+
+    payload["target_type"] = target_type
+
+    # Mission and body targets are rotator-only today. Keep rig control disabled.
+    if target_type == "mission":
+        command = str(payload.get("command") or "").strip()
+        if not command:
+            return {
+                "success": False,
+                "error": "command_required",
+                "message": "command is required for mission targets",
+            }
+        payload["command"] = command
+        payload["body_id"] = None
+        payload["norad_id"] = None
+        payload["group_id"] = None
+        payload["transmitter_id"] = "none"
+        payload["rig_state"] = RigStates.STOPPED
+    elif target_type == "body":
+        body_id = str(payload.get("body_id") or "").strip().lower()
+        if not body_id:
+            return {
+                "success": False,
+                "error": "body_id_required",
+                "message": "body_id is required for body targets",
+            }
+        payload["body_id"] = body_id
+        payload["command"] = None
+        payload["norad_id"] = None
+        payload["group_id"] = None
+        payload["transmitter_id"] = "none"
+        payload["rig_state"] = RigStates.STOPPED
+
+    return {"success": True, "value": payload}
 
 
 def _parse_target_slot_number(tracker_id: str) -> Optional[int]:
@@ -132,8 +198,32 @@ async def emit_tracker_data(dbsession, sio, logger, tracker_id: str):
             logger.debug("Tracking state has no value, skipping tracker data emission")
             return
 
-        norad_id = tracking_value.get("norad_id", None)
-        satellite_data = await compiled_satellite_data(dbsession, norad_id)
+        target_type = _infer_target_type_from_value(tracking_value) or "satellite"
+        if target_type == "satellite":
+            norad_id = tracking_value.get("norad_id", None)
+            satellite_data = await compiled_satellite_data(dbsession, norad_id)
+        else:
+            target_name = str(
+                tracking_value.get("target_name")
+                or tracking_value.get("command")
+                or tracking_value.get("body_id")
+                or target_type
+            ).strip()
+            satellite_data = {
+                "details": {
+                    "name": target_name,
+                    "target_type": target_type,
+                    "command": tracking_value.get("command"),
+                    "body_id": tracking_value.get("body_id"),
+                    "norad_id": None,
+                    "is_geostationary": False,
+                },
+                "position": {},
+                "paths": {"past": [], "future": []},
+                "coverage": [],
+                "transmitters": [],
+                "error": False,
+            }
         data = {
             "tracker_id": tracker_id,
             "satellite_data": satellite_data,
@@ -176,10 +266,26 @@ async def emit_ui_tracker_values(dbsession, sio, logger, tracker_id: str):
             logger.debug("Tracking state has no value, skipping UI tracker values emission")
             return
 
-        group_id = tracking_value.get("group_id", None)
-        norad_id = tracking_value.get("norad_id", None)
-        ui_tracker_state = await get_ui_tracker_state(group_id, norad_id, tracker_id)
-        data = ui_tracker_state["data"]
+        target_type = _infer_target_type_from_value(tracking_value) or "satellite"
+        if target_type == "satellite":
+            group_id = tracking_value.get("group_id", None)
+            norad_id = tracking_value.get("norad_id", None)
+            ui_tracker_state = await get_ui_tracker_state(group_id, norad_id, tracker_id)
+            data = ui_tracker_state["data"]
+        else:
+            data = {
+                "groups": [],
+                "satellites": [],
+                "transmitters": [],
+                "group_id": None,
+                "norad_id": None,
+                "rig_id": tracking_value.get("rig_id", "none"),
+                "rotator_id": tracking_value.get("rotator_id", "none"),
+                "transmitter_id": "none",
+                "target_type": target_type,
+                "command": tracking_value.get("command"),
+                "body_id": tracking_value.get("body_id"),
+            }
         if isinstance(data, dict):
             data["tracker_id"] = tracker_id
         await sio.emit("ui-tracker-state", data)
@@ -245,6 +351,10 @@ async def set_tracking_state(
     # Extract the value from the data structure
     value = data.get("value", {}) if data else {}
     value = value if isinstance(value, dict) else {}
+    normalized_payload = _normalize_target_update_payload(value)
+    if not normalized_payload.get("success"):
+        return normalized_payload
+    value = normalized_payload["value"]
 
     existing_payload = get_tracker_instances_payload()
     existing_instances = existing_payload.get("instances", []) if existing_payload else []
@@ -763,7 +873,7 @@ async def fetch_next_pass_summaries_for_trackers(
         {
             tracker["norad_id"]
             for tracker in normalized_trackers
-            if isinstance(tracker.get("norad_id"), int)
+            if isinstance(tracker.get("norad_id"), int) and tracker["norad_id"] > 0
         }
     )
 
@@ -804,7 +914,9 @@ async def fetch_next_pass_summaries_for_trackers(
             "cached": False,
         }
 
-        if norad_id is None:
+        # Non-satellite targets may carry an empty NORAD identifier.
+        # Treat missing/invalid IDs as "no satellite pass summary" instead of hard-failing.
+        if not isinstance(norad_id, int) or norad_id <= 0:
             summaries_by_tracker_id[tracker_id] = summary
             continue
 

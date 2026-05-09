@@ -175,9 +175,25 @@ export function canControlRotator(rotatorData, trackingState) {
  * @param {string} selectedRotator - Selected rotator ID
  * @returns {boolean} True if tracking can be started
  */
+function hasSelectedTarget(trackingState = {}, satelliteId = '') {
+    const explicitType = String(trackingState?.target_type || '').trim().toLowerCase();
+    const missionCommand = String(trackingState?.command || '').trim();
+    const bodyId = String(trackingState?.body_id || '').trim().toLowerCase();
+    const noradCandidate = trackingState?.norad_id ?? satelliteId;
+    const parsedNoradId = Number(noradCandidate);
+    const hasSatellite = Number.isFinite(parsedNoradId) && parsedNoradId > 0;
+
+    if (explicitType === 'mission') return missionCommand.length > 0;
+    if (explicitType === 'body') return bodyId.length > 0;
+    if (explicitType === 'satellite') return hasSatellite;
+
+    // Backward-compatible fallback for partially-populated tracking states.
+    return hasSatellite || missionCommand.length > 0 || bodyId.length > 0;
+}
+
 export function canStartTracking(trackingState, satelliteId, selectedRotator) {
     return ![ROTATOR_STATES.TRACKING, ROTATOR_STATES.DISCONNECTED].includes(trackingState['rotator_state']) &&
-           satelliteId !== "" &&
+           hasSelectedTarget(trackingState, satelliteId) &&
            !["none", ""].includes(selectedRotator);
 }
 
@@ -195,7 +211,7 @@ export function canStopTracking(trackingState, satelliteId, selectedRotator) {
         ROTATOR_STATES.DISCONNECTED,
         ROTATOR_STATES.CONNECTED,
     ].includes(trackingState['rotator_state']) &&
-           satelliteId !== "" &&
+           hasSelectedTarget(trackingState, satelliteId) &&
            !["none", ""].includes(selectedRotator);
 }
 

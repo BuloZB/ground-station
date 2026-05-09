@@ -23,6 +23,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from common.common import logger, serialize_object
 from db.models import TrackingState
 
+ALLOWED_TRACKER_TARGET_TYPES = {"satellite", "mission", "body"}
+
+
+def _normalize_target_type(raw_target_type) -> str:
+    normalized = str(raw_target_type or "").strip().lower()
+    return normalized if normalized in ALLOWED_TRACKER_TARGET_TYPES else ""
+
+
+def _infer_target_type(value: Dict) -> str:
+    # Prefer explicit type when provided, then infer from mission/body fields.
+    explicit_target_type = _normalize_target_type(value.get("target_type"))
+    if explicit_target_type:
+        return explicit_target_type
+    if str(value.get("command") or "").strip():
+        return "mission"
+    if str(value.get("body_id") or "").strip():
+        return "body"
+    return "satellite"
+
 
 async def set_tracking_state(session: AsyncSession, data: dict) -> dict:
     """
@@ -78,10 +97,27 @@ async def set_tracking_state(session: AsyncSession, data: dict) -> dict:
             new_record = existing_record
 
         else:
-            # Full validation only for new records
-            assert value.get(
-                "norad_id", None
-            ), "norad_id is required when creating new tracking state"
+            # Full validation only for new records. Mission/body trackers are valid
+            # without NORAD and are controlled as non-satellite targets.
+            target_type = _infer_target_type(value)
+            if str(value.get("target_type") or "").strip() and not _normalize_target_type(
+                value.get("target_type")
+            ):
+                raise AssertionError(
+                    "target_type must be one of satellite, mission, body when creating new tracking state"
+                )
+            if target_type == "mission":
+                assert str(
+                    value.get("command") or ""
+                ).strip(), "command is required when creating new mission tracking state"
+            elif target_type == "body":
+                assert str(
+                    value.get("body_id") or ""
+                ).strip(), "body_id is required when creating new body tracking state"
+            else:
+                assert value.get(
+                    "norad_id", None
+                ), "norad_id is required when creating new tracking state"
             assert (
                 value.get("rotator_state", None) is not None
             ), "rotator_state is required when creating new tracking state"

@@ -38,9 +38,6 @@ import {useDispatch, useSelector} from "react-redux";
 import {useTranslation} from 'react-i18next';
 import {
     setGridEditable,
-    setMapZoomLevel,
-    fetchNextPassesForGroup,
-    setShowGeostationarySatellites,
 } from './overview-slice.jsx';
 import NextPassesGroupIsland from "./satellite-passes.jsx";
 import OverviewSatelliteInfoCard from "./satellite-info.jsx";
@@ -48,61 +45,8 @@ import { setRotator, setTrackerId, setTrackingStateInBackend } from "../target/t
 import SatelliteMapContainer from './overview-map.jsx';
 import SatelliteDetailsTable from "./satellites-table.jsx";
 import SatelliteGroupSelectorBar from "./satellite-group-selector-bar.jsx";
-import SatellitePassTimeline from "../target/timeline-main.jsx";
+import OverviewPassTimeline from './overview-pass-timeline.jsx';
 import { useTargetRotatorSelectionDialog } from '../target/use-target-rotator-selection-dialog.jsx';
-
-// Wrapper component to adapt overview passes to Timeline component
-const OverviewTimelineWrapper = React.memo(() => {
-    const dispatch = useDispatch();
-    const {socket} = useSocket();
-    const passes = useSelector((state) => state.overviewSatTrack.passes);
-    const gridEditable = useSelector((state) => state.overviewSatTrack.gridEditable);
-    const nextPassesHours = useSelector((state) => state.overviewSatTrack.nextPassesHours);
-    const passesAreCached = useSelector((state) => state.overviewSatTrack.passesAreCached);
-    const passesLoading = useSelector((state) => state.overviewSatTrack.passesLoading);
-    const selectedSatGroupId = useSelector((state) => state.overviewSatTrack.selectedSatGroupId);
-    const showGeostationarySatellites = useSelector((state) => state.overviewSatTrack.showGeostationarySatellites);
-    const passesRangeStart = useSelector((state) => state.overviewSatTrack.passesRangeStart);
-    const passesRangeEnd = useSelector((state) => state.overviewSatTrack.passesRangeEnd);
-
-    const handleRefreshPasses = () => {
-        if (selectedSatGroupId) {
-            dispatch(fetchNextPassesForGroup({
-                socket,
-                selectedSatGroupId,
-                hours: nextPassesHours,
-                forceRecalculate: true
-            }));
-        }
-    };
-
-    const handleToggleGeostationary = () => {
-        dispatch(setShowGeostationarySatellites(!showGeostationarySatellites));
-    };
-
-    return (
-        <SatellitePassTimeline
-            timeWindowHours={nextPassesHours}
-            satelliteName={null} // Multi-satellite view
-            passesOverride={passes}
-            activePassOverride={null} // Overview doesn't have an active pass concept
-            gridEditableOverride={gridEditable}
-            cachedOverride={passesAreCached}
-            labelType="name" // Show satellite names at peak
-            labelVerticalOffset={110} // Labels very close to curve peak
-            loading={passesLoading} // Show loading indicator
-            nextPassesHours={nextPassesHours} // Pass forecast window for pan boundaries
-            onRefresh={handleRefreshPasses}
-            showHoverElevation={false} // Hide elevation label on overview page
-            showGeoToggle={true} // Show geostationary toggle button on overview
-            showGeostationarySatellites={showGeostationarySatellites} // Toggle state from Redux
-            onToggleGeostationary={handleToggleGeostationary} // Toggle handler
-            highlightActivePasses={true} // Highlight active passes with solid lines
-            forceTimeWindowStart={passesRangeStart} // Force timeline to use calculation window start
-            forceTimeWindowEnd={passesRangeEnd} // Force timeline to use calculation window end
-        />
-    );
-});
 
 // global callback for dashboard editing here
 const setGridEditableOverviewEvent = 'overview-set-grid-editable';
@@ -481,11 +425,21 @@ const GlobalSatelliteTrackLayout = React.memo(function GlobalSatelliteTrackLayou
         dispatch(setTrackerId(trackerId));
         dispatch(setRotator({ value: nextRotatorId, trackerId }));
 
+        // Always overwrite target identity fields when retargeting to a satellite slot.
+        const normalizedTargetName = String(satelliteName || noradId || '').trim();
+        const satelliteTargetPatch = {
+            target_type: 'satellite',
+            target_name: normalizedTargetName || String(noradId || '').trim(),
+            command: null,
+            body_id: null,
+        };
+
         const newTrackingState = isCreateNewSlot
             ? {
                 tracker_id: trackerId,
                 norad_id: noradId,
                 group_id: nextGroupId,
+                ...satelliteTargetPatch,
                 rig_id: nextRigId,
                 rotator_id: nextRotatorId,
                 transmitter_id: 'none',
@@ -500,6 +454,7 @@ const GlobalSatelliteTrackLayout = React.memo(function GlobalSatelliteTrackLayou
                 tracker_id: trackerId,
                 norad_id: noradId,
                 group_id: nextGroupId,
+                ...satelliteTargetPatch,
                 rig_id: nextRigId,
                 rotator_id: nextRotatorId,
                 transmitter_id: nextTransmitterId,
@@ -544,7 +499,7 @@ const GlobalSatelliteTrackLayout = React.memo(function GlobalSatelliteTrackLayou
             <SatelliteDetailsTable/>
         </StyledIslandParentNoScrollbar>,
         <StyledIslandParentNoScrollbar key="timeline">
-            <OverviewTimelineWrapper/>
+            <OverviewPassTimeline/>
         </StyledIslandParentNoScrollbar>,
     ];
 

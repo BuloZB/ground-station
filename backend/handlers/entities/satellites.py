@@ -15,9 +15,11 @@
 
 """Satellite data handlers."""
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import crud
+from celestial.bodycatalog import search_celestial_bodies
+from celestial.spacecraftindex import search_spacecraft_index
 from db import AsyncSessionLocal
 from server import runtimestate
 from tasks.registry import get_task
@@ -104,7 +106,7 @@ async def get_satellites_for_group_id(
 
 
 async def search_satellites(
-    sio: Any, data: Optional[Dict], logger: Any, sid: str
+    sio: Any, data: Optional[Union[Dict[str, Any], str, int]], logger: Any, sid: str
 ) -> Dict[str, Union[bool, list]]:
     """
     Search satellites by keyword with their transmitters.
@@ -120,7 +122,12 @@ async def search_satellites(
     """
     async with AsyncSessionLocal() as dbsession:
         logger.debug(f"Searching satellites, data: {data}")
-        satellites = await crud.satellites.search_satellites(dbsession, keyword=data)
+        keyword: Union[str, int, None]
+        if isinstance(data, dict):
+            keyword = data.get("keyword") or data.get("query")
+        else:
+            keyword = data
+        satellites = await crud.satellites.search_satellites(dbsession, keyword=keyword)
 
         # Get transmitters for each satellite (same as get_satellites_for_group_id)
         if satellites:
@@ -133,6 +140,110 @@ async def search_satellites(
             logger.debug(f"No satellites found for search keyword: {data}")
 
         return {"success": satellites["success"], "data": satellites.get("data", [])}
+
+
+async def search_targets(
+    sio: Any, data: Optional[Union[Dict[str, Any], str]], logger: Any, sid: str
+) -> Dict[str, Union[bool, list, str, None]]:
+    """
+    Search satellites, missions, and bodies with one normalized payload.
+
+    Satellites keep the same backend lookup behavior as get-satellite-search
+    so target retargeting can preserve existing group/transmitter handling.
+    """
+    try:
+        query = ""
+        limit = 20
+
+        if isinstance(data, str):
+            query = data
+        elif isinstance(data, dict):
+            query = str(data.get("query") or "")
+            requested_limit = data.get("limit")
+            if isinstance(requested_limit, int) and requested_limit > 0:
+                limit = min(requested_limit, 50)
+
+        query = str(query or "").strip()
+        if len(query) < 2:
+            return {"success": True, "data": [], "error": None}
+
+        # Reuse existing satellite search flow so results keep group and transmitter enrichment.
+        satellites_reply = await search_satellites(sio, query, logger, sid)
+        if not satellites_reply.get("success"):
+            return {
+                "success": False,
+                "data": [],
+                "error": satellites_reply.get("error") or "Failed to search satellites",
+            }
+
+        satellite_data = satellites_reply.get("data")
+        satellite_rows: List[Dict[str, Any]] = (
+            satellite_data[:limit] if isinstance(satellite_data, list) else []
+        )
+        mission_rows = search_spacecraft_index(query=query, limit=limit)
+        body_rows = search_celestial_bodies(query=query, limit=limit)
+
+        results = []
+
+        for satellite in satellite_rows:
+            norad_id = satellite.get("norad_id")
+            if norad_id is None:
+                continue
+            name = str(satellite.get("name") or norad_id).strip()
+            results.append(
+                {
+                    "id": f"satellite:{norad_id}",
+                    "target_type": "satellite",
+                    "target_name": name,
+                    "target_identifier": str(norad_id),
+                    "norad_id": norad_id,
+                    "groups": satellite.get("groups") or [],
+                    "transmitters": satellite.get("transmitters") or [],
+                }
+            )
+
+        for mission in mission_rows:
+            command = str(mission.get("command") or "").strip()
+            if not command:
+                continue
+            display_name = str(mission.get("display_name") or command).strip()
+            results.append(
+                {
+                    "id": f"mission:{command.lower()}",
+                    "target_type": "mission",
+                    "target_name": display_name,
+                    "target_identifier": command,
+                    "command": command,
+                    "display_name": display_name,
+                    "mission_status": str(mission.get("mission_status") or "unknown")
+                    .strip()
+                    .lower(),
+                    "status_label": str(mission.get("status_label") or "").strip(),
+                }
+            )
+
+        for body in body_rows:
+            body_id = str(body.get("body_id") or "").strip().lower()
+            if not body_id:
+                continue
+            body_name = str(body.get("name") or body_id).strip()
+            results.append(
+                {
+                    "id": f"body:{body_id}",
+                    "target_type": "body",
+                    "target_name": body_name,
+                    "target_identifier": body_id,
+                    "body_id": body_id,
+                    "name": body_name,
+                    "body_type": str(body.get("body_type") or "").strip(),
+                    "parent_body_id": str(body.get("parent_body_id") or "").strip().lower(),
+                }
+            )
+
+        return {"success": True, "data": results, "error": None}
+    except Exception as exc:
+        logger.error(f"Failed searching unified targets: {exc}")
+        return {"success": False, "error": str(exc), "data": []}
 
 
 async def delete_satellite(
@@ -230,9 +341,9 @@ async def sync_satellite_data(
     sio: Any, data: Optional[Dict], logger: Any, sid: str
 ) -> Dict[str, Union[bool, None, str]]:
     """
-    Synchronize satellite data with known TLE sources as a background task.
+    Synchronize satellite data with known orbital sources as a background task.
 
-    This handler starts TLE synchronization as a background task, making it:
+    This handler starts orbital synchronization as a background task, making it:
     - Visible in the task manager UI
     - Cancellable by users
     - Consistent with scheduled sync behavior
@@ -252,26 +363,30 @@ async def sync_satellite_data(
             logger.error("Background task manager not initialized")
             return {"success": False, "error": "Background task manager not initialized"}
 
-        logger.info("Starting TLE synchronization as background task (manual trigger)")
+        logger.info("Starting orbital synchronization as background task (manual trigger)")
 
-        # Get the TLE sync task function
-        tle_sync_task = get_task("tle_sync")
+        # Get the orbital sync task function
+        orbital_sync_task = get_task("orbital_sync")
 
         # Start as background task
         task_id = await background_task_manager.start_task(
-            func=tle_sync_task, args=(), kwargs={}, name="Manual TLE Sync", task_id=None
+            func=orbital_sync_task,
+            args=(),
+            kwargs={},
+            name="Manual Orbital Data Sync",
+            task_id=None,
         )
 
-        logger.info(f"Manual TLE sync started as background task: {task_id}")
+        logger.info(f"Manual orbital sync started as background task: {task_id}")
         return {"success": True, "task_id": task_id}
 
     except ValueError as e:
-        # Singleton task already running (e.g., TLE sync already in progress)
-        logger.warning(f"TLE sync already running: {e}")
+        # Singleton task already running (e.g., orbital sync already in progress)
+        logger.warning(f"Orbital sync already running: {e}")
         return {"success": False, "error": str(e)}
 
     except Exception as e:
-        logger.error(f"Error starting TLE synchronization: {e}")
+        logger.error(f"Error starting orbital synchronization: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -283,6 +398,7 @@ def register_handlers(registry):
             "get-satellite": (get_satellite, "data_request"),
             "get-satellites-for-group-id": (get_satellites_for_group_id, "data_request"),
             "get-satellite-search": (search_satellites, "data_request"),
+            "get-target-search": (search_targets, "data_request"),
             "submit-satellite": (submit_satellite, "data_submission"),
             "edit-satellite": (edit_satellite, "data_submission"),
             "delete-satellite": (delete_satellite, "data_submission"),

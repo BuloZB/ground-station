@@ -19,6 +19,34 @@
 
 
 
+const normalizeTargetType = (trackingState = {}) => {
+    const explicitType = String(trackingState?.target_type || '').trim().toLowerCase();
+    if (explicitType === 'satellite' || explicitType === 'mission' || explicitType === 'body') {
+        return explicitType;
+    }
+    if (trackingState?.command) {
+        return 'mission';
+    }
+    if (trackingState?.body_id) {
+        return 'body';
+    }
+    return 'satellite';
+};
+
+export const trackingStateSelector = (state) => state.targetSatTrack.trackingState || {};
+export const targetTypeSelector = (state) => normalizeTargetType(trackingStateSelector(state));
+export const targetIdentifierSelector = (state) => {
+    const trackingState = trackingStateSelector(state);
+    const targetType = normalizeTargetType(trackingState);
+    if (targetType === 'mission') {
+        return String(trackingState?.command || '').trim();
+    }
+    if (targetType === 'body') {
+        return String(trackingState?.body_id || '').trim().toLowerCase();
+    }
+    return String(trackingState?.norad_id || '').trim();
+};
+
 export const satellitePositionSelector = state => state.targetSatTrack.satelliteData.position;
 export const satellitePathsSelector = state => state.targetSatTrack.satelliteData.paths;
 export const satelliteCoverageSelector = state => state.targetSatTrack.satelliteData.coverage;
