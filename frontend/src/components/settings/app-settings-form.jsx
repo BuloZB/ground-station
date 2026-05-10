@@ -666,7 +666,7 @@ const AppSettingsForm = () => {
                                 const definedInFile = Boolean(payload?.defined_in_file?.[field.key]);
                                 const forceFullWidth = field.value_type === 'string_list' || field.value_type === 'boolean';
                                 const applyModeMeta = getApplyModeMeta(field.apply_mode, t);
-                                const applyModeChipSx = field.apply_mode === 'restart_required'
+                                const applyModeChipSx = (field.apply_mode === 'restart_required' || field.apply_mode === 'hot')
                                     ? {
                                         height: 16,
                                         '& .MuiChip-label': {
