@@ -431,6 +431,7 @@ function GaugeEl({el, maxElevation = null, targetCurrentEl = null, hardwareLimit
         >
             <GaugeReferenceArc/>
             <Pointer angle={0} dotted={true} stroke="#666" opacity={0.3}/>
+            <Pointer angle={90} dotted={true} stroke="#666" opacity={0.3}/>
             {/* Pass limits - green allowed zone */}
             {safeMaxElevation !== null && hwMinElAngle !== null && <>
                 <Pointer angle={angle} stroke="#888" strokeWidth={1} opacity={0.3}/>

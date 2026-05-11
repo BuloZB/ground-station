@@ -21,19 +21,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { updatePreferences, setPreference } from './preferences-slice.jsx';
 import { tz } from 'moment-timezone';
-import Paper from '@mui/material/Paper';
 import { useTranslation } from 'react-i18next';
 import {
     Accordion,
     AccordionDetails,
     AccordionSummary,
-    Alert,
     Backdrop,
     Box,
     Button,
     Chip,
     CircularProgress,
-    Divider,
     FormControl,
     FormHelperText,
     IconButton,
@@ -46,12 +43,21 @@ import {
     Typography,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
+import { alpha } from '@mui/material/styles';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { useSocket } from '../common/socket.jsx';
 import { toast } from '../../utils/toast-with-timestamp.jsx';
 import { getAvailableThemesWithMetadata } from '../../themes/theme-configs.js';
+import {
+    SettingsActionFooter,
+    SettingsBanner,
+    SettingsMetaRow,
+    SettingsSection,
+    SettingsSurface,
+    SettingsSurfaceHeader,
+} from './shared/index.js';
 
 const EDITABLE_KEYS = [
     'timezone',
@@ -92,6 +98,57 @@ const localeOptions = [
     { name: '中文 (Chinese Simplified)', value: 'zh-CN' },
 ];
 
+const getPreferenceCardBackground = (theme) => (
+    theme.palette.mode === 'dark'
+        ? alpha(theme.palette.grey[700], 0.18)
+        : alpha(theme.palette.grey[100], 0.9)
+);
+
+const preferenceCardSx = {
+    p: 1.5,
+    border: '1px solid',
+    borderColor: 'divider',
+    borderRadius: 1,
+    backgroundColor: (theme) => getPreferenceCardBackground(theme),
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+};
+
+const preferenceFieldHeadingSx = {
+    fontSize: { xs: '0.7rem', sm: '0.78rem', md: '0.82rem' },
+    lineHeight: 1.2,
+    mb: 0.75,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    minWidth: 0,
+};
+
+const integrationStatusChipSx = {
+    height: 16,
+    '& .MuiChip-label': {
+        px: 0.6,
+        fontSize: '0.62rem',
+        lineHeight: 1.1,
+        fontWeight: 400,
+    },
+};
+
+const PreferenceFieldHeading = ({ title, subtitle }) => (
+    <Typography variant="body2" title={`${title} ${subtitle || ''}`.trim()} sx={preferenceFieldHeadingSx}>
+        <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>
+            {title}
+        </Box>
+        {subtitle ? (
+            <Box component="span" sx={{ ml: 0.75, color: 'text.secondary' }}>
+                {subtitle}
+            </Box>
+        ) : null}
+    </Typography>
+);
+
 const normalizePreferences = (preferences) => {
     const result = Object.fromEntries(EDITABLE_KEYS.map((key) => [key, '']));
 
@@ -124,15 +181,16 @@ const SecretsField = ({
 
     return (
         <Stack spacing={1}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <SettingsMetaRow sx={{ justifyContent: 'space-between' }}>
                 <Typography variant="subtitle2">{label}</Typography>
                 <Chip
                     size="small"
                     color={value ? 'success' : 'default'}
                     label={statusLabel}
                     variant={value ? 'filled' : 'outlined'}
+                    sx={integrationStatusChipSx}
                 />
-            </Stack>
+            </SettingsMetaRow>
             <TextField
                 fullWidth
                 size="small"
@@ -168,7 +226,7 @@ const SecretsField = ({
     );
 };
 
-const PreferencesForm = () => {
+const PreferencesForm = ({ mode = 'preferences' }) => {
     const { socket } = useSocket();
     const dispatch = useDispatch();
     const { preferences, status } = useSelector((state) => state.preferences);
@@ -187,6 +245,7 @@ const PreferencesForm = () => {
         deepgram_api_key: false,
         google_translate_api_key: false,
     });
+    const isIntegrationsMode = mode === 'integrations';
 
     const timezoneOptions = useMemo(
         () => tz.names().map((zone) => ({ name: zone.replace('_', ' '), value: zone })),
@@ -281,10 +340,18 @@ const PreferencesForm = () => {
     };
 
     const saveStatusText = isSaving || isLoading
-        ? t('preferences.state_saving', { defaultValue: 'Saving changes...' })
+        ? t('preferences.saving_button', { defaultValue: 'Saving...' })
         : isDirty
-            ? t('preferences.state_unsaved', { defaultValue: 'You have unsaved changes.' })
-            : t('preferences.state_saved', { defaultValue: 'All changes saved.' });
+            ? t('app_settings.unsaved', { defaultValue: 'Unsaved changes' })
+            : t('app_settings.saved', { defaultValue: 'Saved' });
+
+    const headerStatusText = isSaving || isLoading
+        ? t('preferences.saving_button', { defaultValue: 'Saving...' })
+        : isDirty
+            ? t('app_settings.unsaved', { defaultValue: 'Unsaved changes' })
+            : t('app_settings.saved', { defaultValue: 'Saved' });
+
+    const headerStatusColor = isSaving || isLoading ? 'info' : (isDirty ? 'warning' : 'success');
 
     return (
         <>
@@ -303,194 +370,238 @@ const PreferencesForm = () => {
                 <Typography variant="h6">{t('preferences.reloading', { defaultValue: 'Reloading...' })}</Typography>
             </Backdrop>
 
-            <Paper elevation={3} sx={{ p: 2, mt: 0, borderRadius: 0 }}>
+            <SettingsSurface>
                 <Box component="form">
-                    <Stack spacing={3}>
-                        <Box>
-                            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
-                                {t('general')}
-                            </Typography>
-                            <Divider sx={{ mb: 2 }} />
+                    <Stack spacing={2}>
+                        <SettingsSurfaceHeader
+                            title={isIntegrationsMode
+                                ? t('preferences.integration_tab_title', { defaultValue: 'Integrations' })
+                                : t('preferences.title', { defaultValue: 'User Preferences' })}
+                            subtitle={isIntegrationsMode
+                                ? t('preferences.integration_tab_subtitle', { defaultValue: 'Manage API keys and external service integrations.' })
+                                : t('preferences.preferences_tab_subtitle', { defaultValue: 'Configure regional, appearance, and experimental behavior.' })}
+                            status={{ label: headerStatusText, color: headerStatusColor }}
+                        />
 
+                        {!isIntegrationsMode ? (
+                            <>
+                                <SettingsSection
+                                    title={t('preferences.group_regional_language', { defaultValue: 'Regional & Language' })}
+                                    description={t('preferences.group_regional_language_help', {
+                                        defaultValue: 'Controls language, timezone, and regional formatting used across the UI.',
+                                    })}
+                                >
                             <Grid container spacing={2} columns={12}>
                                 <Grid size={{ xs: 12, md: 6 }}>
-                                    <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
-                                        <InputLabel>{t('preferences.timezone')}</InputLabel>
-                                        <Select
-                                            value={draft.timezone || ''}
-                                            label={t('preferences.timezone')}
-                                            onChange={(event) => handleDraftChange('timezone', event.target.value)}
-                                        >
-                                            {timezoneOptions.map((option) => (
-                                                <MenuItem key={option.value} value={option.value}>
-                                                    {option.name}
-                                                </MenuItem>
-                                            ))}
-                                        </Select>
-                                        <FormHelperText>
-                                            {t('preferences.timezone_help', { defaultValue: 'Used for satellite pass times and scheduling displays.' })}
-                                        </FormHelperText>
-                                    </FormControl>
+                                    <Box sx={preferenceCardSx}>
+                                        <PreferenceFieldHeading
+                                            title={t('preferences.timezone')}
+                                            subtitle={t('preferences.timezone_help', { defaultValue: 'Used for satellite pass times and scheduling displays.' })}
+                                        />
+                                        <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
+                                            <InputLabel>{t('preferences.timezone')}</InputLabel>
+                                            <Select
+                                                value={draft.timezone || ''}
+                                                label={t('preferences.timezone')}
+                                                onChange={(event) => handleDraftChange('timezone', event.target.value)}
+                                            >
+                                                {timezoneOptions.map((option) => (
+                                                    <MenuItem key={option.value} value={option.value}>
+                                                        {option.name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                    </Box>
                                 </Grid>
 
                                 <Grid size={{ xs: 12, md: 6 }}>
-                                    <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
-                                        <InputLabel>{t('preferences.locale_formatting', { defaultValue: 'Locale (Formatting)' })}</InputLabel>
-                                        <Select
-                                            value={draft.locale || 'browser'}
-                                            label={t('preferences.locale_formatting', { defaultValue: 'Locale (Formatting)' })}
-                                            onChange={(event) => handleDraftChange('locale', event.target.value)}
-                                        >
-                                            {localeOptions.map((option) => (
-                                                <MenuItem key={option.value} value={option.value}>
-                                                    {option.value === 'browser'
-                                                        ? `${t('preferences.browser_default', { defaultValue: 'Browser Default' })} (${navigator.language})`
-                                                        : option.name}
-                                                </MenuItem>
-                                            ))}
-                                        </Select>
-                                        <FormHelperText>
-                                            {t('preferences.locale_help', { defaultValue: 'Controls date and number formatting in the UI.' })}
-                                        </FormHelperText>
-                                    </FormControl>
+                                    <Box sx={preferenceCardSx}>
+                                        <PreferenceFieldHeading
+                                            title={t('preferences.locale_formatting', { defaultValue: 'Locale (Formatting)' })}
+                                            subtitle={t('preferences.locale_help', { defaultValue: 'Controls date and number formatting in the UI.' })}
+                                        />
+                                        <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
+                                            <InputLabel>{t('preferences.locale_formatting', { defaultValue: 'Locale (Formatting)' })}</InputLabel>
+                                            <Select
+                                                value={draft.locale || 'browser'}
+                                                label={t('preferences.locale_formatting', { defaultValue: 'Locale (Formatting)' })}
+                                                onChange={(event) => handleDraftChange('locale', event.target.value)}
+                                            >
+                                                {localeOptions.map((option) => (
+                                                    <MenuItem key={option.value} value={option.value}>
+                                                        {option.value === 'browser'
+                                                            ? `${t('preferences.browser_default', { defaultValue: 'Browser Default' })} (${navigator.language})`
+                                                            : option.name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                    </Box>
                                 </Grid>
 
                                 <Grid size={{ xs: 12, md: 6 }}>
-                                    <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
-                                        <InputLabel>{t('preferences.language')}</InputLabel>
-                                        <Select
-                                            value={draft.language || 'en_US'}
-                                            label={t('preferences.language')}
-                                            onChange={(event) => handleDraftChange('language', event.target.value)}
-                                        >
-                                            {languageOptions.map((option) => (
-                                                <MenuItem key={option.value} value={option.value}>
-                                                    {option.name}
-                                                </MenuItem>
-                                            ))}
-                                        </Select>
-                                        <FormHelperText>
-                                            {t('preferences.language_help', { defaultValue: 'Changes interface language after saving.' })}
-                                        </FormHelperText>
-                                    </FormControl>
-                                </Grid>
-
-                                <Grid size={{ xs: 12, md: 6 }}>
-                                    <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
-                                        <InputLabel htmlFor="theme-selector">{t('preferences.theme')}</InputLabel>
-                                        <Select
-                                            id="theme-selector"
-                                            value={draft.theme || 'auto'}
-                                            label={t('preferences.theme')}
-                                            onChange={(event) => handleDraftChange('theme', event.target.value)}
-                                        >
-                                            {themesOptions.map((option) => (
-                                                <MenuItem key={option.id} value={option.id}>
-                                                    {option.name}
-                                                </MenuItem>
-                                            ))}
-                                        </Select>
-                                        <FormHelperText>
-                                            {t('preferences.theme_help', { defaultValue: 'Theme change is applied after saving and page reload.' })}
-                                        </FormHelperText>
-                                    </FormControl>
-                                    {themeChanged && (
-                                        <Alert severity="info" sx={{ mt: 1 }}>
-                                            {t('preferences.theme_reload_required', { defaultValue: 'Theme will be applied after saving and reloading.' })}
-                                        </Alert>
-                                    )}
-                                </Grid>
-
-                                <Grid size={{ xs: 12, md: 6 }}>
-                                    <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
-                                        <InputLabel>{t('preferences.toast_position')}</InputLabel>
-                                        <Select
-                                            value={draft.toast_position || 'bottom-center'}
-                                            label={t('preferences.toast_position')}
-                                            onChange={(event) => handleDraftChange('toast_position', event.target.value)}
-                                        >
-                                            {toastPositionOptions.map((option) => (
-                                                <MenuItem key={option.value} value={option.value}>
-                                                    {option.name}
-                                                </MenuItem>
-                                            ))}
-                                        </Select>
-                                        <FormHelperText>
-                                            {t('preferences.toast_position_help', { defaultValue: 'Choose where system notifications appear.' })}
-                                        </FormHelperText>
-                                    </FormControl>
+                                    <Box sx={preferenceCardSx}>
+                                        <PreferenceFieldHeading
+                                            title={t('preferences.language')}
+                                            subtitle={t('preferences.language_help', { defaultValue: 'Changes interface language after saving.' })}
+                                        />
+                                        <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
+                                            <InputLabel>{t('preferences.language')}</InputLabel>
+                                            <Select
+                                                value={draft.language || 'en_US'}
+                                                label={t('preferences.language')}
+                                                onChange={(event) => handleDraftChange('language', event.target.value)}
+                                            >
+                                                {languageOptions.map((option) => (
+                                                    <MenuItem key={option.value} value={option.value}>
+                                                        {option.name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                    </Box>
                                 </Grid>
                             </Grid>
-                        </Box>
+                                </SettingsSection>
 
-                        <Box>
-                            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
-                                {t('preferences.labs', { defaultValue: 'Labs' })}
-                            </Typography>
-                            <Divider sx={{ mb: 2 }} />
-
+                                <SettingsSection
+                                    title={t('preferences.group_appearance_notifications', { defaultValue: 'Appearance & Notifications' })}
+                                    description={t('preferences.group_appearance_notifications_help', {
+                                        defaultValue: 'Visual theme selection and notification placement.',
+                                    })}
+                                >
                             <Grid container spacing={2} columns={12}>
                                 <Grid size={{ xs: 12, md: 6 }}>
-                                    <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
-                                        <InputLabel>{t('preferences.celestial_page')}</InputLabel>
-                                        <Select
-                                            value={draft.celestial_enabled || 'false'}
-                                            label={t('preferences.celestial_page')}
-                                            onChange={(event) => handleDraftChange('celestial_enabled', event.target.value)}
+                                    <Box sx={preferenceCardSx}>
+                                        <PreferenceFieldHeading
+                                            title={t('preferences.theme')}
+                                            subtitle={t('preferences.theme_help', { defaultValue: 'Theme change is applied after saving and page reload.' })}
+                                        />
+                                        <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
+                                            <InputLabel htmlFor="theme-selector">{t('preferences.theme')}</InputLabel>
+                                            <Select
+                                                id="theme-selector"
+                                                value={draft.theme || 'auto'}
+                                                label={t('preferences.theme')}
+                                                onChange={(event) => handleDraftChange('theme', event.target.value)}
+                                            >
+                                                {themesOptions.map((option) => (
+                                                    <MenuItem key={option.id} value={option.id}>
+                                                        {option.name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                        {themeChanged && (
+                                            <SettingsBanner severity="info" sx={{ mt: 1 }}>
+                                                {t('preferences.theme_reload_required', { defaultValue: 'Theme will be applied after saving and reloading.' })}
+                                            </SettingsBanner>
+                                        )}
+                                    </Box>
+                                </Grid>
+
+                                <Grid size={{ xs: 12, md: 6 }}>
+                                    <Box sx={preferenceCardSx}>
+                                        <PreferenceFieldHeading
+                                            title={t('preferences.toast_position')}
+                                            subtitle={t('preferences.toast_position_help', { defaultValue: 'Choose where system notifications appear.' })}
+                                        />
+                                        <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
+                                            <InputLabel>{t('preferences.toast_position')}</InputLabel>
+                                            <Select
+                                                value={draft.toast_position || 'bottom-center'}
+                                                label={t('preferences.toast_position')}
+                                                onChange={(event) => handleDraftChange('toast_position', event.target.value)}
+                                            >
+                                                {toastPositionOptions.map((option) => (
+                                                    <MenuItem key={option.value} value={option.value}>
+                                                        {option.name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                    </Box>
+                                </Grid>
+                            </Grid>
+                                </SettingsSection>
+
+                                <SettingsSection
+                                    title={t('preferences.group_experimental', { defaultValue: 'Experimental' })}
+                                    description={t('preferences.group_experimental_help', {
+                                        defaultValue: 'Feature flags for pages and flows that are still under active development.',
+                                    })}
+                                >
+                            <Grid container spacing={2} columns={12}>
+                                <Grid size={{ xs: 12, md: 6 }}>
+                                    <Box sx={preferenceCardSx}>
+                                        <PreferenceFieldHeading
+                                            title={t('preferences.celestial_page')}
+                                            subtitle={t('preferences.celestial_page_help', { defaultValue: 'Show or hide the Celestial page while it is under development.' })}
+                                        />
+                                        <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
+                                            <InputLabel>{t('preferences.celestial_page')}</InputLabel>
+                                            <Select
+                                                value={draft.celestial_enabled || 'false'}
+                                                label={t('preferences.celestial_page')}
+                                                onChange={(event) => handleDraftChange('celestial_enabled', event.target.value)}
+                                            >
+                                                <MenuItem value="false">
+                                                    {t('preferences.celestial_hidden', { defaultValue: 'Hidden (default)' })}
+                                                </MenuItem>
+                                                <MenuItem value="true">
+                                                    {t('preferences.celestial_visible', { defaultValue: 'Visible' })}
+                                                </MenuItem>
+                                            </Select>
+                                        </FormControl>
+                                    </Box>
+                                </Grid>
+                            </Grid>
+                                </SettingsSection>
+                            </>
+                        ) : null}
+
+                        {isIntegrationsMode ? (
+                            <SettingsSection
+                                title={t('preferences.integration_section_title', { defaultValue: 'Integration' })}
+                                description={t('preferences.integration_section_help', {
+                                    defaultValue: 'Manage API keys for map providers, transcription, and translation services.',
+                                })}
+                            >
+                                <Grid container spacing={2} columns={12}>
+                                    <Grid size={{ xs: 12, md: 6 }}>
+                                        <Box sx={preferenceCardSx}>
+                                            <SecretsField
+                                                fieldKey="stadia_maps_api_key"
+                                                label={t('preferences.stadia_maps_api_key')}
+                                                value={draft.stadia_maps_api_key || ''}
+                                                placeholder={t('preferences.api_key_placeholder', { defaultValue: 'Paste API key' })}
+                                                helperText={t('preferences.stadia_api_help', { defaultValue: 'Used for map tile providers that require an API token.' })}
+                                                statusLabel={draft.stadia_maps_api_key
+                                                    ? t('preferences.configured', { defaultValue: 'Configured' })
+                                                    : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                visible={visibleSecrets.stadia_maps_api_key}
+                                                onToggleVisibility={() => toggleSecretVisibility('stadia_maps_api_key')}
+                                                onChange={(value) => handleDraftChange('stadia_maps_api_key', value)}
+                                                disabled={isSaving || isLoading}
+                                            />
+                                        </Box>
+                                    </Grid>
+                                    <Grid size={{ xs: 12, md: 6 }}>
+                                        <Stack spacing={1.25}>
+                                        <Accordion
+                                            disableGutters
+                                            sx={{
+                                                border: '1px solid',
+                                                borderColor: 'divider',
+                                                borderRadius: 1,
+                                                backgroundColor: (theme) => getPreferenceCardBackground(theme),
+                                                overflow: 'hidden',
+                                                '&:before': { display: 'none' },
+                                            }}
                                         >
-                                            <MenuItem value="false">
-                                                {t('preferences.celestial_hidden', { defaultValue: 'Hidden (default)' })}
-                                            </MenuItem>
-                                            <MenuItem value="true">
-                                                {t('preferences.celestial_visible', { defaultValue: 'Visible' })}
-                                            </MenuItem>
-                                        </Select>
-                                        <FormHelperText>
-                                            {t('preferences.celestial_page_help', { defaultValue: 'Show or hide the Celestial page while it is under development.' })}
-                                        </FormHelperText>
-                                    </FormControl>
-                                </Grid>
-                            </Grid>
-                        </Box>
-
-                        <Box>
-                            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
-                                {t('preferences.api_configuration')}
-                            </Typography>
-                            <Divider sx={{ mb: 2 }} />
-
-                            <Grid container spacing={2} columns={12}>
-                                <Grid size={{ xs: 12, md: 6 }}>
-                                    <SecretsField
-                                        fieldKey="stadia_maps_api_key"
-                                        label={t('preferences.stadia_maps_api_key')}
-                                        value={draft.stadia_maps_api_key || ''}
-                                        placeholder={t('preferences.api_key_placeholder', { defaultValue: 'Paste API key' })}
-                                        helperText={t('preferences.stadia_api_help', { defaultValue: 'Used for map tile providers that require an API token.' })}
-                                        statusLabel={draft.stadia_maps_api_key
-                                            ? t('preferences.configured', { defaultValue: 'Configured' })
-                                            : t('preferences.not_configured', { defaultValue: 'Not configured' })}
-                                        visible={visibleSecrets.stadia_maps_api_key}
-                                        onToggleVisibility={() => toggleSecretVisibility('stadia_maps_api_key')}
-                                        onChange={(value) => handleDraftChange('stadia_maps_api_key', value)}
-                                        disabled={isSaving || isLoading}
-                                    />
-                                </Grid>
-                            </Grid>
-                        </Box>
-
-                        <Box>
-                            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
-                                {t('preferences.transcription_settings', { defaultValue: 'Transcription Services' })}
-                            </Typography>
-                            <Divider sx={{ mb: 2 }} />
-
-                            <Grid container spacing={2} columns={12}>
-                                <Grid size={{ xs: 12, md: 6 }}>
-                                    <Stack spacing={1.25}>
-                                        <Accordion disableGutters>
                                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                                <Stack direction="row" spacing={1} alignItems="center">
+                                                <SettingsMetaRow>
                                                     <Typography fontWeight={600}>{t('preferences.gemini_api_key', { defaultValue: 'Gemini API Key' })}</Typography>
                                                     <Chip
                                                         size="small"
@@ -498,8 +609,9 @@ const PreferencesForm = () => {
                                                         label={draft.gemini_api_key
                                                             ? t('preferences.configured', { defaultValue: 'Configured' })
                                                             : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                        sx={integrationStatusChipSx}
                                                     />
-                                                </Stack>
+                                                </SettingsMetaRow>
                                             </AccordionSummary>
                                             <AccordionDetails>
                                                 <Stack spacing={1.5}>
@@ -542,9 +654,19 @@ const PreferencesForm = () => {
                                             </AccordionDetails>
                                         </Accordion>
 
-                                        <Accordion disableGutters>
+                                        <Accordion
+                                            disableGutters
+                                            sx={{
+                                                border: '1px solid',
+                                                borderColor: 'divider',
+                                                borderRadius: 1,
+                                                backgroundColor: (theme) => getPreferenceCardBackground(theme),
+                                                overflow: 'hidden',
+                                                '&:before': { display: 'none' },
+                                            }}
+                                        >
                                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                                <Stack direction="row" spacing={1} alignItems="center">
+                                                <SettingsMetaRow>
                                                     <Typography fontWeight={600}>{t('preferences.deepgram_api_key', { defaultValue: 'Deepgram API Key' })}</Typography>
                                                     <Chip
                                                         size="small"
@@ -552,8 +674,9 @@ const PreferencesForm = () => {
                                                         label={draft.deepgram_api_key
                                                             ? t('preferences.configured', { defaultValue: 'Configured' })
                                                             : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                        sx={integrationStatusChipSx}
                                                     />
-                                                </Stack>
+                                                </SettingsMetaRow>
                                             </AccordionSummary>
                                             <AccordionDetails>
                                                 <Stack spacing={1.5}>
@@ -596,9 +719,19 @@ const PreferencesForm = () => {
                                             </AccordionDetails>
                                         </Accordion>
 
-                                        <Accordion disableGutters>
+                                        <Accordion
+                                            disableGutters
+                                            sx={{
+                                                border: '1px solid',
+                                                borderColor: 'divider',
+                                                borderRadius: 1,
+                                                backgroundColor: (theme) => getPreferenceCardBackground(theme),
+                                                overflow: 'hidden',
+                                                '&:before': { display: 'none' },
+                                            }}
+                                        >
                                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                                <Stack direction="row" spacing={1} alignItems="center">
+                                                <SettingsMetaRow>
                                                     <Typography fontWeight={600}>{t('preferences.google_translate_api_key', { defaultValue: 'Google Translate API Key' })}</Typography>
                                                     <Chip
                                                         size="small"
@@ -606,8 +739,9 @@ const PreferencesForm = () => {
                                                         label={draft.google_translate_api_key
                                                             ? t('preferences.configured', { defaultValue: 'Configured' })
                                                             : t('preferences.not_configured', { defaultValue: 'Not configured' })}
+                                                        sx={integrationStatusChipSx}
                                                     />
-                                                </Stack>
+                                                </SettingsMetaRow>
                                             </AccordionSummary>
                                             <AccordionDetails>
                                                 <Stack spacing={1.5}>
@@ -641,59 +775,36 @@ const PreferencesForm = () => {
                                                 </Stack>
                                             </AccordionDetails>
                                         </Accordion>
-                                    </Stack>
+                                        </Stack>
+                                    </Grid>
                                 </Grid>
-                            </Grid>
-                        </Box>
-                    </Stack>
+                            </SettingsSection>
+                        ) : null}
 
-                    <Box
-                        sx={{
-                            mt: 3,
-                            position: 'sticky',
-                            bottom: 8,
-                            zIndex: 2,
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            borderRadius: 1,
-                            p: 1.5,
-                            bgcolor: 'background.paper',
-                        }}
-                    >
-                        <Stack
-                            direction={{ xs: 'column', sm: 'row' }}
-                            justifyContent="space-between"
-                            alignItems={{ xs: 'flex-start', sm: 'center' }}
-                            spacing={1.5}
-                        >
-                            <Typography variant="body2" role="status" aria-live="polite">
-                                {saveStatusText}
-                            </Typography>
-                            <Stack direction="row" spacing={1}>
-                                <Button
-                                    variant="outlined"
-                                    color="inherit"
-                                    disabled={!isDirty || isSaving || isLoading}
-                                    onClick={handleReset}
-                                >
-                                    {t('preferences.reset_changes', { defaultValue: 'Reset' })}
-                                </Button>
-                                <Button
-                                    variant="contained"
-                                    color="primary"
-                                    disabled={!isDirty || isSaving || isLoading}
-                                    onClick={handleSavePreferences}
-                                    data-testid="preferences-save-button"
-                                >
-                                    {isSaving || isLoading
-                                        ? t('preferences.saving_button', { defaultValue: 'Saving...' })
-                                        : t('preferences.save_preferences')}
-                                </Button>
-                            </Stack>
-                        </Stack>
-                    </Box>
+                        <SettingsActionFooter statusText={saveStatusText} sticky sx={{ mt: 1 }}>
+                            <Button
+                                variant="outlined"
+                                color="inherit"
+                                disabled={!isDirty || isSaving || isLoading}
+                                onClick={handleReset}
+                            >
+                                {t('preferences.reset_changes', { defaultValue: 'Reset' })}
+                            </Button>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                disabled={!isDirty || isSaving || isLoading}
+                                onClick={handleSavePreferences}
+                                data-testid="preferences-save-button"
+                            >
+                                {isSaving || isLoading
+                                    ? t('preferences.saving_button', { defaultValue: 'Saving...' })
+                                    : t('preferences.save_preferences')}
+                            </Button>
+                        </SettingsActionFooter>
+                    </Stack>
                 </Box>
-            </Paper>
+            </SettingsSurface>
         </>
     );
 };

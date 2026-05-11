@@ -5,6 +5,7 @@ import {
     Tooltip,
     Typography,
 } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import { useDispatch, useSelector } from 'react-redux';
 import { Responsive, useContainerWidth } from 'react-grid-layout';
 import { absoluteStrategy } from 'react-grid-layout/core';
@@ -13,6 +14,7 @@ import 'react-resizable/css/styles.css';
 import { useSocket } from '../common/socket.jsx';
 import {
     getClassNamesBasedOnGridEditing,
+    islandTitleBarSx,
     StyledIslandParentNoScrollbar,
     TitleBar,
 } from '../common/common.jsx';
@@ -221,6 +223,7 @@ const defaultLayouts = {
 };
 
 const CelestialMainLayout = () => {
+    const { t } = useTranslation('overview');
     const dispatch = useDispatch();
     const { socket } = useSocket();
     const isEditing = useSelector((state) => state.dashboard?.isEditing);
@@ -395,9 +398,11 @@ const CelestialMainLayout = () => {
             <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <TitleBar
                     className={getClassNamesBasedOnGridEditing(isEditing, [])}
-                    sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    sx={{ ...islandTitleBarSx, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                 >
-                    <Box component="span">Solar System Layout</Box>
+                    <Box component="span">
+                        {t('celestial.solar_system_layout_title', { defaultValue: 'Solar System Layout' })}
+                    </Box>
                     <Tooltip title="Layout options">
                         <span>
                             <IconButton
@@ -454,9 +459,11 @@ const CelestialMainLayout = () => {
             <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <TitleBar
                     className={getClassNamesBasedOnGridEditing(isEditing, [])}
-                    sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    sx={{ ...islandTitleBarSx, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                 >
-                    <Box component="span">Monitored Celestial</Box>
+                    <Box component="span">
+                        {t('celestial.monitored_title', { defaultValue: 'Monitored Celestial' })}
+                    </Box>
                     <Tooltip title="Table settings">
                         <span>
                             <IconButton

@@ -27,6 +27,50 @@ from tracker.data import compiled_satellite_data
 from tracker.runner import get_all_tracker_managers
 
 
+def _split_query_token(query: str) -> tuple[str, str]:
+    """Return normalized leading token and optional trailing query text."""
+    raw_query = str(query or "").strip().lower()
+    if not raw_query:
+        return "", ""
+
+    parts = raw_query.split(maxsplit=1)
+    token = "".join(ch for ch in parts[0] if ch.isalnum())
+    if token.endswith("s") and len(token) > 3:
+        token = token[:-1]
+    tail = parts[1].strip() if len(parts) > 1 else ""
+    return token, tail
+
+
+def _starts_with_any(token: str, prefixes: List[str]) -> bool:
+    """Prefix matching used for type-hint autocomplete tokens (e.g. `moo`)."""
+    if len(token) < 2:
+        return False
+    return any(prefix.startswith(token) for prefix in prefixes)
+
+
+def _resolve_target_search_hints(query: str) -> Dict[str, Any]:
+    """Resolve optional query type hints for mission/body grouped autocomplete."""
+    token, tail = _split_query_token(query)
+
+    mission_group = _starts_with_any(token, ["mission", "spacecraft"])
+    moon_group = _starts_with_any(token, ["moon"])
+    planet_group = _starts_with_any(token, ["planet"])
+    body_group = moon_group or planet_group or _starts_with_any(token, ["body", "celestial"])
+
+    body_type: Optional[str] = None
+    if moon_group:
+        body_type = "moon"
+    elif planet_group:
+        body_type = "planet"
+
+    return {
+        "mission_group": mission_group,
+        "body_group": body_group,
+        "body_type": body_type,
+        "tail_query": tail or None,
+    }
+
+
 async def get_satellites(
     sio: Any, data: Optional[Dict], logger: Any, sid: str
 ) -> Dict[str, Union[bool, list]]:
@@ -167,6 +211,12 @@ async def search_targets(
         if len(query) < 2:
             return {"success": True, "data": [], "error": None}
 
+        type_hints = _resolve_target_search_hints(query)
+        mission_group_hint = bool(type_hints.get("mission_group"))
+        body_group_hint = bool(type_hints.get("body_group"))
+        hinted_body_type = str(type_hints.get("body_type") or "").strip().lower() or None
+        tail_query = str(type_hints.get("tail_query") or "").strip()
+
         # Reuse existing satellite search flow so results keep group and transmitter enrichment.
         satellites_reply = await search_satellites(sio, query, logger, sid)
         if not satellites_reply.get("success"):
@@ -180,8 +230,28 @@ async def search_targets(
         satellite_rows: List[Dict[str, Any]] = (
             satellite_data[:limit] if isinstance(satellite_data, list) else []
         )
-        mission_rows = search_spacecraft_index(query=query, limit=limit)
-        body_rows = search_celestial_bodies(query=query, limit=limit)
+        mission_query = (
+            tail_query
+            if mission_group_hint and tail_query
+            else ("" if mission_group_hint else query)
+        )
+        mission_rows = search_spacecraft_index(query=mission_query, limit=limit)
+
+        if body_group_hint:
+            # For type-hint searches (`moon`, `planet`, `body`), evaluate from catalog root
+            # so options are grouped by entity type instead of only literal name matches.
+            body_query = tail_query if tail_query else ""
+            body_limit = max(limit * 5, 100)
+            body_rows = search_celestial_bodies(query=body_query, limit=body_limit)
+            if hinted_body_type:
+                body_rows = [
+                    row
+                    for row in body_rows
+                    if str(row.get("body_type") or "").strip().lower() == hinted_body_type
+                ]
+            body_rows = body_rows[:limit]
+        else:
+            body_rows = search_celestial_bodies(query=query, limit=limit)
 
         results = []
 
@@ -190,13 +260,20 @@ async def search_targets(
             if norad_id is None:
                 continue
             name = str(satellite.get("name") or norad_id).strip()
+            # Keep alias fields in the unified payload so frontend-side filtering
+            # can still match queries that hit DB alias columns (e.g. name_other).
+            name_other = str(satellite.get("name_other") or "").strip()
+            alternative_name = str(satellite.get("alternative_name") or "").strip()
             results.append(
                 {
                     "id": f"satellite:{norad_id}",
                     "target_type": "satellite",
                     "target_name": name,
+                    "name": name,
                     "target_identifier": str(norad_id),
                     "norad_id": norad_id,
+                    "name_other": name_other,
+                    "alternative_name": alternative_name,
                     "groups": satellite.get("groups") or [],
                     "transmitters": satellite.get("transmitters") or [],
                 }
@@ -322,9 +399,12 @@ async def edit_satellite(
         if not data or "norad_id" not in data:
             return {"success": False, "data": [], "error": "Missing satellite NORAD ID"}
 
-        update_data = {key: value for key, value in data.items() if key != "norad_id"}
+        orbit_payload = data.get("orbit") if isinstance(data, dict) else None
+        update_data = {
+            key: value for key, value in data.items() if key not in {"norad_id", "orbit"}
+        }
         edit_reply = await crud.satellites.edit_satellite(
-            dbsession, data["norad_id"], **update_data
+            dbsession, data["norad_id"], orbit=orbit_payload, **update_data
         )
 
         satellites = await crud.satellites.fetch_satellites(dbsession, None)

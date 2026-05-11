@@ -2,10 +2,11 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useSelector } from 'react-redux';
 import { useSocket } from '../common/socket.jsx';
 import { getSmoothingConfig } from './smoothing-presets.js';
+import { getThemeConfig } from '../../themes/theme-configs.js';
 
 const WaterfallEngineContext = createContext(null);
 
-const DEFAULT_WORKER_THEME = {
+const FALLBACK_WORKER_THEME = {
     palette: {
         background: {
             default: '#121212',
@@ -63,6 +64,44 @@ export const WaterfallEngineProvider = ({ children }) => {
         bandscopeRateLimitEnabled: state.waterfall.bandscopeRateLimitEnabled,
         targetFPS: state.waterfall.targetFPS,
     }));
+
+    const selectedThemeName = useSelector(
+        (state) => state.preferences?.preferences?.find((pref) => pref.name === 'theme')?.value || 'dark'
+    );
+
+    const workerTheme = useMemo(() => {
+        // The waterfall worker runs outside React/MUI context, so we pass an explicit
+        // palette snapshot derived from current theme preferences.
+        const config = getThemeConfig(selectedThemeName);
+        const isDark = config.mode === 'dark';
+        const background = config.background || FALLBACK_WORKER_THEME.palette.background;
+        const border = config.border || FALLBACK_WORKER_THEME.palette.border;
+        const overlay = config.overlay || FALLBACK_WORKER_THEME.palette.overlay;
+
+        return {
+            palette: {
+                background: {
+                    default: background.default || FALLBACK_WORKER_THEME.palette.background.default,
+                    paper: background.paper || FALLBACK_WORKER_THEME.palette.background.paper,
+                    elevated: background.elevated || FALLBACK_WORKER_THEME.palette.background.elevated,
+                },
+                border: {
+                    main: border.main || FALLBACK_WORKER_THEME.palette.border.main,
+                    light: border.light || FALLBACK_WORKER_THEME.palette.border.light,
+                    dark: border.dark || FALLBACK_WORKER_THEME.palette.border.dark,
+                },
+                overlay: {
+                    light: overlay.light || FALLBACK_WORKER_THEME.palette.overlay.light,
+                    medium: overlay.medium || FALLBACK_WORKER_THEME.palette.overlay.medium,
+                    dark: overlay.dark || FALLBACK_WORKER_THEME.palette.overlay.dark,
+                },
+                text: {
+                    primary: isDark ? '#f8fafc' : '#0f172a',
+                    secondary: isDark ? 'rgba(248, 250, 252, 0.72)' : 'rgba(15, 23, 42, 0.7)',
+                },
+            },
+        };
+    }, [selectedThemeName]);
 
     const timezone = useSelector((state) =>
         state.preferences?.preferences?.find((pref) => pref.name === 'timezone')?.value || 'UTC'
@@ -232,7 +271,7 @@ export const WaterfallEngineProvider = ({ children }) => {
                 showRotatorDottedLines,
                 bandscopeRateLimitEnabled,
                 timezone,
-                theme: DEFAULT_WORKER_THEME,
+                theme: workerTheme,
             },
         });
 
@@ -249,6 +288,7 @@ export const WaterfallEngineProvider = ({ children }) => {
         showRotatorDottedLines,
         bandscopeRateLimitEnabled,
         timezone,
+        workerTheme,
         waterfallRendererMode,
         waterFallCanvasHeight,
         waterFallCanvasWidth,
@@ -266,7 +306,7 @@ export const WaterfallEngineProvider = ({ children }) => {
             fftSize,
             bandscopeRateLimitEnabled,
             timezone,
-            theme: DEFAULT_WORKER_THEME,
+            theme: workerTheme,
         });
     }, [
         waterfallRendererMode,
@@ -275,6 +315,7 @@ export const WaterfallEngineProvider = ({ children }) => {
         fftSize,
         bandscopeRateLimitEnabled,
         timezone,
+        workerTheme,
         postWorkerMessage,
     ]);
 

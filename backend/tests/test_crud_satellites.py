@@ -20,6 +20,7 @@ Unit tests for satellite CRUD operations.
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from crud.groups import add_satellite_group, fetch_satellite_group
 from crud.satellites import (
@@ -30,6 +31,7 @@ from crud.satellites import (
     fetch_satellites_for_group_id,
     search_satellites,
 )
+from db.models import SatelliteOrbits
 
 # TLE templates for testing (valid format but dummy data)
 TLE1_TEMPLATE = "1 {norad:05d}U 00000A   21001.00000000  .00000000  00000-0  00000-0 0  9990"
@@ -503,3 +505,94 @@ class TestSatellitesCRUD:
         assert result["data"]["operator"] == "Test Operator"
         assert result["data"]["countries"] == "USA, EU"
         assert result["data"]["website"] == "http://example.com"
+
+    async def test_add_satellite_creates_canonical_earth_orbit(self, db_session):
+        """Adding satellites should also upsert canonical earth orbit rows."""
+        norad_id = 77889
+        tle1 = TLE1_TEMPLATE.format(norad=norad_id)
+        tle2 = TLE2_TEMPLATE.format(norad=norad_id)
+
+        add_result = await add_satellite(
+            db_session,
+            {
+                "name": "Orbit Seed Satellite",
+                "sat_id": "ORBIT-001",
+                "norad_id": norad_id,
+                "status": "alive",
+                "is_frequency_violator": False,
+                "tle1": tle1,
+                "tle2": tle2,
+            },
+        )
+
+        assert add_result["success"] is True
+        orbit_row = (
+            await db_session.execute(
+                select(SatelliteOrbits).where(
+                    SatelliteOrbits.satellite_norad_id == norad_id,
+                    SatelliteOrbits.central_body == "earth",
+                )
+            )
+        ).scalar_one_or_none()
+        assert orbit_row is not None
+        assert orbit_row.model_kind == "tle"
+        assert orbit_row.tle1 == tle1
+        assert orbit_row.tle2 == tle2
+
+    async def test_edit_satellite_updates_canonical_orbit_and_projects_fields(self, db_session):
+        """Editing with orbit payload should update canonical orbit and fetch projection."""
+        norad_id = 77901
+        await add_satellite(
+            db_session,
+            {
+                "name": "OMM Test Satellite",
+                "sat_id": "ORBIT-002",
+                "norad_id": norad_id,
+                "status": "alive",
+                "is_frequency_violator": False,
+                "tle1": TLE1_TEMPLATE.format(norad=norad_id),
+                "tle2": TLE2_TEMPLATE.format(norad=norad_id),
+            },
+        )
+
+        updated_tle1 = "1 77901U 24001A   26010.50000000  .00001000  00000-0  10000-3 0  9992"
+        updated_tle2 = "2 77901  97.4000 221.0000 0001000  30.0000 330.0000 14.90000000123456"
+
+        edit_result = await edit_satellite(
+            db_session,
+            satellite_id=norad_id,
+            orbit={
+                "central_body": "earth",
+                "model_kind": "omm",
+                "tle1": updated_tle1,
+                "tle2": updated_tle2,
+                "omm_payload": {
+                    "NORAD_CAT_ID": str(norad_id),
+                    "OBJECT_NAME": "OMM Test Satellite",
+                },
+            },
+        )
+
+        assert edit_result["success"] is True
+        orbit_row = (
+            await db_session.execute(
+                select(SatelliteOrbits).where(
+                    SatelliteOrbits.satellite_norad_id == norad_id,
+                    SatelliteOrbits.central_body == "earth",
+                )
+            )
+        ).scalar_one_or_none()
+        assert orbit_row is not None
+        assert orbit_row.model_kind == "omm"
+        assert orbit_row.tle1 == updated_tle1
+        assert orbit_row.tle2 == updated_tle2
+        assert isinstance(orbit_row.omm_payload, dict)
+        assert orbit_row.omm_payload.get("NORAD_CAT_ID") == str(norad_id)
+
+        fetched = await fetch_satellites(db_session, norad_id=norad_id)
+        assert fetched["success"] is True
+        assert len(fetched["data"]) == 1
+        projected = fetched["data"][0]
+        assert projected["orbit_format"] == "omm"
+        assert projected["tle1"] == updated_tle1
+        assert projected["tle2"] == updated_tle2

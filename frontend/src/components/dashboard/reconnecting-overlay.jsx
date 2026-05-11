@@ -3,7 +3,8 @@ import CloudOffIcon from '@mui/icons-material/CloudOff';
 import SyncProblemIcon from '@mui/icons-material/SyncProblem';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { keyframes } from '@emotion/react';
-import { Backdrop, Box, LinearProgress, Typography } from "@mui/material";
+import { Backdrop, Box, LinearProgress, Typography, useTheme } from "@mui/material";
+import { alpha } from '@mui/material/styles';
 import { useSelector } from "react-redux";
 import { useTranslation } from 'react-i18next';
 
@@ -21,6 +22,7 @@ const fadeIn = keyframes`
 
 function ConnectionOverlay() {
     const { t } = useTranslation('dashboard');
+    const theme = useTheme();
     const {
         connecting,
         connected,
@@ -40,45 +42,37 @@ function ConnectionOverlay() {
     const getConnectionStatus = () => {
         if (connectionError) {
             return {
-                icon: <ErrorOutlineIcon sx={{ fontSize: 24, color: '#d32f2f' }} />,
+                icon: ErrorOutlineIcon,
                 title: t('connection.connection_failed'),
                 message: t('connection.network_error'),
-                color: '#d32f2f',
-                bgColor: '#2a2a2a',
-                borderColor: '#d32f2f'
+                tone: 'error',
             };
         }
 
         if (initialDataLoading) {
             return {
-                icon: <SyncProblemIcon sx={{ fontSize: 24, color: '#4caf50' }} />,
+                icon: SyncProblemIcon,
                 title: t('connection.syncing_data', 'Syncing data'),
                 message: t('connection.loading_initial_state', 'Loading initial application data'),
-                color: '#4caf50',
-                bgColor: '#2a2a2a',
-                borderColor: '#4caf50'
+                tone: 'success',
             };
         }
 
         if (reConnectAttempt > 0) {
             return {
-                icon: <SyncProblemIcon sx={{ fontSize: 24, color: '#ff9800' }} />,
+                icon: SyncProblemIcon,
                 title: t('connection.reconnecting'),
                 message: t('connection.attempt', { count: reConnectAttempt }),
-                color: '#ff9800',
-                bgColor: '#2a2a2a',
-                borderColor: '#ff9800'
+                tone: 'warning',
             };
         }
 
         if (connecting || disconnected) {
             return {
-                icon: <CloudOffIcon sx={{ fontSize: 24, color: '#757575' }} />,
+                icon: CloudOffIcon,
                 title: t('connection.connecting'),
                 message: t('connection.establishing_connection'),
-                color: '#757575',
-                bgColor: '#2a2a2a',
-                borderColor: '#757575'
+                tone: 'info',
             };
         }
 
@@ -91,25 +85,32 @@ function ConnectionOverlay() {
         return null;
     }
 
+    const toneColor = theme.palette[status.tone]?.main || theme.palette.text.secondary;
+    const toneSurface = theme.palette.statusSurface?.[status.tone] || theme.palette.surface.raised;
+    const toneBorder = alpha(toneColor, theme.palette.mode === 'dark' ? 0.6 : 0.45);
+    const StatusIcon = status.icon;
+
     return (
         <Backdrop
             open={true}
             sx={{
                 zIndex: (theme) => theme.zIndex.drawer + 1,
-                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                backgroundColor: theme.palette.surface.scrim,
                 backdropFilter: 'blur(4px)'
             }}
         >
             <Box
                 sx={{
                     animation: `${fadeIn} 0.2s ease-out`,
-                    backgroundColor: status.bgColor,
-                    border: `1px solid ${status.borderColor}`,
+                    backgroundColor: toneSurface,
+                    border: `1px solid ${toneBorder}`,
                     borderRadius: 1,
                     padding: 3,
                     minWidth: 280,
                     maxWidth: 320,
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+                    boxShadow: theme.palette.mode === 'dark'
+                        ? '0 8px 24px rgba(0, 0, 0, 0.45)'
+                        : '0 8px 24px rgba(15, 23, 42, 0.16)',
                 }}
             >
                 {/* Header */}
@@ -119,12 +120,12 @@ function ConnectionOverlay() {
                     gap: 2,
                     mb: 2,
                 }}>
-                    {status.icon}
+                    <StatusIcon sx={{ fontSize: 24, color: toneColor }} />
                     <Box sx={{ flex: 1 }}>
                         <Typography
                             variant="subtitle1"
                             sx={{
-                                color: '#ffffff',
+                                color: 'text.primary',
                                 fontWeight: 500,
                                 mb: 0.5,
                                 fontSize: '1rem'
@@ -135,7 +136,7 @@ function ConnectionOverlay() {
                         <Typography
                             variant="body2"
                             sx={{
-                                color: '#b0b0b0',
+                                color: 'text.secondary',
                                 fontSize: '0.875rem'
                             }}
                         >
@@ -153,16 +154,16 @@ function ConnectionOverlay() {
                             sx={{
                                 height: 4,
                                 borderRadius: 1,
-                                backgroundColor: '#424242',
+                                backgroundColor: (theme) => theme.palette.state.disabledBg,
                                 '& .MuiLinearProgress-bar': {
-                                    backgroundColor: status.color,
+                                    backgroundColor: toneColor,
                                 },
                             }}
                         />
                         <Typography
                             variant="caption"
                             sx={{
-                                color: '#b0b0b0',
+                                color: 'text.secondary',
                                 fontSize: '0.75rem',
                                 display: 'block',
                                 textAlign: 'center',
@@ -180,7 +181,7 @@ function ConnectionOverlay() {
                         sx={{
                             width: '100%',
                             height: 2,
-                            backgroundColor: '#424242',
+                            backgroundColor: (theme) => theme.palette.state.disabledBg,
                             borderRadius: 1,
                             overflow: 'hidden',
                             position: 'relative'
@@ -190,7 +191,7 @@ function ConnectionOverlay() {
                             sx={{
                                 height: '100%',
                                 width: '30%',
-                                backgroundColor: status.color,
+                                backgroundColor: toneColor,
                                 borderRadius: 1,
                                 animation: `${keyframes`
                                     0% { transform: translateX(-100%); }
@@ -205,7 +206,7 @@ function ConnectionOverlay() {
                 <Typography
                     variant="caption"
                     sx={{
-                        color: '#757575',
+                        color: 'text.secondary',
                         fontFamily: 'monospace',
                         fontSize: '0.75rem',
                         display: 'block',

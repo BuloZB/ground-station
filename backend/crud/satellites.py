@@ -13,10 +13,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import json
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic.v1 import UUID4
 from sqlalchemy import String, delete, insert, select, update
@@ -25,9 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.common import logger, serialize_object
 from crud.groups import fetch_satellite_group
-from db.models import Groups, Satellites, Transmitters
+from db.models import Groups, SatelliteOrbits, Satellites, Transmitters
 
 DATETIME_FIELDS = {"decayed", "launched", "deployed", "added", "updated"}
+SUPPORTED_CENTRAL_BODIES = {"earth", "moon", "mars"}
+SUPPORTED_ORBIT_MODEL_KINDS = {"tle", "omm"}
 
 
 def _coerce_datetime(value):
@@ -46,6 +49,215 @@ def _coerce_datetime(value):
             logger.warning(f"Failed to parse datetime value: {value}")
             return None
     return value
+
+
+def _coerce_optional_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def _coerce_optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _coerce_optional_uuid(value: Any) -> Optional[uuid.UUID]:
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    return uuid.UUID(text)
+
+
+def _coerce_optional_json_dict(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("orbit.omm_payload must be a JSON object")
+
+
+def _normalize_orbit_payload(
+    payload: Dict[str, Any],
+    satellite_id: int,
+    fallback_tle1: Optional[str] = None,
+    fallback_tle2: Optional[str] = None,
+) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("orbit payload must be an object")
+
+    model_kind = (
+        str(payload.get("model_kind") or payload.get("orbit_format") or "tle").strip().lower()
+    )
+    if model_kind not in SUPPORTED_ORBIT_MODEL_KINDS:
+        raise ValueError(
+            f"Invalid orbit model_kind '{model_kind}'. Expected one of: {sorted(SUPPORTED_ORBIT_MODEL_KINDS)}"
+        )
+
+    central_body = str(payload.get("central_body") or "earth").strip().lower()
+    if central_body not in SUPPORTED_CENTRAL_BODIES:
+        raise ValueError(
+            f"Invalid orbit central_body '{central_body}'. Expected one of: {sorted(SUPPORTED_CENTRAL_BODIES)}"
+        )
+
+    tle1 = str(payload.get("tle1") or fallback_tle1 or "").strip()
+    tle2 = str(payload.get("tle2") or fallback_tle2 or "").strip()
+    epoch = _coerce_datetime(payload.get("epoch") or payload.get("orbit_epoch"))
+    omm_payload = _coerce_optional_json_dict(payload.get("omm_payload"))
+    source_id = _coerce_optional_uuid(payload.get("source_id"))
+    source_object_id = _coerce_optional_text(payload.get("source_object_id")) or str(satellite_id)
+    source_updated_at = _coerce_datetime(payload.get("source_updated_at"))
+
+    if model_kind == "tle":
+        if not tle1:
+            raise ValueError("Missing required field: orbit.tle1")
+        if not tle2:
+            raise ValueError("Missing required field: orbit.tle2")
+        omm_payload = None
+    else:
+        if omm_payload is None:
+            raise ValueError("Missing required field: orbit.omm_payload")
+        # Current runtime OMM compatibility path still propagates from TLE.
+        if not tle1 or not tle2:
+            raise ValueError(
+                "OMM editing currently requires orbit.tle1 and orbit.tle2 for runtime propagation compatibility"
+            )
+
+    return {
+        "central_body": central_body,
+        "model_kind": model_kind,
+        "epoch": epoch,
+        "tle1": tle1 or None,
+        "tle2": tle2 or None,
+        "omm_payload": omm_payload,
+        "source_id": source_id,
+        "source_object_id": source_object_id,
+        "source_updated_at": source_updated_at,
+    }
+
+
+async def _upsert_satellite_orbit(
+    session: AsyncSession,
+    satellite_id: int,
+    orbit_payload: Dict[str, Any],
+    now: Optional[datetime] = None,
+) -> None:
+    central_body = orbit_payload["central_body"]
+    now_value = now or datetime.now(timezone.utc)
+    orbit_result = await session.execute(
+        select(SatelliteOrbits).filter(
+            SatelliteOrbits.satellite_norad_id == satellite_id,
+            SatelliteOrbits.central_body == central_body,
+        )
+    )
+    orbit_row = orbit_result.scalar_one_or_none()
+    if orbit_row is None:
+        session.add(
+            SatelliteOrbits(
+                satellite_norad_id=satellite_id,
+                central_body=central_body,
+                model_kind=orbit_payload["model_kind"],
+                epoch=orbit_payload["epoch"],
+                tle1=orbit_payload["tle1"],
+                tle2=orbit_payload["tle2"],
+                omm_payload=orbit_payload["omm_payload"],
+                source_id=orbit_payload["source_id"],
+                source_object_id=orbit_payload["source_object_id"],
+                source_updated_at=orbit_payload["source_updated_at"],
+                added=now_value,
+                updated=now_value,
+            )
+        )
+        return
+
+    orbit_row.model_kind = orbit_payload["model_kind"]
+    orbit_row.epoch = orbit_payload["epoch"]
+    orbit_row.tle1 = orbit_payload["tle1"]
+    orbit_row.tle2 = orbit_payload["tle2"]
+    orbit_row.omm_payload = orbit_payload["omm_payload"]
+    orbit_row.source_id = orbit_payload["source_id"]
+    orbit_row.source_object_id = orbit_payload["source_object_id"]
+    orbit_row.source_updated_at = orbit_payload["source_updated_at"]
+    orbit_row.updated = now_value
+
+
+async def _attach_primary_earth_orbits(
+    session: AsyncSession, satellites: List[Dict[str, Any]]
+) -> None:
+    if not satellites:
+        return
+
+    norad_ids: List[int] = []
+    for satellite in satellites:
+        norad_id = _coerce_optional_int(satellite.get("norad_id"))
+        if norad_id is None:
+            continue
+        norad_ids.append(norad_id)
+
+    if not norad_ids:
+        return
+
+    orbit_result = await session.execute(
+        select(SatelliteOrbits).filter(
+            SatelliteOrbits.central_body == "earth",
+            SatelliteOrbits.satellite_norad_id.in_(norad_ids),
+        )
+    )
+    orbit_rows = orbit_result.scalars().all()
+    orbit_by_norad: Dict[int, Dict[str, Any]] = {}
+    for orbit_row in orbit_rows:
+        orbit_by_norad[int(orbit_row.satellite_norad_id)] = serialize_object(orbit_row)
+
+    for satellite in satellites:
+        norad_id = _coerce_optional_int(satellite.get("norad_id"))
+        if norad_id is None:
+            continue
+
+        orbit = orbit_by_norad.get(norad_id)
+        if orbit is None:
+            satellite.setdefault("orbit_format", "tle")
+            satellite.setdefault("orbit_model_kind", "tle")
+            satellite.setdefault("orbit_central_body", "earth")
+            satellite.setdefault("orbit_epoch", None)
+            satellite.setdefault("orbit_payload", None)
+            continue
+
+        model_kind = str(orbit.get("model_kind") or "tle").strip().lower() or "tle"
+        satellite["orbit_format"] = model_kind
+        satellite["orbit_model_kind"] = model_kind
+        satellite["orbit_central_body"] = str(orbit.get("central_body") or "earth").strip().lower()
+        satellite["orbit_epoch"] = orbit.get("epoch")
+        satellite["orbit_payload"] = orbit.get("omm_payload")
+        satellite["orbit_source_id"] = orbit.get("source_id")
+        satellite["orbit_source_object_id"] = orbit.get("source_object_id")
+        satellite["orbit_source_updated_at"] = orbit.get("source_updated_at")
+        if orbit.get("tle1"):
+            satellite["tle1"] = orbit["tle1"]
+        if orbit.get("tle2"):
+            satellite["tle2"] = orbit["tle2"]
 
 
 async def fetch_satellites_for_group_id(session: AsyncSession, group_id: Union[str, UUID4]) -> dict:
@@ -75,6 +287,7 @@ async def fetch_satellites_for_group_id(session: AsyncSession, group_id: Union[s
         result = await session.execute(stmt)
         satellites = result.scalars().all()
         satellites = serialize_object(satellites)
+        await _attach_primary_earth_orbits(session, satellites)
 
         # Auto-heal stale group references (satellites removed from DB but still present in group JSON)
         existing_satellite_ids = {satellite["norad_id"] for satellite in satellites}
@@ -130,6 +343,7 @@ async def search_satellites(session: AsyncSession, keyword: Union[str, int, None
         result = await session.execute(stmt)
         satellites = result.scalars().all()
         satellites = serialize_object(satellites)
+        await _attach_primary_earth_orbits(session, satellites)
 
         # For each satellite, find which groups it belongs to
         for satellite in satellites:
@@ -191,6 +405,7 @@ async def fetch_satellites(
             satellites = [satellite] if satellite else []
 
         satellites = serialize_object(satellites)
+        await _attach_primary_earth_orbits(session, satellites)
         return {"success": True, "data": satellites, "error": None}
 
     except Exception as e:
@@ -220,9 +435,24 @@ async def add_satellite(session: AsyncSession, data: dict) -> dict:
 
         stmt = insert(Satellites).values(**data).returning(Satellites)
         result = await session.execute(stmt)
+        orbit_payload = _normalize_orbit_payload(
+            {
+                "central_body": "earth",
+                "model_kind": "tle",
+                "tle1": data.get("tle1"),
+                "tle2": data.get("tle2"),
+                "source_object_id": str(data.get("norad_id") or ""),
+            },
+            satellite_id=int(data["norad_id"]),
+        )
+        await _upsert_satellite_orbit(
+            session, satellite_id=int(data["norad_id"]), orbit_payload=orbit_payload, now=now
+        )
         await session.commit()
         new_satellite = result.scalar_one()
         new_satellite = serialize_object(new_satellite)
+        satellite_list = [new_satellite]
+        await _attach_primary_earth_orbits(session, satellite_list)
         return {"success": True, "data": new_satellite, "error": None}
 
     except IntegrityError as e:
@@ -247,6 +477,12 @@ async def edit_satellite(session: AsyncSession, satellite_id: uuid.UUID, **kwarg
     Edit an existing satellite record by updating provided fields.
     """
     try:
+        try:
+            normalized_satellite_id = int(satellite_id)
+        except (TypeError, ValueError):
+            return {"success": False, "error": f"Invalid satellite id: {satellite_id}"}
+
+        orbit_payload_raw = kwargs.pop("orbit", None)
         allowed_fields = {column.name for column in Satellites.__table__.columns}
         kwargs = {key: value for key, value in kwargs.items() if key in allowed_fields}
         for field in DATETIME_FIELDS:
@@ -254,25 +490,64 @@ async def edit_satellite(session: AsyncSession, satellite_id: uuid.UUID, **kwarg
                 kwargs[field] = _coerce_datetime(kwargs[field])
 
         # Check if the satellite exists
-        stmt = select(Satellites).filter(Satellites.norad_id == satellite_id)
+        stmt = select(Satellites).filter(Satellites.norad_id == normalized_satellite_id)
         result = await session.execute(stmt)
         satellite = result.scalar_one_or_none()
         if not satellite:
-            return {"success": False, "error": f"Satellite with id {satellite_id} not found."}
+            return {
+                "success": False,
+                "error": f"Satellite with id {normalized_satellite_id} not found.",
+            }
+
+        normalized_orbit_payload = None
+        if orbit_payload_raw is not None:
+            normalized_orbit_payload = _normalize_orbit_payload(
+                orbit_payload_raw,
+                satellite_id=normalized_satellite_id,
+                fallback_tle1=satellite.tle1,
+                fallback_tle2=satellite.tle2,
+            )
+            if normalized_orbit_payload["central_body"] == "earth":
+                # Keep legacy compatibility columns synced with the canonical Earth orbit row.
+                kwargs["tle1"] = normalized_orbit_payload["tle1"]
+                kwargs["tle2"] = normalized_orbit_payload["tle2"]
+        elif "tle1" in kwargs or "tle2" in kwargs:
+            normalized_orbit_payload = _normalize_orbit_payload(
+                {
+                    "central_body": "earth",
+                    "model_kind": "tle",
+                    "tle1": kwargs.get("tle1", satellite.tle1),
+                    "tle2": kwargs.get("tle2", satellite.tle2),
+                    "source_object_id": str(normalized_satellite_id),
+                },
+                satellite_id=normalized_satellite_id,
+                fallback_tle1=satellite.tle1,
+                fallback_tle2=satellite.tle2,
+            )
 
         # Set the updated timestamp
-        kwargs["updated"] = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        kwargs["updated"] = now
 
         upd_stmt = (
             update(Satellites)
-            .where(Satellites.norad_id == satellite_id)
+            .where(Satellites.norad_id == normalized_satellite_id)
             .values(**kwargs)
             .returning(Satellites)
         )
         upd_result = await session.execute(upd_stmt)
+        if normalized_orbit_payload is not None:
+            await _upsert_satellite_orbit(
+                session,
+                satellite_id=normalized_satellite_id,
+                orbit_payload=normalized_orbit_payload,
+                now=now,
+            )
         await session.commit()
         updated_satellite = upd_result.scalar_one_or_none()
         updated_satellite = serialize_object(updated_satellite)
+        satellite_list = [updated_satellite] if updated_satellite else []
+        await _attach_primary_earth_orbits(session, satellite_list)
         return {"success": True, "data": updated_satellite, "error": None}
 
     except Exception as e:

@@ -186,7 +186,7 @@ function ConnectionStatus() {
                             <Typography variant="caption" color="text.secondary">
                                 {t('connection_popover.upload')}
                             </Typography>
-                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#4caf50' }}>
+                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'success.main' }}>
                                 {formatBytes(trafficStatsRef.current.rates.bytesPerSecond.sent)}
                                 <span style={{ color: 'var(--mui-palette-text-secondary)', marginLeft: 8 }}>
                                     {trafficStatsRef.current.rates.packetsPerSecond.sent} msg/s
@@ -197,7 +197,7 @@ function ConnectionStatus() {
                             <Typography variant="caption" color="text.secondary">
                                 {t('connection_popover.download')}
                             </Typography>
-                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#2196f3' }}>
+                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'info.main' }}>
                                 {formatBytes(trafficStatsRef.current.rates.bytesPerSecond.received)}
                                 <span style={{ color: 'var(--mui-palette-text-secondary)', marginLeft: 8 }}>
                                     {trafficStatsRef.current.rates.packetsPerSecond.received} msg/s
@@ -213,7 +213,7 @@ function ConnectionStatus() {
                             <Typography variant="caption" color="text.secondary">
                                 {t('connection_popover.sent')}
                             </Typography>
-                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#4caf50' }}>
+                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'success.main' }}>
                                 {formatTotalBytes(trafficStatsRef.current.engine.bytesSent)}
                                 <span style={{ color: 'var(--mui-palette-text-secondary)', marginLeft: 8 }}>
                                     {trafficStatsRef.current.engine.packetsSent} msgs
@@ -224,7 +224,7 @@ function ConnectionStatus() {
                             <Typography variant="caption" color="text.secondary">
                                 {t('connection_popover.received')}
                             </Typography>
-                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#2196f3' }}>
+                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'info.main' }}>
                                 {formatTotalBytes(trafficStatsRef.current.engine.bytesReceived)}
                                 <span style={{ color: 'var(--mui-palette-text-secondary)', marginLeft: 8 }}>
                                     {trafficStatsRef.current.engine.packetsReceived} msgs
@@ -270,9 +270,13 @@ function ConnectionStatus() {
                                     sx={{
                                         height: 6,
                                         borderRadius: 1,
-                                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                                        backgroundColor: (theme) => theme.palette.state.disabledBg,
                                         '& .MuiLinearProgress-bar': {
-                                            backgroundColor: systemInfoRef.current.cpu.usage_percent > 80 ? '#f44336' : '#4caf50',
+                                            backgroundColor: (theme) => (
+                                                systemInfoRef.current.cpu.usage_percent > 80
+                                                    ? theme.palette.error.main
+                                                    : theme.palette.success.main
+                                            ),
                                             borderRadius: 1,
                                         }
                                     }}
@@ -302,9 +306,13 @@ function ConnectionStatus() {
                                     sx={{
                                         height: 6,
                                         borderRadius: 1,
-                                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                                        backgroundColor: (theme) => theme.palette.state.disabledBg,
                                         '& .MuiLinearProgress-bar': {
-                                            backgroundColor: systemInfoRef.current.memory.usage_percent > 80 ? '#f44336' : '#2196f3',
+                                            backgroundColor: (theme) => (
+                                                systemInfoRef.current.memory.usage_percent > 80
+                                                    ? theme.palette.error.main
+                                                    : theme.palette.info.main
+                                            ),
                                             borderRadius: 1,
                                         }
                                     }}
@@ -334,9 +342,13 @@ function ConnectionStatus() {
                                     sx={{
                                         height: 6,
                                         borderRadius: 1,
-                                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                                        backgroundColor: (theme) => theme.palette.state.disabledBg,
                                         '& .MuiLinearProgress-bar': {
-                                            backgroundColor: systemInfoRef.current.disk.usage_percent > 90 ? '#f44336' : '#ff9800',
+                                            backgroundColor: (theme) => (
+                                                systemInfoRef.current.disk.usage_percent > 90
+                                                    ? theme.palette.error.main
+                                                    : theme.palette.warning.main
+                                            ),
                                             borderRadius: 1,
                                         }
                                     }}

@@ -21,8 +21,7 @@ import string
 
 from common.logger import logger
 from db import AsyncSessionLocal
-from db.models import Groups, OrbitalSources, SatelliteGroupType
-from server.default_satellite_groups import DEFAULT_SYSTEM_SATELLITE_GROUPS
+from db.models import OrbitalSources
 from tasks.registry import get_task
 
 # Orbital sync is now handled by background task manager
@@ -44,54 +43,51 @@ async def first_time_initialization():
             default_sources = [
                 (
                     "Cubesats",
-                    "http://www.celestrak.com/NORAD/elements/cubesat.txt",
+                    "https://celestrak.org/NORAD/elements/gp.php?GROUP=cubesat&FORMAT=omm",
+                    "omm",
                 ),
                 (
                     "Amateur",
-                    "http://celestrak.org/NORAD/elements/gp.php?GROUP=amateur&FORMAT=tle",
-                ),
-                (
-                    "NOAA",
-                    "http://celestrak.org/NORAD/elements/gp.php?GROUP=noaa&FORMAT=tle",
+                    "https://celestrak.org/NORAD/elements/gp.php?GROUP=amateur&FORMAT=omm",
+                    "omm",
                 ),
                 (
                     "Space stations",
-                    "http://www.celestrak.com/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle",
+                    "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=omm",
+                    "omm",
                 ),
                 (
                     "Weather",
-                    "http://www.celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=tle",
+                    "https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=omm",
+                    "omm",
                 ),
                 (
                     "TinyGS",
                     "https://api.tinygs.com/v1/tinygs_supported.txt",
+                    "3le",
                 ),
             ]
 
-            for source_name, source_url in default_sources:
+            for source_name, source_url, source_format in default_sources:
+                # Seed directly via ORM (without CRUD normalization), so keep adapter
+                # aligned with source format for tlesync adapter dispatch.
+                source_adapter = "http_omm" if source_format == "omm" else "http_3le"
                 source = OrbitalSources(
                     name=source_name,
                     identifier=generate_identifier(),
                     url=source_url,
-                    format="3le",
+                    format=source_format,
+                    adapter=source_adapter,
                 )
                 session.add(source)
 
-            for group in DEFAULT_SYSTEM_SATELLITE_GROUPS:
-                session.add(
-                    Groups(
-                        name=group["name"],
-                        identifier=group["identifier"],
-                        type=SatelliteGroupType.SYSTEM,
-                        satellite_ids=group["satellite_ids"],
-                    )
-                )
+            # System groups are created and updated by orbital sync based on
+            # current source contents; avoid pre-seeding curated duplicates here.
 
             await session.commit()
             logger.info(
                 "Initial data populated successfully with default orbital sources: "
-                "Cubesats, Amateur, NOAA, Space stations, Weather, TinyGS, "
-                "and curated system satellite groups."
+                "Cubesats, Amateur, Space stations, Weather, TinyGS."
             )
 
         except Exception as e:

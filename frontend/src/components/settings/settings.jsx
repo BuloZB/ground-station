@@ -25,7 +25,7 @@ import {
     Alert,
     AlertTitle, Typography
 } from '@mui/material';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import Paper from "@mui/material/Paper";
 import Tabs, { tabsClasses } from '@mui/material/Tabs';
@@ -45,6 +45,7 @@ import MaintenanceForm from "./maintenance-form.jsx";
 import CameraTable from "../hardware/camera-table.jsx";
 import {AntTab, AntTabs} from "../common/common.jsx";
 import SDRsPage from "../hardware/sdr-table.jsx";
+import AppSettingsForm from "./app-settings-form.jsx";
 
 
 export function SettingsTabSatellites() {
@@ -62,7 +63,33 @@ export function SettingsTabSatelliteGroups() {
 }
 
 export function SettingsTabPreferences() {
-    return (<SettingsTabs initialMainTab={"settings"} initialTab={"preferences"}/>);
+    return (
+        <SettingsTabs
+            initialMainTab={"settings"}
+            initialTab={"settings"}
+            initialSettingsSubTab={"preferences"}
+        />
+    );
+}
+
+export function SettingsTabIntegrations() {
+    return (
+        <SettingsTabs
+            initialMainTab={"settings"}
+            initialTab={"settings"}
+            initialSettingsSubTab={"integrations"}
+        />
+    );
+}
+
+export function SettingsTabSettings() {
+    return (
+        <SettingsTabs
+            initialMainTab={"settings"}
+            initialTab={"settings"}
+            initialSettingsSubTab={"settings"}
+        />
+    );
 }
 
 export function SettingsTabLocation() {
@@ -97,7 +124,7 @@ export function SettingsTabAbout () {
 const tabsTree = {
     "hardware": ["rigcontrol", "rotatorcontrol", /* "camera", */ "sdrs"],
     "satellites": ["satellites", "orbitalsources", "groups"],
-    "settings": ["preferences", "location", "maintenance", "users", "about"],
+    "settings": ["settings", "location", "maintenance", "users", "about"],
 };
 
 function getTabCategory(value) {
@@ -109,7 +136,11 @@ function getTabCategory(value) {
     return null;
 }
 
-export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, initialTab}) {
+export const SettingsTabs = React.memo(function SettingsTabs({
+    initialMainTab,
+    initialTab,
+    initialSettingsSubTab = "settings",
+}) {
     const { t } = useTranslation('settings');
     const location = useLocation();
 
@@ -131,8 +162,12 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
                 return "satellites";
             case "/satellites/groups":
                 return "groups";
+            case "/settings/settings":
+                return "settings";
             case "/settings/preferences":
-                return "preferences";
+                return "settings";
+            case "/settings/integrations":
+                return "settings";
             case "/settings/location":
                 return "location";
             case "/settings/maintenance":
@@ -167,7 +202,7 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
             break;
         case "settings":
             tabsList = [
-                <AntTab key="preferences" value="preferences" label={t('tabs.preferences')} to="/settings/preferences" component={Link} />,
+                <AntTab key="settings" value="settings" label={t('tabs.settings')} to="/settings/settings" component={Link} />,
                 <AntTab key="location" value="location" label={t('tabs.location')} to="/settings/location" component={Link} />,
                 // <AntTab key="users" value="users" label="Users" to="/settings/users" component={Link} />,
                 <AntTab key="maintenance" value="maintenance" label={t('tabs.maintenance')} to="/settings/maintenance" component={Link} />,
@@ -196,8 +231,18 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
     let activeTabContent = null;
 
     switch (activeTab) {
-        case "preferences":
-            activeTabContent = <PreferencesForm/>;
+        case "settings":
+            activeTabContent = (
+                <SettingsAndPreferencesForm
+                    initialSubTab={
+                        location.pathname === "/settings/preferences"
+                            ? "preferences"
+                            : location.pathname === "/settings/integrations"
+                                ? "integrations"
+                                : initialSettingsSubTab
+                    }
+                />
+            );
             break;
         case "location":
             activeTabContent = <LocationPage/>;
@@ -250,7 +295,7 @@ export const SettingsTabs = React.memo(function SettingsTabs({initialMainTab, in
              >
                  <AntTab value={"hardware"} label={t('tabs.hardware')} to="/hardware/rig" component={Link}/>
                  <AntTab value={"satellites"} label={t('tabs.satellites')} to="/satellites/satellites" component={Link}/>
-                 <AntTab value={"settings"} label={t('tabs.settings')} to="/settings/preferences" component={Link}/>
+                 <AntTab value={"settings"} label={t('tabs.settings')} to="/settings/settings" component={Link}/>
              </AntTabs>
              {tabObject}
              {activeTabContent}
@@ -304,3 +349,66 @@ const OrbitalSourcesForm = () => {
             <SourcesTable/>
         </Paper>);
 };
+
+const SettingsAndPreferencesForm = React.memo(function SettingsAndPreferencesForm({ initialSubTab }) {
+    const { t } = useTranslation('settings');
+    const location = useLocation();
+    const navigate = useNavigate();
+
+    const resolveSubTabFromPath = React.useCallback((pathname) => {
+        if (pathname === "/settings/preferences") return "preferences";
+        if (pathname === "/settings/integrations") return "integrations";
+        return "settings";
+    }, []);
+
+    const [activeSubTab, setActiveSubTab] = React.useState(() => initialSubTab || "settings");
+
+    React.useEffect(() => {
+        setActiveSubTab(resolveSubTabFromPath(location.pathname));
+    }, [location.pathname, resolveSubTabFromPath]);
+
+    React.useEffect(() => {
+        if (!initialSubTab) {
+            return;
+        }
+        setActiveSubTab(initialSubTab);
+    }, [initialSubTab]);
+
+    const handleTabChange = (_event, nextTab) => {
+        if (nextTab === activeSubTab) {
+            return;
+        }
+
+        let nextPath = "/settings/settings";
+        if (nextTab === "preferences") {
+            nextPath = "/settings/preferences";
+        } else if (nextTab === "integrations") {
+            nextPath = "/settings/integrations";
+        }
+        navigate(nextPath);
+    };
+
+    return (
+        <Box sx={{ flexGrow: 1, bgcolor: 'background.paper' }}>
+            <AntTabs
+                value={activeSubTab}
+                onChange={handleTabChange}
+                aria-label={t('tabs.configuration_tabs')}
+                scrollButtons={true}
+                variant="scrollable"
+                allowScrollButtonsMobile
+                sx={{
+                    [`& .${tabsClasses.scrollButtons}`]: {
+                        '&.Mui-disabled': { opacity: 0.3 },
+                    },
+                }}
+            >
+                <AntTab key="preferences" value="preferences" label={t('tabs.preferences')} />
+                <AntTab key="integrations" value="integrations" label={t('tabs.integrations', { defaultValue: 'Integrations' })} />
+                <AntTab key="settings" value="settings" label={t('tabs.settings')} />
+            </AntTabs>
+            {(activeSubTab === "preferences" || activeSubTab === "integrations") ? <PreferencesForm mode={activeSubTab} /> : null}
+            {activeSubTab === "settings" ? <AppSettingsForm/> : null}
+        </Box>
+    );
+});

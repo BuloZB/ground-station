@@ -327,6 +327,7 @@ export const setTargetMapSetting = createAsyncThunk(
     async ({socket, key}, {getState, rejectWithValue}) => {
         const state = getState();
         const mapSettings = {
+            lockOnTarget: state['targetSatTrack']['lockOnTarget'],
             showPastOrbitPath: state['targetSatTrack']['showPastOrbitPath'],
             showFutureOrbitPath: state['targetSatTrack']['showFutureOrbitPath'],
             showSatelliteCoverage: state['targetSatTrack']['showSatelliteCoverage'],
@@ -660,6 +661,7 @@ const targetSatTrackSlice = createSlice({
         passesError: null,
         loading: false,
         error: null,
+        lockOnTarget: true,
         showPastOrbitPath: true,
         showFutureOrbitPath: true,
         showSatelliteCoverage: true,
@@ -1004,6 +1006,9 @@ const targetSatTrackSlice = createSlice({
         },
         setSatelliteId(state, action) {
             state.satelliteId = action.payload;
+        },
+        setLockOnTarget(state, action) {
+            state.lockOnTarget = action.payload;
         },
         setShowPastOrbitPath(state, action) {
             state.showPastOrbitPath = action.payload;
@@ -1586,6 +1591,7 @@ const targetSatTrackSlice = createSlice({
                 state.loading = false;
                 // Handle null/undefined payload for first-time users
                 if (action.payload) {
+                    state.lockOnTarget = action.payload['lockOnTarget'] ?? true;
                     state.tileLayerID = action.payload['tileLayerID'];
                     state.showPastOrbitPath = action.payload['showPastOrbitPath'];
                     state.showFutureOrbitPath = action.payload['showFutureOrbitPath'];
@@ -1626,6 +1632,7 @@ export const {
     updateSatellitePassesWithElevationCurves,
     setSatelliteId,
     setSatGroupId,
+    setLockOnTarget,
     setShowPastOrbitPath,
     setShowFutureOrbitPath,
     setShowSatelliteCoverage,

@@ -24,6 +24,7 @@ import {
     getClassNamesBasedOnGridEditing,
     getTimeFromISO,
     humanizeFutureDateInMinutes,
+    islandTitleBarCompactSx,
     TitleBar
 } from "../common/common.jsx";
 import {DataGrid, gridClasses, useGridApiRef} from "@mui/x-data-grid";
@@ -907,17 +908,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
         <>
             <TitleBar
                 className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}
-                sx={{
-                    bgcolor: 'background.titleBar',
-                    borderBottom: '1px solid',
-                    borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)',
-                    height: 30,
-                    minHeight: 30,
-                    py: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                }}
+                sx={islandTitleBarCompactSx}
             >
                 <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', height: '100%'}}>
                     <Box sx={{display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, pr: 1}}>

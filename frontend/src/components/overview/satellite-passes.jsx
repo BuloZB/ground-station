@@ -25,6 +25,7 @@ import {calculateElevationCurvesForPasses} from '../../utils/elevation-curve-cal
 import {
     formatWithZeros,
     getClassNamesBasedOnGridEditing,
+    islandTitleBarCompactSx,
     getTimeFromISO,
     humanizeFutureDateInMinutes,
     TitleBar,
@@ -1418,17 +1419,7 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
         <>
             <TitleBar
                 className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}
-                sx={{
-                    bgcolor: 'background.titleBar',
-                    borderBottom: '1px solid',
-                    borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)',
-                    height: 30,
-                    minHeight: 30,
-                    py: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                }}
+                sx={islandTitleBarCompactSx}
             >
                 <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', height: '100%'}}>
                     <Box sx={{display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1}}>

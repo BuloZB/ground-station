@@ -21,9 +21,6 @@ import React, { useEffect } from 'react';
 import {
     Box,
     Button,
-    Chip,
-    Divider,
-    Paper,
     Skeleton,
     Stack,
     Typography,
@@ -39,8 +36,15 @@ import { getMaidenhead } from '../common/common.jsx';
 import { useSocket } from '../common/socket.jsx';
 import { getTileLayerById } from '../common/tile-layers.jsx';
 import {
+    SettingsActionFooter,
+    SettingsSection,
+    SettingsSurface,
+    SettingsSurfaceHeader,
+} from './shared/index.js';
+import {
     setAltitude,
     setLocation,
+    setLocationId,
     setLocationLoading,
     setPolylines,
     setQth,
@@ -190,7 +194,9 @@ const LocationPage = () => {
     }, [hasLocation, normalizedLocation]);
 
     useEffect(() => {
-        if (!savedState && hasLocation) {
+        // Initialize the "saved baseline" only from backend-loaded locations.
+        // When the user selects a new point on the map for the first time, it should remain unsaved.
+        if (!savedState && hasLocation && locationId != null) {
             setSavedState({
                 lat: Number(location.lat),
                 lon: Number(location.lon),
@@ -213,42 +219,29 @@ const LocationPage = () => {
     }, [hasLocation, savedState, location, altitude, locationId]);
 
     const canSave = hasLocation && !locationSaving;
+    const canReset = Boolean(savedState) && isDifferentFromSaved && !locationSaving && !locationLoading;
 
-    const statusChip = (() => {
+    const statusLabel = (() => {
         if (!hasLocation) {
-            return (
-                <Chip
-                    size="small"
-                    color="warning"
-                    label={t('location.state_no_location', { defaultValue: 'No location selected' })}
-                />
-            );
+            return t('location.state_no_location', { defaultValue: 'No location selected' });
         }
         if (locationSaving) {
-            return (
-                <Chip
-                    size="small"
-                    color="info"
-                    label={t('location.state_saving', { defaultValue: 'Saving...' })}
-                />
-            );
+            return t('location.state_saving', { defaultValue: 'Saving...' });
+        }
+        if (locationLoading) {
+            return t('location.state_locating', { defaultValue: 'Locating...' });
         }
         if (isDifferentFromSaved) {
-            return (
-                <Chip
-                    size="small"
-                    color="warning"
-                    label={t('location.state_unsaved', { defaultValue: 'Unsaved changes' })}
-                />
-            );
+            return t('location.state_unsaved', { defaultValue: 'Unsaved changes' });
         }
-        return (
-            <Chip
-                size="small"
-                color="success"
-                label={t('location.state_saved', { defaultValue: 'Saved' })}
-            />
-        );
+        return t('location.state_saved', { defaultValue: 'Saved' });
+    })();
+
+    const statusColor = (() => {
+        if (!hasLocation) return 'warning';
+        if (locationSaving || locationLoading) return 'info';
+        if (isDifferentFromSaved) return 'warning';
+        return 'success';
     })();
 
     const nearestCityText = cityLoading
@@ -357,33 +350,36 @@ const LocationPage = () => {
         }
     };
 
-    return (
-        <Paper elevation={3} sx={{ padding: 2, marginTop: 0, borderRadius: 0 }}>
-            <Grid container spacing={2} columns={{ xs: 1, sm: 1, md: 1, lg: 2 }}>
-                <Grid size={{ xs: 1, md: 1 }}>
-                    <Box
-                        sx={{
-                            p: 2,
-                            backgroundColor: 'background.paper',
-                            borderRadius: 1,
-                            boxShadow: 1,
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            height: '100%',
-                        }}
-                    >
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                            <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 700 }}>
-                                {t('location.ground_station_location')}
-                            </Typography>
-                            {statusChip}
-                        </Stack>
+    const handleResetLocation = () => {
+        if (!savedState) return;
 
-                        <Grid container spacing={2}>
-                            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                                <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-                                    {t('location.coordinates')}
-                                </Typography>
+        dispatch(setLocation({ lat: savedState.lat, lon: savedState.lon }));
+        dispatch(setAltitude(savedState.altitude));
+        dispatch(setLocationId(savedState.locationId));
+        dispatch(setQth(getMaidenhead(savedState.lat, savedState.lon)));
+        reCenterMap(savedState.lat, savedState.lon);
+    };
+
+    return (
+        <SettingsSurface>
+            <Stack spacing={2}>
+                <SettingsSurfaceHeader
+                    title={t('location.ground_station_location', { defaultValue: 'Ground Station Location' })}
+                    subtitle={t('location.subtitle', {
+                        defaultValue: 'Set station coordinates by map selection or geolocation, then save to backend.',
+                    })}
+                    status={{ label: statusLabel, color: statusColor }}
+                />
+
+                <Grid container spacing={2} columns={{ xs: 1, sm: 1, md: 1, lg: 2 }}>
+                    <Grid size={{ xs: 1, md: 1 }}>
+                        <Stack spacing={2}>
+                            <SettingsSection
+                                title={t('location.group_station_coordinates', { defaultValue: 'Station Coordinates' })}
+                                description={t('location.group_station_coordinates_help', {
+                                    defaultValue: 'Current latitude/longitude and QTH locator for the selected station point.',
+                                })}
+                            >
                                 {locationLoading && !hasLocation ? (
                                     <Stack spacing={1}>
                                         <Skeleton variant="rounded" height={22} />
@@ -391,221 +387,214 @@ const LocationPage = () => {
                                         <Skeleton variant="rounded" height={22} />
                                     </Stack>
                                 ) : (
-                                    <Stack spacing={1.25}>
-                                        <Box>
+                                    <Grid container spacing={2} columns={12}>
+                                        <Grid size={{ xs: 12, sm: 6 }}>
                                             <Typography variant="caption" color="text.secondary">{t('location.latitude')}</Typography>
                                             <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
                                                 {hasLocation ? `${normalizedLocation.lat.toFixed(6)}deg` : t('location.state_unavailable', { defaultValue: 'Unavailable' })}
                                             </Typography>
-                                        </Box>
-                                        <Box>
+                                        </Grid>
+                                        <Grid size={{ xs: 12, sm: 6 }}>
                                             <Typography variant="caption" color="text.secondary">{t('location.longitude')}</Typography>
                                             <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
                                                 {hasLocation ? `${normalizedLocation.lon.toFixed(6)}deg` : t('location.state_unavailable', { defaultValue: 'Unavailable' })}
                                             </Typography>
-                                        </Box>
-                                        <Box>
+                                        </Grid>
+                                        <Grid size={{ xs: 12 }}>
                                             <Typography variant="caption" color="text.secondary">{t('location.qth_locator')}</Typography>
                                             <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
                                                 {hasLocation ? (qth || 'N/A') : t('location.state_unavailable', { defaultValue: 'Unavailable' })}
                                             </Typography>
-                                        </Box>
-                                    </Stack>
+                                        </Grid>
+                                    </Grid>
                                 )}
-                            </Grid>
+                            </SettingsSection>
 
-                            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                                <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-                                    {t('location.location_details')}
-                                </Typography>
-                                <Stack spacing={1.25}>
-                                    <Box>
+                            <SettingsSection
+                                title={t('location.group_station_metadata', { defaultValue: 'Station Metadata' })}
+                                description={t('location.group_station_metadata_help', {
+                                    defaultValue: 'Derived location metadata from browser and external services.',
+                                })}
+                            >
+                                <Grid container spacing={2} columns={12}>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
                                         <Typography variant="caption" color="text.secondary">{t('location.altitude')}</Typography>
                                         <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
                                             {elevationText}
                                         </Typography>
-                                    </Box>
-                                    <Box>
+                                    </Grid>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
                                         <Typography variant="caption" color="text.secondary">{t('location.timezone')}</Typography>
                                         <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
                                             {`${timezoneName} (${tzOffsetDisplay})`}
                                         </Typography>
-                                    </Box>
-                                    <Box>
+                                    </Grid>
+                                    <Grid size={{ xs: 12 }}>
                                         <Typography variant="caption" color="text.secondary">{t('location.nearest_city')}</Typography>
                                         <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
                                             {nearestCityText}
                                         </Typography>
-                                    </Box>
+                                    </Grid>
+                                </Grid>
+                            </SettingsSection>
+
+                            <SettingsSection
+                                title={t('location.actions', { defaultValue: 'Actions' })}
+                                description={t('location.group_actions_help', {
+                                    defaultValue: 'Quick tools for selecting and sharing station coordinates.',
+                                })}
+                            >
+                                <Stack spacing={1.2}>
+                                    <Button
+                                        variant="contained"
+                                        color="secondary"
+                                        fullWidth
+                                        disabled={locationLoading || locationSaving}
+                                        aria-label={t('location.get_current_location')}
+                                        onClick={getCurrentLocation}
+                                    >
+                                        {locationLoading
+                                            ? t('location.state_locating', { defaultValue: 'Locating...' })
+                                            : t('location.get_current_location')}
+                                    </Button>
+
+                                    <Button
+                                        variant="outlined"
+                                        color="primary"
+                                        fullWidth
+                                        disabled={!hasLocation}
+                                        aria-label={t('location.copy_coordinates')}
+                                        onClick={handleCopyCoordinates}
+                                    >
+                                        {t('location.copy_coordinates')}
+                                    </Button>
+
+                                    <Button
+                                        variant="outlined"
+                                        fullWidth
+                                        disabled={!hasLocation}
+                                        aria-label={t('location.map_recenter', { defaultValue: 'Recenter map' })}
+                                        onClick={() => {
+                                            if (hasLocation) reCenterMap(normalizedLocation.lat, normalizedLocation.lon);
+                                        }}
+                                    >
+                                        {t('location.map_recenter', { defaultValue: 'Recenter' })}
+                                    </Button>
+
+                                    {!hasLocation && (
+                                        <Typography variant="caption" color="warning.main">
+                                            {t('location.map_empty_hint', { defaultValue: 'No location selected yet. Click the map or use current location.' })}
+                                        </Typography>
+                                    )}
                                 </Stack>
-                            </Grid>
+                            </SettingsSection>
+                        </Stack>
+                    </Grid>
 
-                            <Grid size={{ xs: 12, sm: 12, md: 4 }}>
-                                <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-                                    {t('location.actions')}
-                                </Typography>
-                                <Box
-                                    sx={{
-                                        position: { md: 'sticky' },
-                                        top: { md: 16 },
-                                        border: '1px solid',
-                                        borderColor: 'divider',
-                                        borderRadius: 1,
-                                        p: 1.5,
-                                    }}
+                    <Grid size={{ xs: 1, md: 1 }}>
+                        <SettingsSection
+                            title={t('location.map_section_title', { defaultValue: 'Map Selection' })}
+                            description={t('location.map_instruction', {
+                                defaultValue: 'Click anywhere on the map to set your station coordinates.',
+                            })}
+                        >
+                            <Box
+                                sx={{
+                                    width: '100%',
+                                    height: { xs: 380, sm: 420, md: 500 },
+                                    borderRadius: 1,
+                                    border: '1px solid',
+                                    borderColor: 'divider',
+                                    boxShadow: 1,
+                                }}
+                            >
+                                <MapContainer
+                                    center={mapCenter}
+                                    zoom={mapZoom}
+                                    maxZoom={10}
+                                    minZoom={1}
+                                    dragging
+                                    whenReady={handleWhenReady}
+                                    style={{ height: '100%', width: '100%' }}
                                 >
-                                    <Stack spacing={1.2}>
-                                        <Button
-                                            variant="contained"
-                                            color="secondary"
-                                            fullWidth
-                                            disabled={locationLoading || locationSaving}
-                                            aria-label={t('location.get_current_location')}
-                                            onClick={getCurrentLocation}
-                                        >
-                                            {locationLoading
-                                                ? t('location.state_locating', { defaultValue: 'Locating...' })
-                                                : t('location.get_current_location')}
-                                        </Button>
+                                    <TileLayer
+                                        url={getTileLayerById('satellite').url}
+                                        attribution="Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL."
+                                    />
+                                    <MapClickHandler onClick={handleMapClick} />
 
-                                        <Button
-                                            variant="outlined"
-                                            color="primary"
-                                            fullWidth
-                                            disabled={!hasLocation}
-                                            aria-label={t('location.copy_coordinates')}
-                                            onClick={handleCopyCoordinates}
-                                        >
-                                            {t('location.copy_coordinates')}
-                                        </Button>
+                                    {hasLocation && (
+                                        <Marker position={normalizedLocation} icon={customIcon}>
+                                            <Popup>{t('location.your_selected_location')}</Popup>
+                                        </Marker>
+                                    )}
 
-                                        <Divider />
+                                    {hasLocation && polylines.map((polyline, index) => (
+                                        <Polyline
+                                            key={index}
+                                            positions={polyline}
+                                            color="white"
+                                            opacity={0.8}
+                                            lineCap="round"
+                                            lineJoin="round"
+                                            dashArray="2, 2"
+                                            dashOffset="10"
+                                            interactive={false}
+                                            smoothFactor={1}
+                                            noClip={false}
+                                            className="leaflet-interactive"
+                                            weight={1}
+                                        />
+                                    ))}
 
-                                        <Button
-                                            variant="contained"
-                                            color="primary"
-                                            fullWidth
-                                            disabled={!canSave}
-                                            aria-label={t('location.save_location')}
-                                            onClick={handleSetLocation}
-                                        >
-                                            {locationSaving
-                                                ? t('location.state_saving', { defaultValue: 'Saving...' })
-                                                : t('location.save_location')}
-                                        </Button>
+                                    {hasLocation && (
+                                        <Circle
+                                            center={normalizedLocation}
+                                            radius={400000}
+                                            pathOptions={{
+                                                color: 'white',
+                                                fillOpacity: 0,
+                                                weight: 1,
+                                                opacity: 0.8,
+                                                dashArray: '2, 2',
+                                            }}
+                                        />
+                                    )}
+                                </MapContainer>
+                            </Box>
 
-                                        {!hasLocation && (
-                                            <Typography variant="caption" color="warning.main">
-                                                {t('location.map_empty_hint', { defaultValue: 'No location selected yet. Click the map or use current location.' })}
-                                            </Typography>
-                                        )}
-                                    </Stack>
-                                </Box>
-                            </Grid>
-                        </Grid>
-
-                        <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-                            {t('location.subtitle')}
-                        </Typography>
-                    </Box>
+                            {!hasLocation && (
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                                    {t('location.map_empty_state', { defaultValue: 'No marker selected yet.' })}
+                                </Typography>
+                            )}
+                        </SettingsSection>
+                    </Grid>
                 </Grid>
 
-                <Grid size={{ xs: 1, md: 1 }}>
-                    <Box sx={{ px: 0.5, pb: 1.5 }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                            {t('location.map_section_title', { defaultValue: 'Map Selection' })}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                            {t('location.map_instruction', { defaultValue: 'Click anywhere on the map to set your station coordinates.' })}
-                        </Typography>
-                    </Box>
-
-                    <Box
-                        sx={{
-                            width: '100%',
-                            height: { xs: 380, sm: 420, md: 500 },
-                            borderRadius: 1,
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            boxShadow: 1,
-                        }}
+                <SettingsActionFooter statusText={statusLabel} sticky>
+                    <Button
+                        variant="outlined"
+                        color="inherit"
+                        disabled={!canReset}
+                        onClick={handleResetLocation}
                     >
-                        <MapContainer
-                            center={mapCenter}
-                            zoom={mapZoom}
-                            maxZoom={10}
-                            minZoom={1}
-                            dragging
-                            whenReady={handleWhenReady}
-                            style={{ height: '100%', width: '100%' }}
-                        >
-                            <TileLayer
-                                url={getTileLayerById('satellite').url}
-                                attribution="Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL."
-                            />
-                            <MapClickHandler onClick={handleMapClick} />
-
-                            {hasLocation && (
-                                <Marker position={normalizedLocation} icon={customIcon}>
-                                    <Popup>{t('location.your_selected_location')}</Popup>
-                                </Marker>
-                            )}
-
-                            {hasLocation && polylines.map((polyline, index) => (
-                                <Polyline
-                                    key={index}
-                                    positions={polyline}
-                                    color="white"
-                                    opacity={0.8}
-                                    lineCap="round"
-                                    lineJoin="round"
-                                    dashArray="2, 2"
-                                    dashOffset="10"
-                                    interactive={false}
-                                    smoothFactor={1}
-                                    noClip={false}
-                                    className="leaflet-interactive"
-                                    weight={1}
-                                />
-                            ))}
-
-                            {hasLocation && (
-                                <Circle
-                                    center={normalizedLocation}
-                                    radius={400000}
-                                    pathOptions={{
-                                        color: 'white',
-                                        fillOpacity: 0,
-                                        weight: 1,
-                                        opacity: 0.8,
-                                        dashArray: '2, 2',
-                                    }}
-                                />
-                            )}
-                        </MapContainer>
-                    </Box>
-
-                    <Stack direction="row" spacing={1} sx={{ mt: 1.25 }}>
-                        <Button
-                            variant="outlined"
-                            size="small"
-                            disabled={!hasLocation}
-                            aria-label={t('location.map_recenter', { defaultValue: 'Recenter map' })}
-                            onClick={() => {
-                                if (hasLocation) reCenterMap(normalizedLocation.lat, normalizedLocation.lon);
-                            }}
-                        >
-                            {t('location.map_recenter', { defaultValue: 'Recenter' })}
-                        </Button>
-                    </Stack>
-                    {!hasLocation && (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                            {t('location.map_empty_state', { defaultValue: 'No marker selected yet.' })}
-                        </Typography>
-                    )}
-                </Grid>
-            </Grid>
-        </Paper>
+                        {t('location.reset', { defaultValue: 'Reset' })}
+                    </Button>
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        disabled={!canSave || !isDifferentFromSaved}
+                        aria-label={t('location.save_location')}
+                        onClick={handleSetLocation}
+                    >
+                        {locationSaving
+                            ? t('location.state_saving', { defaultValue: 'Saving...' })
+                            : t('location.save_location', { defaultValue: 'Save location' })}
+                    </Button>
+                </SettingsActionFooter>
+            </Stack>
+        </SettingsSurface>
     );
 };
 

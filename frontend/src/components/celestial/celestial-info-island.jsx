@@ -7,13 +7,13 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { useTranslation } from 'react-i18next';
-import { getClassNamesBasedOnGridEditing, TitleBar } from '../common/common.jsx';
+import { getClassNamesBasedOnGridEditing, islandTitleBarSx, TitleBar } from '../common/common.jsx';
 import { useSocket } from '../common/socket.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { setRotator, setTrackerId, setTrackingStateInBackend } from '../target/target-slice.jsx';
 import { useTargetRotatorSelectionDialog } from '../target/use-target-rotator-selection-dialog.jsx';
 import { toast } from '../../utils/toast-with-timestamp.jsx';
-import BodyIcon from './body-icon.jsx';
+import TargetIcon from './target-icon.jsx';
 import { resolveTargetDisplayName } from '../target/celestial-target-utils.js';
 
 const AU_IN_KM = 149597870.7;
@@ -329,15 +329,11 @@ const CelestialInfoIsland = ({
             <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <TitleBar
                     className={getClassNamesBasedOnGridEditing(gridEditable, ['window-title-bar'])}
-                    sx={{
-                        bgcolor: 'background.titleBar',
-                        borderBottom: '1px solid',
-                        borderColor: 'border.main',
-                    }}
+                    sx={islandTitleBarSx}
                 >
                     <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                         <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                            Celestial Info
+                            {t('celestial.info_title', { defaultValue: 'Celestial Info' })}
                         </Typography>
                     </Box>
                 </TitleBar>
@@ -346,7 +342,9 @@ const CelestialInfoIsland = ({
                     {!normalizedTargetKey ? (
                         <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2, py: 1.5 }}>
                             <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic', textAlign: 'center' }}>
-                                Select a body or mission from Monitored Celestial or Celestial Passes.
+                                {t('celestial.info_empty_hint', {
+                                    defaultValue: 'Select a body or mission from Monitored Celestial or Celestial Passes.',
+                                })}
                             </Typography>
                         </Box>
                     ) : loading && !selectedTrack ? (
@@ -388,7 +386,7 @@ const CelestialInfoIsland = ({
                             >
                                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
                                     <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <BodyIcon
+                                        <TargetIcon
                                             targetType={targetType}
                                             bodyId={targetIdentifier}
                                             size={44}

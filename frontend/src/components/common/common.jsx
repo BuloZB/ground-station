@@ -176,6 +176,23 @@ export const TitleBar = styled(Paper)(({ theme }) => ({
     },
 }));
 
+// Shared title-bar style presets used by island headers across overview/target/celestial/waterfall.
+export const islandTitleBarSx = {
+    bgcolor: 'background.titleBar',
+    borderBottom: '1px solid',
+    borderColor: 'border.main',
+    backdropFilter: 'blur(10px)',
+};
+
+export const islandTitleBarCompactSx = {
+    ...islandTitleBarSx,
+    height: 30,
+    minHeight: 30,
+    py: 0,
+    display: 'flex',
+    alignItems: 'center',
+};
+
 export const ThemedLeafletTooltip = styled(LeafletTooltip)(({ theme }) => ({
     color: theme.palette.text.primary,
     backgroundColor: theme.palette.background.paper,
@@ -387,12 +404,13 @@ export function getTimeFromISO(isoString, timezone, locale) {
     });
 }
 
-export const MapArrowControls = function ({mapObject}) {
+export const MapArrowControls = function ({mapObject, verticalOffset = 0}) {
 
     return (
         <Box sx={{'& > :not(style)': {m: 1}}} style={{
             left: 10,
-            bottom: 10,
+            // Positive offset moves controls upward while keeping bottom anchoring behavior.
+            bottom: 10 + Number(verticalOffset || 0),
             position: 'absolute',
             display: 'flex',
             flexDirection: 'column',

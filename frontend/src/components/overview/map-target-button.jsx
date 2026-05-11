@@ -1,6 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Box, Button, Typography, Paper, IconButton } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { useNavigate } from 'react-router-dom';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import InfoIcon from '@mui/icons-material/Info';
@@ -33,15 +34,19 @@ const SatelliteTrackSuggestion = ({
                 zIndex: 1000,
                 padding: 2,
                 maxWidth: 300,
-                backgroundColor: 'rgba(25, 25, 25, 0.8)',
+                backgroundColor: (theme) => alpha(
+                    theme.palette.background.paper,
+                    theme.palette.mode === 'dark' ? 0.86 : 0.94
+                ),
                 backdropFilter: 'blur(5px)',
                 borderRadius: 2,
                 transition: 'all 0.3s ease',
-                border: '1px solid #444',
+                border: '1px solid',
+                borderColor: 'border.main',
             }}
         >
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="subtitle2" component="div" sx={{color: '#fff', mb: 1}}>
+                <Typography variant="subtitle2" component="div" sx={{ color: 'text.primary', mb: 1 }}>
                     {trackingSatelliteId === selectedSatelliteId ? t('map_target.already_tracking') : t('map_target.start_tracking', { name: selectedSatellite['name'] || 'this satellite' })}
                 </Typography>
 
@@ -58,7 +63,7 @@ const SatelliteTrackSuggestion = ({
                             fontWeight: 'bold',
                             flex: 1,
                             '&:hover': {
-                                backgroundColor: '#00796b',
+                                backgroundColor: 'primary.dark',
                             }
                         }}
                         title={t('map_target.start_tracking_tooltip', { name: selectedSatellite['name'] || 'this satellite' })}
@@ -69,10 +74,10 @@ const SatelliteTrackSuggestion = ({
                     <IconButton
                         onClick={handleNavigateToSatellite}
                         sx={{
-                            backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                            color: '#fff',
+                            backgroundColor: 'action.hover',
+                            color: 'text.primary',
                             '&:hover': {
-                                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                                backgroundColor: 'action.selected',
                             }
                         }}
                         size="small"

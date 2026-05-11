@@ -69,6 +69,7 @@ const normalizeProjectionLabel = (projection) => {
 };
 
 const buildSettings = ({
+    initialLockOnTarget,
     initialShowPastOrbitPath,
     initialShowFutureOrbitPath,
     initialShowSatelliteCoverage,
@@ -83,6 +84,7 @@ const buildSettings = ({
     initialShowTooltip,
     initialShowGrid,
 }) => ({
+    lockOnTarget: Boolean(initialLockOnTarget),
     showPastOrbitPath: Boolean(initialShowPastOrbitPath),
     showFutureOrbitPath: Boolean(initialShowFutureOrbitPath),
     showSatelliteCoverage: Boolean(initialShowSatelliteCoverage),
@@ -98,7 +100,7 @@ const buildSettings = ({
     tileLayerID: initialTileLayerID || 'satellite',
 });
 
-const settingsEqual = (left, right) => SETTINGS_KEYS.every((key) => left[key] === right[key]);
+const settingsEqual = (left, right, keys = SETTINGS_KEYS) => keys.every((key) => left[key] === right[key]);
 
 const SectionBlock = ({ title, subtitle, children }) => (
     <Paper
@@ -197,11 +199,11 @@ const ColorSetting = ({ label, value, disabled = false, onChange }) => {
     );
 };
 
-const MapSettingsIsland = ({ initialShowPastOrbitPath, initialShowFutureOrbitPath, initialShowSatelliteCoverage,
+const MapSettingsIsland = ({ initialLockOnTarget, initialShowPastOrbitPath, initialShowFutureOrbitPath, initialShowSatelliteCoverage,
                             initialShowSunIcon, initialShowMoonIcon, initialShowTerminatorLine,
                             initialSatelliteCoverageColor, initialPastOrbitLineColor, initialFutureOrbitLineColor,
                             initialOrbitProjectionDuration, initialTileLayerID, initialShowTooltip, initialShowGrid,
-                               handleShowFutureOrbitPath, handleShowPastOrbitPath,
+                               handleLockOnTarget, handleShowFutureOrbitPath, handleShowPastOrbitPath,
                             handleShowSatelliteCoverage, handleSetShowSunIcon, handleSetShowMoonIcon,
                             handleShowTerminatorLine, handleFutureOrbitLineColor, handlePastOrbitLineColor,
                             handleSatelliteCoverageColor, handleOrbitProjectionDuration, handleShowTooltip,
@@ -218,8 +220,22 @@ const MapSettingsIsland = ({ initialShowPastOrbitPath, initialShowFutureOrbitPat
         {value: 1440, label: t('map_settings.time_options.24_hours')},
     ];
 
+    const supportsLockOnTarget = useMemo(
+        () => (
+            typeof initialLockOnTarget === 'boolean'
+            || typeof defaultSettings?.lockOnTarget === 'boolean'
+            || typeof handleLockOnTarget === 'function'
+        ),
+        [defaultSettings?.lockOnTarget, handleLockOnTarget, initialLockOnTarget]
+    );
+    const settingsKeys = useMemo(
+        () => (supportsLockOnTarget ? [...SETTINGS_KEYS, 'lockOnTarget'] : SETTINGS_KEYS),
+        [supportsLockOnTarget]
+    );
+
     const initialSettings = useMemo(
         () => buildSettings({
+            initialLockOnTarget,
             initialShowPastOrbitPath,
             initialShowFutureOrbitPath,
             initialShowSatelliteCoverage,
@@ -235,6 +251,7 @@ const MapSettingsIsland = ({ initialShowPastOrbitPath, initialShowFutureOrbitPat
             initialShowGrid,
         }),
         [
+            initialLockOnTarget,
             initialShowPastOrbitPath,
             initialShowFutureOrbitPath,
             initialShowSatelliteCoverage,
@@ -253,6 +270,7 @@ const MapSettingsIsland = ({ initialShowPastOrbitPath, initialShowFutureOrbitPat
 
     const defaults = useMemo(
         () => buildSettings({
+            initialLockOnTarget: defaultSettings?.lockOnTarget,
             initialShowPastOrbitPath: defaultSettings?.showPastOrbitPath,
             initialShowFutureOrbitPath: defaultSettings?.showFutureOrbitPath,
             initialShowSatelliteCoverage: defaultSettings?.showSatelliteCoverage,
@@ -295,7 +313,7 @@ const MapSettingsIsland = ({ initialShowPastOrbitPath, initialShowFutureOrbitPat
     );
 
     const projectionChanged = (selectedLayer.projection || 'EPSG3857') !== (initialLayer.projection || 'EPSG3857');
-    const isDirty = !settingsEqual(draftSettings, initialSettings);
+    const isDirty = !settingsEqual(draftSettings, initialSettings, settingsKeys);
 
     const applySettings = async () => {
         const sanitizedSettings = {
@@ -313,6 +331,9 @@ const MapSettingsIsland = ({ initialShowPastOrbitPath, initialShowFutureOrbitPat
         handleShowTerminatorLine(sanitizedSettings.showTerminatorLine);
         handleShowTooltip(sanitizedSettings.showTooltip);
         handleShowGrid(sanitizedSettings.showGrid);
+        if (supportsLockOnTarget) {
+            handleLockOnTarget?.(sanitizedSettings.lockOnTarget);
+        }
         handlePastOrbitLineColor(sanitizedSettings.pastOrbitLineColor);
         handleFutureOrbitLineColor(sanitizedSettings.futureOrbitLineColor);
         handleSatelliteCoverageColor(sanitizedSettings.satelliteCoverageColor);
@@ -400,6 +421,13 @@ const MapSettingsIsland = ({ initialShowPastOrbitPath, initialShowFutureOrbitPat
                 <SectionBlock
                     title={t('map_settings.section_satellite_overlays', { defaultValue: 'Satellite Overlays' })}
                 >
+                    {supportsLockOnTarget ? (
+                        <ToggleRow
+                            label={t('map_settings.lock_on_target', { defaultValue: 'Lock map on selected target' })}
+                            checked={draftSettings.lockOnTarget}
+                            onChange={(value) => setDraftSettings((prev) => ({ ...prev, lockOnTarget: value }))}
+                        />
+                    ) : null}
                     <ToggleRow
                         label={t('map_settings.satellite_coverage')}
                         checked={draftSettings.showSatelliteCoverage}

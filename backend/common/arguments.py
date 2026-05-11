@@ -81,9 +81,17 @@ parser.add_argument(
     help="Run the SoapySDR server discovery once on startup",
 )
 
+# Export resolved config context for runtime configuration handlers/UI.
+resolved_app_config_path: Path
+app_config_cli_overrides: set[str]
+raw_startup_cli_args: argparse.Namespace | None
+
 # Only parse arguments if we're not in an alembic context
 if os.environ.get("ALEMBIC_CONTEXT"):
     # Create a namespace with default values for alembic context
+    resolved_app_config_path = Path("data/configs/app_config.json")
+    app_config_cli_overrides = set()
+    raw_startup_cli_args = None
     arguments = argparse.Namespace(
         host="0.0.0.0",
         port=5000,
@@ -103,19 +111,27 @@ if os.environ.get("ALEMBIC_CONTEXT"):
         celestial_periodic_sync_enabled=True,
         celestial_periodic_sync_interval_minutes=60,
         celestial_sync_past_hours=1,
-        celestial_sync_future_hours=24,
-        celestial_sync_step_minutes=60,
-        celestial_runtime_cache_ttl_seconds=120,
-        celestial_vector_db_ttl_seconds=2 * 60 * 60,
-        celestial_vector_epoch_bucket_minutes=60,
-        celestial_computed_epoch_bucket_seconds=60,
-        celestial_dynamic_cache_min_seconds=2 * 60,
-        celestial_dynamic_cache_max_seconds=6 * 60 * 60,
-        celestial_sky_motion_accuracy_target_deg=0.25,
-        celestial_sky_motion_safety_factor=0.5,
     )
 else:
     _raw_args = parser.parse_args()
+    raw_startup_cli_args = _raw_args
+    app_config_cli_overrides = {
+        key
+        for key, value in {
+            "host": _raw_args.host,
+            "port": _raw_args.port,
+            "db": _raw_args.db,
+            "temp_db": _raw_args.temp_db,
+            "log_level": _raw_args.log_level,
+            "log_config": _raw_args.log_config,
+            "secret_key": _raw_args.secret_key,
+            "track_interval_ms": _raw_args.track_interval_ms,
+            "max_tracker_targets": _raw_args.max_tracker_targets,
+            "enable_soapy_discovery": _raw_args.enable_soapy_discovery,
+            "runonce_soapy_discovery": _raw_args.runonce_soapy_discovery,
+        }.items()
+        if value is not None
+    }
 
     if _raw_args.config:
         _config_path = Path(_raw_args.config)
@@ -126,6 +142,7 @@ else:
             _config_path = Path("backend/data/configs/app_config.json")
         else:
             _config_path = Path("data/configs/app_config.json")
+    resolved_app_config_path = _config_path
     _file_config = load_app_config(_config_path)
 
     def _pick(cli_value, key):
@@ -166,22 +183,6 @@ else:
             "celestial_periodic_sync_interval_minutes"
         ),
         celestial_sync_past_hours=_file_config.get("celestial_sync_past_hours"),
-        celestial_sync_future_hours=_file_config.get("celestial_sync_future_hours"),
-        celestial_sync_step_minutes=_file_config.get("celestial_sync_step_minutes"),
-        celestial_runtime_cache_ttl_seconds=_file_config.get("celestial_runtime_cache_ttl_seconds"),
-        celestial_vector_db_ttl_seconds=_file_config.get("celestial_vector_db_ttl_seconds"),
-        celestial_vector_epoch_bucket_minutes=_file_config.get(
-            "celestial_vector_epoch_bucket_minutes"
-        ),
-        celestial_computed_epoch_bucket_seconds=_file_config.get(
-            "celestial_computed_epoch_bucket_seconds"
-        ),
-        celestial_dynamic_cache_min_seconds=_file_config.get("celestial_dynamic_cache_min_seconds"),
-        celestial_dynamic_cache_max_seconds=_file_config.get("celestial_dynamic_cache_max_seconds"),
-        celestial_sky_motion_accuracy_target_deg=_file_config.get(
-            "celestial_sky_motion_accuracy_target_deg"
-        ),
-        celestial_sky_motion_safety_factor=_file_config.get("celestial_sky_motion_safety_factor"),
     )
 
 if getattr(arguments, "temp_db", False):

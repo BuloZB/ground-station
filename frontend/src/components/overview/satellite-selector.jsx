@@ -30,7 +30,7 @@ import {
 import { useTheme, styled } from '@mui/material/styles';
 import React, {useEffect, useState} from "react";
 import Grid from "@mui/material/Grid";
-import {getClassNamesBasedOnGridEditing, TitleBar} from "../common/common.jsx";
+import {getClassNamesBasedOnGridEditing, islandTitleBarSx, TitleBar} from "../common/common.jsx";
 import {useSocket} from "../common/socket.jsx";
 import { toast } from '../../utils/toast-with-timestamp.jsx';
 import {useLocalStorageState} from "@toolpad/core";
@@ -105,12 +105,7 @@ const OverviewSatelliteGroupSelector = React.memo(function OverviewSatelliteGrou
         <ThemedSettingsDiv>
             <TitleBar
                 className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}
-                sx={{
-                    bgcolor: 'background.titleBar',
-                    borderBottom: '1px solid',
-                    borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)'
-                }}
+                sx={islandTitleBarSx}
             >
                 <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%'}}>
                     <Box sx={{display: 'flex', alignItems: 'center'}}>

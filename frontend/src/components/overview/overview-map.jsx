@@ -53,6 +53,7 @@ import {
     MapArrowControls,
     SimpleTruncatedHtml,
     getClassNamesBasedOnGridEditing,
+    islandTitleBarSx,
 } from '../common/common.jsx';
 import MapSettingsIslandDialog from './map-settings-dialog.jsx';
 import CoordinateGrid from '../common/mercator-grid.jsx';
@@ -795,15 +796,10 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
     };
 
     return (
-        <>
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <TitleBar
                 className={getClassNamesBasedOnGridEditing(gridEditable, ['window-title-bar'])}
-                sx={{
-                    bgcolor: 'background.titleBar',
-                    borderBottom: '1px solid',
-                    borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)'
-                }}
+                sx={islandTitleBarSx}
             >
                 <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%'}}>
                     <Box sx={{display: 'flex', alignItems: 'center'}}>
@@ -826,7 +822,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                     </Box>
                 </Box>
             </TitleBar>
-            <Box sx={{position: 'relative', width: '100%', height: 'calc(100% - 60px)'}}>
+            <Box sx={{ position: 'relative', width: '100%', flex: 1, minHeight: 0 }}>
                 <Backdrop
                     open={loadingSatellites && selectedSatGroupId}
                     sx={{
@@ -929,7 +925,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
 
                 {/* Wrap MapArrowControls with a container to detect clicks */}
                 <div ref={arrowControlsRef}>
-                    <MapArrowControls mapObject={MapObject}/>
+                    <MapArrowControls mapObject={MapObject} verticalOffset={25}/>
                 </div>
 
                 {showGrid && (
@@ -950,15 +946,15 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
                 {/*    selectedSatellite={selectedSatellites.find((sat) => sat.norad_id === selectedSatelliteId)}*/}
                 {/*    handleSetTrackingOnBackend={handleSetTrackingOnBackend}*/}
                 {/*/>*/}
+                    <MapStatusBar>
+                        <SimpleTruncatedHtml
+                            className={'attribution'}
+                            htmlString={`<a href="https://leafletjs.com" title="A JavaScript library for interactive maps" target="_blank" rel="noopener noreferrer">Leaflet</a> | ${selectedTileLayer.attribution}`}
+                        />
+                    </MapStatusBar>
                 </MapContainer>
             </Box>
-            <MapStatusBar>
-                <SimpleTruncatedHtml
-                    className={'attribution'}
-                    htmlString={`<a href="https://leafletjs.com" title="A JavaScript library for interactive maps" target="_blank" rel="noopener noreferrer">Leaflet</a> | ${selectedTileLayer.attribution}`}
-                />
-            </MapStatusBar>
-        </>
+        </Box>
     );
 };
 

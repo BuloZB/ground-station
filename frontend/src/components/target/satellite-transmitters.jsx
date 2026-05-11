@@ -22,6 +22,7 @@ import { useSelector } from "react-redux";
 import { useTranslation } from 'react-i18next';
 import {
     getClassNamesBasedOnGridEditing,
+    islandTitleBarSx,
     TitleBar,
     getFrequencyBand,
     getBandColor
@@ -293,12 +294,9 @@ const TargetSatelliteTransmittersIsland = () => {
             <TitleBar
                 className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}
                 sx={{
-                    bgcolor: 'background.titleBar',
-                    borderBottom: '1px solid',
-                    borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)',
+                    ...islandTitleBarSx,
                     height: 30,
-                    minHeight: 30
+                    minHeight: 30,
                 }}
             >
                 <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 1, minWidth: 0}}>

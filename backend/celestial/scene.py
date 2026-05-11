@@ -39,31 +39,18 @@ def _config_int(name: str, default: int, minimum: int) -> int:
     return max(minimum, value)
 
 
-def _config_float(name: str, default: float, minimum: float) -> float:
-    try:
-        value = float(getattr(arguments, name, default))
-    except (TypeError, ValueError):
-        value = float(default)
-    return max(minimum, value)
-
-
-CACHE_TTL_SECONDS = _config_int("celestial_runtime_cache_ttl_seconds", 120, 0)
-VECTOR_DB_TTL_SECONDS = _config_int("celestial_vector_db_ttl_seconds", 2 * 60 * 60, 60)
-VECTOR_EPOCH_BUCKET_MINUTES = _config_int("celestial_vector_epoch_bucket_minutes", 60, 1)
-COMPUTED_EPOCH_BUCKET_SECONDS = _config_int("celestial_computed_epoch_bucket_seconds", 60, 1)
-SKY_MOTION_ACCURACY_TARGET_DEG = _config_float(
-    "celestial_sky_motion_accuracy_target_deg", 0.25, 0.01
-)
-SKY_MOTION_SAFETY_FACTOR = _config_float("celestial_sky_motion_safety_factor", 0.5, 0.01)
-SKY_MOTION_DYNAMIC_TTL_MIN_SECONDS = _config_int("celestial_dynamic_cache_min_seconds", 2 * 60, 1)
-SKY_MOTION_DYNAMIC_TTL_MAX_SECONDS = _config_int(
-    "celestial_dynamic_cache_max_seconds",
-    6 * 60 * 60,
-    SKY_MOTION_DYNAMIC_TTL_MIN_SECONDS,
-)
+# Celestial cache policy is fixed by code, not by app config.
+CACHE_TTL_SECONDS = 120
+VECTOR_DB_TTL_SECONDS = 2 * 60 * 60
+VECTOR_EPOCH_BUCKET_MINUTES = 60
+COMPUTED_EPOCH_BUCKET_SECONDS = 60
+SKY_MOTION_ACCURACY_TARGET_DEG = 0.25
+SKY_MOTION_SAFETY_FACTOR = 0.5
+SKY_MOTION_DYNAMIC_TTL_MIN_SECONDS = 2 * 60
+SKY_MOTION_DYNAMIC_TTL_MAX_SECONDS = 6 * 60 * 60
 SCHEDULED_SYNC_PAST_HOURS = _config_int("celestial_sync_past_hours", 1, 0)
-SCHEDULED_SYNC_FUTURE_HOURS = _config_int("celestial_sync_future_hours", 24, 1)
-SCHEDULED_SYNC_STEP_MINUTES = _config_int("celestial_sync_step_minutes", 60, 1)
+SCHEDULED_SYNC_FUTURE_HOURS = 24
+SCHEDULED_SYNC_STEP_MINUTES = 60
 MAX_SAMPLES_PER_TARGET = 1500
 DEFAULT_CELESTIAL_TARGETS: List[Dict[str, str]] = []
 NO_EPHEMERIS_ERROR_FRAGMENT = "No ephemeris data returned by Horizons"
@@ -340,6 +327,15 @@ def _coerce_utc_datetime(value: Any) -> Optional[datetime]:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _cache_row_is_expired(row: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    expires_at = _coerce_utc_datetime(row.get("expires_at"))
+    if not expires_at:
+        return False
+    return expires_at < datetime.now(timezone.utc)
 
 
 def _extract_orbit_samples(
@@ -1324,16 +1320,10 @@ async def _get_vectors_snapshot(
             valid_only=valid_only,
         )
         if cached and isinstance(cached.get("payload"), dict):
-            cached_expires_at = _coerce_utc_datetime(cached.get("expires_at"))
-            cached_is_expired = (
-                bool(cached_expires_at)
-                and cached_expires_at is not None
-                and cached_expires_at < datetime.now(timezone.utc)
-            )
             return {
                 "payload": dict(cached["payload"]),
                 "cache": "db-hit" if allow_network_fetch else "db-cache-only-hit",
-                "stale": False if valid_only else bool(cached_is_expired),
+                "stale": False if valid_only else _cache_row_is_expired(cached),
                 "error": None,
             }
 
@@ -1346,16 +1336,10 @@ async def _get_vectors_snapshot(
         )
         if latest and isinstance(latest.get("payload"), dict):
             if not allow_network_fetch:
-                latest_expires_at = _coerce_utc_datetime(latest.get("expires_at"))
-                latest_is_expired = (
-                    bool(latest_expires_at)
-                    and latest_expires_at is not None
-                    and latest_expires_at < datetime.now(timezone.utc)
-                )
                 return {
                     "payload": dict(latest["payload"]),
                     "cache": "db-cache-only-latest-hit",
-                    "stale": bool(latest_is_expired),
+                    "stale": _cache_row_is_expired(latest),
                     "error": None,
                 }
             cached_bucket = _coerce_utc_datetime(latest.get("epoch_bucket_utc"))
@@ -1384,16 +1368,10 @@ async def _get_vectors_snapshot(
                 valid_only=False,
             )
             if latest_for_command and isinstance(latest_for_command.get("payload"), dict):
-                latest_any_expires_at = _coerce_utc_datetime(latest_for_command.get("expires_at"))
-                latest_any_is_expired = (
-                    bool(latest_any_expires_at)
-                    and latest_any_expires_at is not None
-                    and latest_any_expires_at < datetime.now(timezone.utc)
-                )
                 return {
                     "payload": dict(latest_for_command["payload"]),
                     "cache": "db-cache-only-command-hit",
-                    "stale": bool(latest_any_is_expired),
+                    "stale": _cache_row_is_expired(latest_for_command),
                     "error": None,
                 }
             return {
@@ -1493,6 +1471,37 @@ async def _get_vectors_snapshot(
             return {
                 "payload": dict(fallback["payload"]),
                 "cache": "db-stale",
+                "stale": True,
+                "error": str(fetch_error),
+            }
+
+        # If the exact epoch bucket misses, degrade gracefully to the latest persisted
+        # vectors for this projection before returning a hard miss.
+        latest_fallback = await _load_latest_vectors_from_db(
+            command=command,
+            past_hours=past_hours,
+            future_hours=future_hours,
+            step_minutes=step_minutes,
+            valid_only=False,
+        )
+        if latest_fallback and isinstance(latest_fallback.get("payload"), dict):
+            return {
+                "payload": dict(latest_fallback["payload"]),
+                "cache": "db-stale-latest",
+                "stale": True,
+                "error": str(fetch_error),
+            }
+
+        latest_for_command_fallback = await _load_latest_vectors_for_command_from_db(
+            command=command,
+            valid_only=False,
+        )
+        if latest_for_command_fallback and isinstance(
+            latest_for_command_fallback.get("payload"), dict
+        ):
+            return {
+                "payload": dict(latest_for_command_fallback["payload"]),
+                "cache": "db-stale-command",
                 "stale": True,
                 "error": str(fetch_error),
             }
@@ -1611,7 +1620,8 @@ async def _fetch_celestial_with_cache(
             )
             cached_payload["name"] = name
             cached_payload["color"] = color
-            cached_payload["stale"] = False
+            # Preserve stale state propagated from DB/network fallback snapshots.
+            cached_payload["stale"] = bool(cached_payload.get("stale"))
             cached_payload["cache"] = "computed-hit"
             rows.append(cached_payload)
             if per_row_callback:

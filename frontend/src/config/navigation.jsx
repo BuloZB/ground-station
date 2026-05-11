@@ -21,7 +21,7 @@ import PublicIcon from '@mui/icons-material/Public';
 import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import AddHomeIcon from '@mui/icons-material/AddHome';
-import {SatelliteIcon, Satellite03Icon, PreferenceVerticalIcon} from "hugeicons-react";
+import {SatelliteIcon, Satellite03Icon} from "hugeicons-react";
 import RadioIcon from '@mui/icons-material/Radio';
 import InfoIcon from '@mui/icons-material/Info';
 import MicrowaveIcon from '@mui/icons-material/Microwave';
@@ -29,6 +29,7 @@ import GroupWorkIcon from '@mui/icons-material/GroupWork';
 import WavesIcon from '@mui/icons-material/Waves';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import FolderIcon from '@mui/icons-material/Folder';
+import SettingsIcon from '@mui/icons-material/Settings';
 import i18n from '../i18n/config.js';
 import { CelestialSolarIcon, TleIcon } from '../components/common/custom-icons.jsx';
 import { Box, CircularProgress } from '@mui/material';
@@ -340,9 +341,9 @@ export const getNavigation = ({ showCelestial = false } = {}) => {
         title: i18n.t('settings', { ns: 'navigation' }),
     },
     {
-        segment: 'settings/preferences',
-        title: i18n.t('preferences', { ns: 'navigation' }),
-        icon: <PreferenceVerticalIcon/>,
+        segment: 'settings/settings',
+        title: i18n.t('settings', { ns: 'navigation' }),
+        icon: <SettingsIcon/>,
     },
     {
         segment: 'settings/location',

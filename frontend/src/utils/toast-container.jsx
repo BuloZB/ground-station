@@ -94,7 +94,9 @@ export const ToastContainerWithStyles = () => {
 
                 .Toastify__toast {
                     border-radius: 8px !important;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+                    box-shadow: ${theme.palette.mode === 'dark'
+                        ? '0 6px 18px rgba(0, 0, 0, 0.4)'
+                        : '0 6px 18px rgba(15, 23, 42, 0.18)'} !important;
                     padding: 12px !important;
                     min-height: 64px !important;
                     backdrop-filter: blur(10px);
@@ -155,7 +157,7 @@ export const ToastContainerWithStyles = () => {
 
                 .Toastify__close-button {
                     opacity: 0.7 !important;
-                    color: ${theme.palette.text.primary} !important;
+                    color: rgba(255, 255, 255, 0.92) !important;
                 }
 
                 .Toastify__close-button:hover {

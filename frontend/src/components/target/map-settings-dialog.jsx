@@ -28,6 +28,7 @@ import React from "react";
 import { useTranslation } from 'react-i18next';
 import {
     setFutureOrbitLineColor,
+    setLockOnTarget,
     setOrbitProjectionDuration,
     setPastOrbitLineColor,
     setSatelliteCoverageColor,
@@ -54,6 +55,7 @@ function MapSettingsIslandDialog({updateBackend}) {
         showMoonIcon,
         showTerminatorLine,
         showTooltip,
+        lockOnTarget,
         pastOrbitLineColor,
         futureOrbitLineColor,
         satelliteCoverageColor,
@@ -106,6 +108,7 @@ function MapSettingsIslandDialog({updateBackend}) {
                 >
                     <MapSettingsIsland
                         open={openMapSettingsDialog}
+                        initialLockOnTarget={lockOnTarget}
                         initialShowPastOrbitPath={showPastOrbitPath}
                         initialShowFutureOrbitPath={showFutureOrbitPath}
                         initialShowSatelliteCoverage={showSatelliteCoverage}
@@ -120,6 +123,7 @@ function MapSettingsIslandDialog({updateBackend}) {
                         initialShowGrid={showGrid}
                         initialShowTerminatorLine={showTerminatorLine}
                         defaultSettings={{
+                            lockOnTarget: true,
                             showPastOrbitPath: true,
                             showFutureOrbitPath: true,
                             showSatelliteCoverage: true,
@@ -134,6 +138,7 @@ function MapSettingsIslandDialog({updateBackend}) {
                             orbitProjectionDuration: 60 * 24,
                             tileLayerID: 'satellite',
                         }}
+                        handleLockOnTarget={(value)=>{dispatch(setLockOnTarget(value))}}
                         handleShowPastOrbitPath={(value)=>{dispatch(setShowPastOrbitPath(value))}}
                         handleShowFutureOrbitPath={(value)=>{dispatch(setShowFutureOrbitPath(value))}}
                         handleShowSatelliteCoverage={(value)=>{dispatch(setShowSatelliteCoverage(value))}}

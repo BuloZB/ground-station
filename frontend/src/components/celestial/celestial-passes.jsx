@@ -30,12 +30,13 @@ import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useDispatch, useSelector } from 'react-redux';
+import { useTranslation } from 'react-i18next';
 import {
     setCelestialPassesTableColumnVisibility,
     setCelestialPassesTablePageSize,
     setCelestialPassesTableSortModel,
 } from './celestial-slice.jsx';
-import { getClassNamesBasedOnGridEditing, TitleBar } from '../common/common.jsx';
+import { getClassNamesBasedOnGridEditing, islandTitleBarCompactSx, TitleBar } from '../common/common.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { toRowSelectionModel, toSelectedIds } from '../../utils/datagrid-selection.js';
 import ProgressFormatter from '../overview/progressbar-widget.jsx';
@@ -222,7 +223,6 @@ const PassesTableSettingsDialog = ({ open, onClose }) => {
         { name: 'name', label: 'Name', category: 'basic', alwaysVisible: true },
         { name: 'targetType', label: 'Type', category: 'basic' },
         { name: 'peakElevationDeg', label: 'Peak Elevation', category: 'metrics' },
-        { name: 'currentElevationDeg', label: 'Current Elevation', category: 'metrics' },
         { name: 'progress', label: 'Progress', category: 'basic' },
         { name: 'duration', label: 'Duration', category: 'basic' },
         { name: 'eventStart', label: 'Start', category: 'time' },
@@ -314,13 +314,13 @@ const PassesTableSettingsDialog = ({ open, onClose }) => {
 
 const CelestialPasses = ({
     passes = [],
-    tracks = [],
     loading = false,
     gridEditable = false,
     onTargetSelected = null,
     onRefresh = null,
     refreshDisabled = false,
 }) => {
+    const { t } = useTranslation('overview');
     const dispatch = useDispatch();
     const theme = useTheme();
     const isCompactHeader = useMediaQuery(theme.breakpoints.down('lg'));
@@ -341,24 +341,10 @@ const CelestialPasses = ({
         return () => clearInterval(interval);
     }, []);
 
-    const currentElevationByTargetKey = useMemo(() => {
-        const map = {};
-        (tracks || []).forEach((track) => {
-            const key = String(track?.target_key || '').trim();
-            if (!key) return;
-            const elevation = Number(track?.sky_position?.el_deg);
-            if (Number.isFinite(elevation)) {
-                map[key] = elevation;
-            }
-        });
-        return map;
-    }, [tracks]);
-
     const rows = useMemo(() => (passes || []).map((pass) => {
         const eventStartMs = new Date(pass.event_start).getTime();
         const eventEndMs = new Date(pass.event_end).getTime();
         const status = getPassStatus({ eventStartMs, eventEndMs }, nowMs);
-        const currentElevation = currentElevationByTargetKey[String(pass.target_key || '').trim()];
         return {
             id: pass.id || `${pass.target_key || 'target'}_${pass.event_start || ''}`,
             status,
@@ -370,7 +356,6 @@ const CelestialPasses = ({
                     ? (pass.body_id || '-')
                     : (pass.command || '-'),
             peakElevationDeg: Number(pass.peak_elevation_deg),
-            currentElevationDeg: currentElevation,
             eventStart: pass.event_start,
             eventEnd: pass.event_end,
             event_start: pass.event_start,
@@ -386,7 +371,7 @@ const CelestialPasses = ({
             stale: pass.stale ? 'Yes' : 'No',
             source: pass.source || '-',
         };
-    }), [passes, nowMs, currentElevationByTargetKey]);
+    }), [passes, nowMs]);
 
     const filteredRows = useMemo(() => {
         if (quickFilterPreset === 'live') {
@@ -472,15 +457,6 @@ const CelestialPasses = ({
                 if (value < 10.0) return 'passes-cell-warning';
                 if (value > 45.0) return 'passes-cell-success';
                 return '';
-            },
-        },
-        {
-            field: 'currentElevationDeg',
-            headerName: 'Current Elevation',
-            minWidth: 130,
-            valueFormatter: (value, row) => {
-                if (row?.status !== 'live') return '-';
-                return formatAngle(value);
             },
         },
         {
@@ -599,24 +575,17 @@ const CelestialPasses = ({
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <TitleBar
                 className={getClassNamesBasedOnGridEditing(gridEditable, ['window-title-bar'])}
-                sx={{
-                    bgcolor: 'background.titleBar',
-                    borderBottom: '1px solid',
-                    borderColor: 'border.main',
-                    height: 30,
-                    minHeight: 30,
-                    py: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                }}
+                sx={islandTitleBarCompactSx}
             >
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', height: '100%' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1 }}>
                         <Typography variant="subtitle2" sx={{ fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            Celestial Passes
+                            {t('celestial.passes_title', { defaultValue: 'Celestial Passes' })}
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                            ({rows.length} {rows.length === 1 ? 'pass' : 'passes'})
+                            ({rows.length} {rows.length === 1
+                                ? t('celestial.pass_label', { defaultValue: 'pass' })
+                                : t('celestial.passes_label', { defaultValue: 'passes' })})
                         </Typography>
                     </Box>
                     <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>

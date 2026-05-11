@@ -36,6 +36,7 @@ export const themeConfigs = {
             paper: '#1a1c1e',
             elevated: '#23262a',
             titleBar: '#171a1d',
+            appBar: '#272b30',
         },
         border: {
             main: '#383c42',
@@ -72,6 +73,7 @@ export const themeConfigs = {
             paper: '#181b1e',
             elevated: '#20252a',
             titleBar: '#14181c',
+            appBar: '#242d36',
         },
         border: {
             main: '#2a2f35',
@@ -97,27 +99,28 @@ export const themeConfigs = {
 
     light: {
         mode: 'light',
-        primary: { main: '#1565c0' },
-        secondary: { main: '#ad1457' },
+        primary: { main: '#1f6feb' },
+        secondary: { main: '#c43d82' },
         success: { main: '#2e7d32' },
         warning: { main: '#ed6c02' },
         error: { main: '#c62828' },
-        info: { main: '#0277bd' },
+        info: { main: '#0b74c8' },
         background: {
-            default: '#edf1f5',
+            default: '#f3f5f8',
             paper: '#ffffff',
-            elevated: '#e2e7ee',
-            titleBar: '#dce5ef',
+            elevated: '#eef2f7',
+            titleBar: '#e8edf4',
+            appBar: '#dbe8fb',
         },
         border: {
-            main: '#b5bec8',
-            light: '#c2cad4',
-            dark: '#98a3af',
+            main: '#c4ccd8',
+            light: '#d3d9e3',
+            dark: '#aeb8c6',
         },
         overlay: {
-            light: 'rgba(0, 0, 0, 0.10)',
-            medium: 'rgba(0, 0, 0, 0.18)',
-            dark: 'rgba(0, 0, 0, 0.4)',
+            light: 'rgba(15, 23, 42, 0.06)',
+            medium: 'rgba(15, 23, 42, 0.12)',
+            dark: 'rgba(15, 23, 42, 0.35)',
         },
         status: {
             connected: '#2e7d32',
@@ -143,6 +146,7 @@ export const themeConfigs = {
             paper: '#121212', // Very dark gray
             elevated: '#1e1e1e', // Slightly elevated
             titleBar: '#161316',
+            appBar: '#2a272c',
         },
         border: {
             main: '#2d2d2d',
@@ -179,6 +183,7 @@ export const themeConfigs = {
             paper: '#1a1d1a', // Grimy concrete
             elevated: '#252b25', // Rusted metal
             titleBar: '#2a3a2a',
+            appBar: '#334a33',
         },
         border: {
             main: '#3a4a3a', // Weathered steel
@@ -221,6 +226,7 @@ export const themeConfigs = {
             paper: '#0a0f12', // Hull interior
             elevated: '#121a20', // Conning tower
             titleBar: '#1a2a18',
+            appBar: '#263828',
         },
         border: {
             main: '#3a4520', // Phosphor grid

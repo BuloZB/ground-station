@@ -36,6 +36,8 @@ import {SatelliteAlt} from '@mui/icons-material';
 import HomeIcon from '@mui/icons-material/Home';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FilterCenterFocusIcon from '@mui/icons-material/FilterCenterFocus';
+import GpsFixedIcon from '@mui/icons-material/GpsFixed';
+import PanToolAltIcon from '@mui/icons-material/PanToolAlt';
 import SettingsIcon from '@mui/icons-material/Settings';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import {useDispatch, useSelector} from "react-redux";
@@ -59,6 +61,7 @@ import {
     fetchSatellite,
     getTrackingStateFromBackend,
     setSatelliteId,
+    setLockOnTarget,
     setTargetMapSetting,
 } from './target-slice.jsx';
 import {getMapCrsByTileLayerId, getTileLayerById} from "../common/tile-layers.jsx";
@@ -72,6 +75,7 @@ import {
     getClassNamesBasedOnGridEditing,
     humanizeAltitude,
     humanizeVelocity,
+    islandTitleBarSx,
 } from "../common/common.jsx";
 import TargetNumberIcon from '../common/target-number-icon.jsx';
 import { useTooltipOrientation } from '../common/tooltip-orientation.js';
@@ -351,6 +355,24 @@ const FullscreenMapButton = React.memo(function FullscreenMapButton() {
     );
 });
 
+const FollowTargetModeButton = React.memo(function FollowTargetModeButton({ lockOnTarget, onToggle }) {
+    const { t } = useTranslation('target');
+    const tooltipTitle = lockOnTarget
+        ? t('map_controls.switch_to_free_pan', { defaultValue: 'Switch to free pan mode' })
+        : t('map_controls.switch_to_lock_on_target', { defaultValue: 'Switch to lock-on-target mode' });
+
+    return (
+        <Fab
+            size="small"
+            color={lockOnTarget ? 'primary' : 'default'}
+            aria-label={tooltipTitle}
+            onClick={onToggle}
+        >
+            {lockOnTarget ? <GpsFixedIcon/> : <PanToolAltIcon/>}
+        </Fab>
+    );
+});
+
 const TargetMapContainer = ({}) => {
     const {socket} = useSocket();
     const dispatch = useDispatch();
@@ -367,6 +389,7 @@ const TargetMapContainer = ({}) => {
         showMoonIcon,
         showTerminatorLine,
         showTooltip,
+        lockOnTarget,
         terminatorLine,
         daySidePolygon,
         pastOrbitLineColor,
@@ -721,6 +744,7 @@ const TargetMapContainer = ({}) => {
     useEffect(() => {
         if (!isSatelliteTarget) return;
         if (!MapObject) return;
+        if (!lockOnTarget) return;
 
         const selectedNoradId = String(noradId ?? '');
         const loadedNoradId = String(satelliteDetails?.norad_id ?? '');
@@ -754,6 +778,7 @@ const TargetMapContainer = ({}) => {
         satellitePosition?.lon,
         satelliteCoverage,
         showSatelliteCoverage,
+        lockOnTarget,
     ]);
 
     useEffect(() => {
@@ -839,6 +864,13 @@ const TargetMapContainer = ({}) => {
     const handleOpenSettings = useCallback(() => {
         dispatch(setOpenMapSettingsDialog(true));
     }, [dispatch]);
+    const handleToggleLockOnTarget = useCallback(() => {
+        const nextLockOnTarget = !lockOnTarget;
+        dispatch(setLockOnTarget(nextLockOnTarget));
+        if (socket) {
+            dispatch(setTargetMapSetting({socket, key: 'target-map-settings'}));
+        }
+    }, [dispatch, lockOnTarget, socket]);
 
     if (!isSatelliteTarget) {
         const scopedTargetRows = Array.isArray(nonSatelliteScene?.celestial) ? nonSatelliteScene.celestial : [];
@@ -846,15 +878,10 @@ const TargetMapContainer = ({}) => {
         const nonSatelliteTitle = targetType === 'mission' ? 'Target Map · Mission' : 'Target Map · Body';
 
         return (
-            <>
+            <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <TitleBar
                     className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}
-                    sx={{
-                        bgcolor: 'background.titleBar',
-                        borderBottom: '1px solid',
-                        borderColor: 'border.main',
-                        backdropFilter: 'blur(10px)',
-                    }}
+                    sx={islandTitleBarSx}
                 >
                     <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%'}}>
                         <Box sx={{display: 'flex', alignItems: 'center', minWidth: 0, gap: 0.75}}>
@@ -881,7 +908,7 @@ const TargetMapContainer = ({}) => {
                         </Box>
                     </Box>
                 </TitleBar>
-                <Box sx={{ width: '100%', height: 'calc(100% - 30px)' }}>
+                <Box sx={{ width: '100%', flex: 1, minHeight: 0 }}>
                     {!nonSatellitePayload ? (
                         <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
                             <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center' }}>
@@ -909,20 +936,15 @@ const TargetMapContainer = ({}) => {
                         </Box>
                     )}
                 </Box>
-            </>
+            </Box>
         );
     }
 
     return (
-        <>
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <TitleBar
                 className={getClassNamesBasedOnGridEditing(gridEditable, ["window-title-bar"])}
-                sx={{
-                    bgcolor: 'background.titleBar',
-                    borderBottom: '1px solid',
-                    borderColor: 'border.main',
-                    backdropFilter: 'blur(10px)'
-                }}
+                sx={islandTitleBarSx}
             >
                 <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%'}}>
                     <Box sx={{display: 'flex', alignItems: 'center'}}>
@@ -945,25 +967,26 @@ const TargetMapContainer = ({}) => {
                     </Box>
                 </Box>
             </TitleBar>
-            {/* Leaflet CRS is immutable after map init, so remount when projection changes. */}
-            <MapContainer
-                key={`target-map-${selectedTileLayer.id}-${selectedTileLayer.projection || 'EPSG3857'}`}
-                className="target-map"
-                center={satellitePosition?.lat && satellitePosition?.lon ? [satellitePosition.lat, satellitePosition.lon] : [0, 0]}
-                crs={mapCrs}
-                zoom={mapZoomLevel}
-                style={{width: '100%', height: 'calc(100% - 60px)'}}
-                dragging={false}
-                scrollWheelZoom={false}
-                maxZoom={10}
-                minZoom={0}
-                whenReady={handleWhenReady}
-                zoomSnap={0.25}
-                zoomDelta={0.25}
-                keyboard={false}
-                bounceAtZoomLimits={false}
-                closePopupOnClick={false}
-            >
+            <Box sx={{ width: '100%', flex: 1, minHeight: 0, position: 'relative' }}>
+                {/* Leaflet CRS is immutable after map init, so remount when projection changes. */}
+                <MapContainer
+                    key={`target-map-${selectedTileLayer.id}-${selectedTileLayer.projection || 'EPSG3857'}`}
+                    className="target-map"
+                    center={satellitePosition?.lat && satellitePosition?.lon ? [satellitePosition.lat, satellitePosition.lon] : [0, 0]}
+                    crs={mapCrs}
+                    zoom={mapZoomLevel}
+                    style={{width: '100%', height: '100%'}}
+                    dragging={false}
+                    scrollWheelZoom={false}
+                    maxZoom={10}
+                    minZoom={0}
+                    whenReady={handleWhenReady}
+                    zoomSnap={0.25}
+                    zoomDelta={0.25}
+                    keyboard={false}
+                    bounceAtZoomLimits={false}
+                    closePopupOnClick={false}
+                >
                 <MapEventComponent handleSetMapZoomLevel={handleSetMapZoomLevel}/>
 
                 {selectedTileLayer.type === 'wms' ? (
@@ -976,6 +999,15 @@ const TargetMapContainer = ({}) => {
                 )}
 
                 <Box sx={{'& > :not(style)': {m: 1}}} style={{right: 5, top: 5, position: 'absolute'}}>
+                    <Tooltip
+                        title={lockOnTarget
+                            ? t('map_controls.lock_on_target_enabled', { defaultValue: 'Lock on target is enabled' })
+                            : t('map_controls.lock_on_target_disabled', { defaultValue: 'Free pan mode is enabled' })}
+                    >
+                        <span>
+                            <FollowTargetModeButton lockOnTarget={lockOnTarget} onToggle={handleToggleLockOnTarget}/>
+                        </span>
+                    </Tooltip>
                     <CenterHomeButton/>
                     <CenterMapButton/>
                     <FullscreenMapButton/>
@@ -1032,7 +1064,8 @@ const TargetMapContainer = ({}) => {
                 {showSatelliteCoverage ? currentSatellitesCoverage : null}
 
 
-                <MapArrowControls mapObject={MapObject}/>
+                {/* Arrow panning is only available in free-pan mode. */}
+                {!lockOnTarget ? <MapArrowControls mapObject={MapObject} verticalOffset={25}/> : null}
 
                 {showGrid && (
                     <CoordinateGrid
@@ -1045,14 +1078,15 @@ const TargetMapContainer = ({}) => {
                         showLabels={false}
                     />
                 )}
-            </MapContainer>
-            <MapStatusBar>
-                <SimpleTruncatedHtml
-                    className={"attribution"}
-                    htmlString={`<a href="https://leafletjs.com" title="A JavaScript library for interactive maps" target="_blank" rel="noopener noreferrer">Leaflet</a> | ${selectedTileLayer.attribution}`}
-                />
-            </MapStatusBar>
-        </>
+                    <MapStatusBar>
+                        <SimpleTruncatedHtml
+                            className={"attribution"}
+                            htmlString={`<a href="https://leafletjs.com" title="A JavaScript library for interactive maps" target="_blank" rel="noopener noreferrer">Leaflet</a> | ${selectedTileLayer.attribution}`}
+                        />
+                    </MapStatusBar>
+                </MapContainer>
+            </Box>
+        </Box>
     );
 };
 

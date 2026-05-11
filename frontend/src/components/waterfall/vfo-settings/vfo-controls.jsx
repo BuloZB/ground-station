@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { Box, ToggleButton, Tooltip } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
 import LCDFrequencyDisplay from '../../common/lcd-frequency-display.jsx';
 
@@ -26,26 +27,26 @@ export const VfoActivateButton = ({ vfoIndex, vfoActive, onVFOActiveChange }) =>
                     height: '32px',
                     fontSize: '0.8rem',
                     border: '1px solid',
-                    borderColor: 'rgba(255, 255, 255, 0.23)',
+                    borderColor: (theme) => theme.palette.border.main,
                     borderRadius: '4px',
                     color: 'text.secondary',
                     textTransform: 'none',
-                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    backgroundColor: (theme) => theme.palette.state.disabledBg,
                     transition: 'all 0.2s ease-in-out',
                     '&.Mui-selected': {
                         backgroundColor: 'success.main',
                         color: 'success.contrastText',
                         borderColor: 'success.main',
                         fontWeight: 600,
-                        boxShadow: '0 0 8px rgba(76, 175, 80, 0.4)',
+                        boxShadow: (theme) => `0 0 8px ${alpha(theme.palette.success.main, 0.4)}`,
                         '&:hover': {
                             backgroundColor: 'success.dark',
-                            boxShadow: '0 0 12px rgba(76, 175, 80, 0.6)',
+                            boxShadow: (theme) => `0 0 12px ${alpha(theme.palette.success.main, 0.6)}`,
                         }
                     },
                     '&:hover': {
-                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                        borderColor: 'rgba(255, 255, 255, 0.4)',
+                        backgroundColor: (theme) => theme.palette.state.hover,
+                        borderColor: (theme) => theme.palette.border.dark,
                     }
                 }}
             >
@@ -74,31 +75,39 @@ export const VfoMuteButton = ({ vfoIndex, vfoActive, vfoMuted, onMuteToggle }) =
                         height: '32px',
                         fontSize: '0.8rem',
                         border: '1px solid',
-                        borderColor: vfoMuted ? 'rgba(255, 152, 0, 0.5)' : 'rgba(255, 255, 255, 0.23)',
+                        borderColor: (theme) => vfoMuted
+                            ? alpha(theme.palette.warning.main, 0.6)
+                            : theme.palette.border.main,
                         borderRadius: '4px',
                         color: 'text.secondary',
                         textTransform: 'none',
-                        backgroundColor: vfoMuted ? 'rgba(255, 152, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                        backgroundColor: (theme) => vfoMuted
+                            ? alpha(theme.palette.warning.main, theme.palette.mode === 'dark' ? 0.16 : 0.12)
+                            : theme.palette.state.disabledBg,
                         transition: 'all 0.2s ease-in-out',
                         '&.Mui-selected': {
                             backgroundColor: 'primary.main',
                             color: 'primary.contrastText',
                             borderColor: 'primary.main',
                             fontWeight: 600,
-                            boxShadow: '0 0 8px rgba(33, 150, 243, 0.4)',
+                            boxShadow: (theme) => `0 0 8px ${alpha(theme.palette.primary.main, 0.4)}`,
                             '&:hover': {
                                 backgroundColor: 'primary.dark',
-                                boxShadow: '0 0 12px rgba(33, 150, 243, 0.6)',
+                                boxShadow: (theme) => `0 0 12px ${alpha(theme.palette.primary.main, 0.6)}`,
                             }
                         },
                         '&:hover': {
-                            backgroundColor: vfoMuted ? 'rgba(255, 152, 0, 0.2)' : 'rgba(255, 255, 255, 0.1)',
-                            borderColor: vfoMuted ? 'rgba(255, 152, 0, 0.7)' : 'rgba(255, 255, 255, 0.4)',
+                            backgroundColor: (theme) => vfoMuted
+                                ? alpha(theme.palette.warning.main, theme.palette.mode === 'dark' ? 0.24 : 0.18)
+                                : theme.palette.state.hover,
+                            borderColor: (theme) => vfoMuted
+                                ? alpha(theme.palette.warning.main, 0.8)
+                                : theme.palette.border.dark,
                         },
                         '&.Mui-disabled': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                            borderColor: 'rgba(255, 255, 255, 0.08)',
-                            color: 'rgba(255, 255, 255, 0.3)',
+                            backgroundColor: (theme) => theme.palette.state.disabledBg,
+                            borderColor: (theme) => theme.palette.border.dark,
+                            color: (theme) => theme.palette.state.disabled,
                             opacity: 0.5,
                         }
                     }}
@@ -127,7 +136,7 @@ export const VfoFrequencyDisplay = ({ frequency }) => {
                 sx={{
                     width: '100%',
                     fontFamily: "Monospace",
-                    color: '#2196f3',
+                    color: 'info.main',
                     alignItems: 'center',
                     textAlign: 'center',
                     justifyContent: 'center'

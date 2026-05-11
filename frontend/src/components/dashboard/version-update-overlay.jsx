@@ -1,11 +1,12 @@
 
 import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import { keyframes } from '@emotion/react';
-import { Backdrop, Box, Typography, Button, CircularProgress } from "@mui/material";
+import { Backdrop, Box, Typography, Button, useTheme } from "@mui/material";
 import { useSelector, useDispatch } from "react-redux";
 import { clearVersionChangeFlag } from './version-slice.jsx';
 import { useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next';
+import { alpha } from '@mui/material/styles';
 
 // Minimal animations
 const fadeIn = keyframes`
@@ -25,17 +26,13 @@ const COUNTDOWN_DURATION = 5; // 5 seconds
 function VersionUpdateOverlay() {
     const dispatch = useDispatch();
     const { t } = useTranslation('dashboard');
+    const theme = useTheme();
     const { hasVersionChanged, data } = useSelector((state) => state.version);
     const [countdown, setCountdown] = useState(COUNTDOWN_DURATION);
     const [intervalId, setIntervalId] = useState(null);
 
     useEffect(() => {
         if (hasVersionChanged) {
-            // Don't show overlay if version hasn't changed
-            if (!hasVersionChanged) {
-                return null;
-            }
-
             console.log('Version has changed!', data?.version);
 
             // Start the countdown interval
@@ -80,28 +77,30 @@ function VersionUpdateOverlay() {
     // Calculate progress for circular progress (100% at start, 0% at end)
     const progress = countdown <= 0 ? 0 : Math.max(0, (countdown / COUNTDOWN_DURATION) * 100);
 
-    // Determine color based on countdown
-    const statusColor = countdown > 2 ? '#4caf50' : countdown > 1 ? '#ff9800' : '#d32f2f';
+    const statusTone = countdown > 2 ? 'success' : countdown > 1 ? 'warning' : 'error';
+    const statusColor = theme.palette[statusTone].main;
 
     return (
         <Backdrop
             open={true}
             sx={{
                 zIndex: (theme) => theme.zIndex.drawer + 1,
-                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                backgroundColor: theme.palette.surface.scrim,
                 backdropFilter: 'blur(4px)'
             }}
         >
             <Box
                 sx={{
                     animation: `${fadeIn} 0.2s ease-out`,
-                    backgroundColor: '#2a2a2a',
-                    border: `1px solid ${statusColor}`,
+                    backgroundColor: theme.palette.statusSurface[statusTone],
+                    border: `1px solid ${alpha(statusColor, theme.palette.mode === 'dark' ? 0.6 : 0.45)}`,
                     borderRadius: 1,
                     padding: 3,
                     minWidth: 320,
                     maxWidth: 370,
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+                    boxShadow: theme.palette.mode === 'dark'
+                        ? '0 8px 24px rgba(0, 0, 0, 0.45)'
+                        : '0 8px 24px rgba(15, 23, 42, 0.16)',
                 }}
             >
                 {/* Header */}
@@ -116,7 +115,7 @@ function VersionUpdateOverlay() {
                         <Typography
                             variant="subtitle1"
                             sx={{
-                                color: '#ffffff',
+                                color: 'text.primary',
                                 fontWeight: 500,
                                 mb: 0.5,
                                 fontSize: '1rem'
@@ -127,7 +126,7 @@ function VersionUpdateOverlay() {
                         <Typography
                             variant="body2"
                             sx={{
-                                color: '#b0b0b0',
+                                color: 'text.secondary',
                                 fontSize: '0.875rem'
                             }}
                         >
@@ -146,7 +145,7 @@ function VersionUpdateOverlay() {
                         sx={{
                             width: '100%',
                             height: 2,
-                            backgroundColor: '#424242',
+                            backgroundColor: (theme) => theme.palette.state.disabledBg,
                             borderRadius: 1,
                             overflow: 'hidden',
                             position: 'relative',
@@ -189,15 +188,15 @@ function VersionUpdateOverlay() {
                         fullWidth
                         size="small"
                         sx={{
-                            color: '#b0b0b0',
-                            borderColor: '#424242',
+                            color: 'text.secondary',
+                            borderColor: 'border.main',
                             '&:hover': {
-                                borderColor: '#757575',
-                                backgroundColor: 'rgba(255, 255, 255, 0.05)'
+                                borderColor: 'border.dark',
+                                backgroundColor: (theme) => theme.palette.state.hover,
                             },
                             '&:disabled': {
-                                borderColor: '#333333',
-                                color: '#666666'
+                                borderColor: 'border.main',
+                                color: (theme) => theme.palette.state.disabled,
                             },
                             textTransform: 'none',
                             fontWeight: 500,
@@ -215,13 +214,14 @@ function VersionUpdateOverlay() {
                         size="small"
                         sx={{
                             backgroundColor: statusColor,
-                            color: '#ffffff',
+                            color: theme.palette.getContrastText(statusColor),
                             '&:hover': {
-                                backgroundColor: countdown > 2 ? '#45a049' : countdown > 1 ? '#f57c00' : '#d32f2f',
+                                backgroundColor: theme.palette[statusTone].dark,
                                 filter: 'brightness(0.9)'
                             },
                             '&:disabled': {
-                                backgroundColor: '#666666'
+                                backgroundColor: (theme) => theme.palette.state.disabled,
+                                color: theme.palette.mode === 'dark' ? '#0f172a' : '#ffffff',
                             },
                             textTransform: 'none',
                             fontWeight: 500,
@@ -237,7 +237,7 @@ function VersionUpdateOverlay() {
                 <Typography
                     variant="caption"
                     sx={{
-                        color: '#757575',
+                        color: 'text.secondary',
                         fontFamily: 'monospace',
                         fontSize: '0.75rem',
                         display: 'block',

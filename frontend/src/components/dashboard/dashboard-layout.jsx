@@ -130,6 +130,13 @@ const CustomAppBar = styled(AppBar, {
     shouldForwardProp: (prop) => prop !== 'open',
 })(({ theme, open }) => ({
     zIndex: theme.zIndex.drawer + 1,
+    ...(theme.palette.mode === 'dark' ? {
+        backgroundColor: `${theme.palette.background.appBar || theme.palette.surface.appBar} !important`,
+        backgroundImage: 'none',
+        '&.MuiAppBar-colorPrimary': {
+            backgroundColor: `${theme.palette.background.appBar || theme.palette.surface.appBar} !important`,
+        },
+    } : {}),
 }));
 
 function DashboardEditor() {
@@ -176,13 +183,11 @@ function DashboardEditor() {
                 </Stack>
             ) : (
                 <Tooltip title={t('layout.edit_layout')}>
-                    <IconButton size="small" onClick={handleEditClick} sx={{
-                        width: 40,
-                    }}>
-                        <BorderColorIcon sx={{
-                            color: theme.palette.mode === 'dark'
-                                ? theme.palette.primary.main
-                                : theme.palette.common.white
+                        <IconButton size="small" onClick={handleEditClick} sx={{
+                            width: 40,
+                        }}>
+                            <BorderColorIcon sx={{
+                            color: theme.palette.primary.main
                         }}/>
                     </IconButton>
                 </Tooltip>
@@ -664,7 +669,7 @@ function TimeDisplay() {
             <Typography variant="body2" sx={{fontSize: "0.65rem", fontWeight: "bold", fontFamily: "monospace"}}>
                 {formattedTime}
             </Typography>
-            <Typography variant="caption" sx={{fontSize: "0.65rem", fontFamily: "monospace", color: "#aaa"}}>
+            <Typography variant="caption" sx={{fontSize: "0.65rem", fontFamily: "monospace", color: "text.secondary"}}>
                 {isUTC ? "UTC" : timeZoneAbbr}
             </Typography>
         </Box>
@@ -899,6 +904,16 @@ export default function Layout() {
     const isActiveRoute = (segment) => {
         const currentPath = location.pathname.slice(1); // Remove leading slash
         if (segment === '' && currentPath === '') return true;
+        if (
+            segment === 'settings/settings' &&
+            (
+                currentPath.startsWith('settings/settings')
+                || currentPath.startsWith('settings/preferences')
+                || currentPath.startsWith('settings/integrations')
+            )
+        ) {
+            return true;
+        }
         if (segment && currentPath.startsWith(segment)) return true;
         return false;
     };
