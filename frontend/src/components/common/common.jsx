@@ -404,12 +404,13 @@ export function getTimeFromISO(isoString, timezone, locale) {
     });
 }
 
-export const MapArrowControls = function ({mapObject}) {
+export const MapArrowControls = function ({mapObject, verticalOffset = 0}) {
 
     return (
         <Box sx={{'& > :not(style)': {m: 1}}} style={{
             left: 10,
-            bottom: 10,
+            // Positive offset moves controls upward while keeping bottom anchoring behavior.
+            bottom: 10 + Number(verticalOffset || 0),
             position: 'absolute',
             display: 'flex',
             flexDirection: 'column',

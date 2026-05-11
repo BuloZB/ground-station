@@ -925,7 +925,7 @@ const SatelliteMapContainer = ({handleSetTrackingOnBackend}) => {
 
                 {/* Wrap MapArrowControls with a container to detect clicks */}
                 <div ref={arrowControlsRef}>
-                    <MapArrowControls mapObject={MapObject}/>
+                    <MapArrowControls mapObject={MapObject} verticalOffset={25}/>
                 </div>
 
                 {showGrid && (

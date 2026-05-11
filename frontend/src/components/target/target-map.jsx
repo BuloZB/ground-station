@@ -1065,7 +1065,7 @@ const TargetMapContainer = ({}) => {
 
 
                 {/* Arrow panning is only available in free-pan mode. */}
-                {!lockOnTarget ? <MapArrowControls mapObject={MapObject}/> : null}
+                {!lockOnTarget ? <MapArrowControls mapObject={MapObject} verticalOffset={25}/> : null}
 
                 {showGrid && (
                     <CoordinateGrid
