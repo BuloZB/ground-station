@@ -781,7 +781,15 @@ const PreferencesForm = ({ mode = 'preferences' }) => {
                             </SettingsSection>
                         ) : null}
 
-                        <SettingsActionFooter statusText={saveStatusText} sticky sx={{ mt: 1 }}>
+                        <SettingsActionFooter
+                            statusText={saveStatusText}
+                            sticky
+                            mobileInline
+                            sx={{
+                                mt: 1,
+                                backgroundColor: (theme) => getPreferenceCardBackground(theme),
+                            }}
+                        >
                             <Button
                                 variant="outlined"
                                 color="inherit"

@@ -341,7 +341,7 @@ export const getNavigation = ({ showCelestial = false } = {}) => {
         title: i18n.t('settings', { ns: 'navigation' }),
     },
     {
-        segment: 'settings/settings',
+        segment: 'settings/preferences',
         title: i18n.t('settings', { ns: 'navigation' }),
         icon: <SettingsIcon/>,
     },

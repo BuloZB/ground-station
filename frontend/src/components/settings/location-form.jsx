@@ -25,6 +25,7 @@ import {
     Stack,
     Typography,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import Grid from '@mui/material/Grid';
 import { useTranslation } from 'react-i18next';
 import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMapEvents } from 'react-leaflet';
@@ -99,6 +100,14 @@ const setupMarkerIcons = () => {
 
 setupMarkerIcons();
 const customIcon = createCustomIcon();
+
+const locationCardSx = {
+    backgroundColor: (theme) => (
+        theme.palette.mode === 'dark'
+            ? alpha(theme.palette.grey[700], 0.18)
+            : alpha(theme.palette.grey[100], 0.9)
+    ),
+};
 
 function MapClickHandler({ onClick }) {
     useMapEvents({ click: onClick });
@@ -379,6 +388,7 @@ const LocationPage = () => {
                                 description={t('location.group_station_coordinates_help', {
                                     defaultValue: 'Current latitude/longitude and QTH locator for the selected station point.',
                                 })}
+                                sx={locationCardSx}
                             >
                                 {locationLoading && !hasLocation ? (
                                     <Stack spacing={1}>
@@ -415,6 +425,7 @@ const LocationPage = () => {
                                 description={t('location.group_station_metadata_help', {
                                     defaultValue: 'Derived location metadata from browser and external services.',
                                 })}
+                                sx={locationCardSx}
                             >
                                 <Grid container spacing={2} columns={12}>
                                     <Grid size={{ xs: 12, sm: 6 }}>
@@ -443,6 +454,7 @@ const LocationPage = () => {
                                 description={t('location.group_actions_help', {
                                     defaultValue: 'Quick tools for selecting and sharing station coordinates.',
                                 })}
+                                sx={locationCardSx}
                             >
                                 <Stack spacing={1.2}>
                                     <Button
@@ -497,6 +509,7 @@ const LocationPage = () => {
                             description={t('location.map_instruction', {
                                 defaultValue: 'Click anywhere on the map to set your station coordinates.',
                             })}
+                            sx={locationCardSx}
                         >
                             <Box
                                 sx={{

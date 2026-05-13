@@ -27,6 +27,7 @@ import {
     Stack,
     Typography,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { tabsClasses } from '@mui/material/Tabs';
 import StorageIcon from '@mui/icons-material/Storage';
 import DashboardCustomizeIcon from '@mui/icons-material/DashboardCustomize';
@@ -58,6 +59,17 @@ import {
 } from './maintenance/index.jsx';
 
 const TAB_QUERY_PARAM = 'mtab';
+
+const maintenanceSectionCardSx = {
+    p: 2,
+    borderColor: 'divider',
+    borderRadius: 1.5,
+    backgroundColor: (theme) => (
+        theme.palette.mode === 'dark'
+            ? alpha(theme.palette.grey[700], 0.18)
+            : alpha(theme.palette.grey[100], 0.9)
+    ),
+};
 
 const MaintenanceForm = () => {
     const { t } = useTranslation('settings');
@@ -263,10 +275,8 @@ const MaintenanceForm = () => {
                                 <Paper
                                     variant="outlined"
                                     sx={{
-                                        p: 2,
+                                        ...maintenanceSectionCardSx,
                                         height: '100%',
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
                                     }}
                                 >
                                     <GridLayoutStorageCard />
@@ -276,10 +286,8 @@ const MaintenanceForm = () => {
                                 <Paper
                                     variant="outlined"
                                     sx={{
-                                        p: 2,
+                                        ...maintenanceSectionCardSx,
                                         height: '100%',
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
                                     }}
                                 >
                                     <ReduxPersistentSettingsCard />
@@ -295,11 +303,7 @@ const MaintenanceForm = () => {
                             <Grid size={{ xs: 12, md: 12 }}>
                                 <Paper
                                     variant="outlined"
-                                    sx={{
-                                        p: 2,
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
-                                    }}
+                                    sx={maintenanceSectionCardSx}
                                 >
                                     <ReduxStateInspectorCard />
                                 </Paper>
@@ -314,11 +318,7 @@ const MaintenanceForm = () => {
                             <Grid size={{ xs: 12, md: 6 }}>
                                 <Paper
                                     variant="outlined"
-                                    sx={{
-                                        p: 2,
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
-                                    }}
+                                    sx={maintenanceSectionCardSx}
                                 >
                                     <ServiceControlCard />
                                 </Paper>
@@ -334,21 +334,13 @@ const MaintenanceForm = () => {
                                 <Stack spacing={2}>
                                     <Paper
                                         variant="outlined"
-                                        sx={{
-                                            p: 2,
-                                            borderColor: 'divider',
-                                            borderRadius: 1.5,
-                                        }}
+                                        sx={maintenanceSectionCardSx}
                                     >
                                         <TimeDriftCard />
                                     </Paper>
                                     <Paper
                                         variant="outlined"
-                                        sx={{
-                                            p: 2,
-                                            borderColor: 'divider',
-                                            borderRadius: 1.5,
-                                        }}
+                                        sx={maintenanceSectionCardSx}
                                     >
                                         <SocketInfoCard />
                                     </Paper>
@@ -358,21 +350,13 @@ const MaintenanceForm = () => {
                                 <Stack spacing={2}>
                                     <Paper
                                         variant="outlined"
-                                        sx={{
-                                            p: 2,
-                                            borderColor: 'divider',
-                                            borderRadius: 1.5,
-                                        }}
+                                        sx={maintenanceSectionCardSx}
                                     >
                                         <BrowserFeaturesCard />
                                     </Paper>
                                     <Paper
                                         variant="outlined"
-                                        sx={{
-                                            p: 2,
-                                            borderColor: 'divider',
-                                            borderRadius: 1.5,
-                                        }}
+                                        sx={maintenanceSectionCardSx}
                                     >
                                         <CanvasDebugCard />
                                     </Paper>
@@ -388,11 +372,7 @@ const MaintenanceForm = () => {
                             <Grid size={{ xs: 12 }}>
                                 <Paper
                                     variant="outlined"
-                                    sx={{
-                                        p: 2,
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
-                                    }}
+                                    sx={maintenanceSectionCardSx}
                                 >
                                     <DatabaseBackupCard />
                                 </Paper>
@@ -400,11 +380,7 @@ const MaintenanceForm = () => {
                             <Grid size={{ xs: 12 }}>
                                 <Paper
                                     variant="outlined"
-                                    sx={{
-                                        p: 2,
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
-                                    }}
+                                    sx={maintenanceSectionCardSx}
                                 >
                                     <TransmitterImportCard />
                                 </Paper>
@@ -419,11 +395,7 @@ const MaintenanceForm = () => {
                             <Grid size={{ xs: 12 }}>
                                 <Paper
                                     variant="outlined"
-                                    sx={{
-                                        p: 2,
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
-                                    }}
+                                    sx={maintenanceSectionCardSx}
                                 >
                                     <LibraryVersionsCard />
                                 </Paper>
@@ -446,11 +418,7 @@ const MaintenanceForm = () => {
                             <Grid size={{ xs: 12 }}>
                                 <Paper
                                     variant="outlined"
-                                    sx={{
-                                        p: 2,
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
-                                    }}
+                                    sx={maintenanceSectionCardSx}
                                 >
                                     <SessionSnapshotCard />
                                 </Paper>
@@ -465,11 +433,7 @@ const MaintenanceForm = () => {
                             <Grid size={{ xs: 12 }}>
                                 <Paper
                                     variant="outlined"
-                                    sx={{
-                                        p: 2,
-                                        borderColor: 'divider',
-                                        borderRadius: 1.5,
-                                    }}
+                                    sx={maintenanceSectionCardSx}
                                 >
                                     <EventLogConsoleCard />
                                 </Paper>

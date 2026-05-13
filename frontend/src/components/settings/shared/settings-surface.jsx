@@ -152,6 +152,7 @@ export const SettingsActionFooter = ({
     statusText,
     children,
     sticky = false,
+    mobileInline = false,
     sx,
 }) => {
     return (
@@ -171,15 +172,28 @@ export const SettingsActionFooter = ({
             }}
         >
             <Stack
-                direction={{ xs: 'column', sm: 'row' }}
+                direction={mobileInline ? 'row' : { xs: 'column', sm: 'row' }}
                 justifyContent="space-between"
-                alignItems={{ xs: 'flex-start', sm: 'center' }}
-                spacing={1.5}
+                alignItems={mobileInline ? 'center' : { xs: 'flex-start', sm: 'center' }}
+                spacing={mobileInline ? 1 : 1.5}
+                flexWrap={mobileInline ? 'wrap' : undefined}
+                useFlexGap={mobileInline}
             >
-                <Typography variant="body2" role="status" aria-live="polite">
+                <Typography
+                    variant="body2"
+                    role="status"
+                    aria-live="polite"
+                    sx={mobileInline ? { whiteSpace: 'nowrap' } : undefined}
+                >
                     {statusText}
                 </Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Stack
+                    direction="row"
+                    spacing={1}
+                    flexWrap="wrap"
+                    useFlexGap
+                    sx={mobileInline ? { ml: 'auto' } : undefined}
+                >
                     {children}
                 </Stack>
             </Stack>
