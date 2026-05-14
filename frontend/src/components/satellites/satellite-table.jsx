@@ -30,7 +30,6 @@ import {
     DialogContent,
     DialogTitle,
     FormControl,
-    FormControlLabel,
     OutlinedInput,
     InputAdornment,
     IconButton,
@@ -40,7 +39,6 @@ import {
     Select,
     Stack,
     TextField,
-    Checkbox,
     Tooltip,
     Typography,
 } from "@mui/material";
@@ -64,16 +62,14 @@ import {
     getFrequencyBand, getBandColor
 } from '../common/common.jsx';
 import {
+    fetchSatellite,
     fetchSatelliteGroups,
     fetchSatellites,
     searchSatellites,
-    submitOrEditSatellite,
     deleteSatellite,
     setSatGroupId,
     setSearchKeyword,
     setSelected,
-    setFormValues,
-    resetFormValues,
     setOpenDeleteConfirm,
     setOpenAddDialog,
     setClickedSatellite,
@@ -91,6 +87,7 @@ import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import FolderSharedOutlinedIcon from '@mui/icons-material/FolderSharedOutlined';
+import SatelliteEditDialog from "./satellite-edit-dialog.jsx";
 
 function Pagination({page, onPageChange, className}) {
     const apiRef = useGridApiContext();
@@ -125,7 +122,6 @@ const SatelliteTable = React.memo(function SatelliteTable() {
         searchKeyword,
         selected,
         loading,
-        formValues,
         openDeleteConfirm,
         openAddDialog,
         clickedSatellite,
@@ -133,9 +129,7 @@ const SatelliteTable = React.memo(function SatelliteTable() {
 
     const [localSearchValue, setLocalSearchValue] = useState('');
     const [transmittersDialogOpen, setTransmittersDialogOpen] = useState(false);
-    const [submitError, setSubmitError] = useState('');
-    const [submitErrorFields, setSubmitErrorFields] = useState({});
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editingSatellite, setEditingSatellite] = useState(null);
 
     const getGroupOptionIcon = (groupType) => {
         const normalizedType = String(groupType || '').toLowerCase();
@@ -151,15 +145,44 @@ const SatelliteTable = React.memo(function SatelliteTable() {
         return tzPref?.value || 'UTC';
     });
 
-    const handleEditRow = (satellite) => {
+    const latestEditRequestRef = React.useRef(0);
+
+    const hydrateSatelliteForEdit = useCallback((noradId, fallbackSatellite = null) => {
+        const parsedNoradId = Number(noradId);
+        if (Number.isNaN(parsedNoradId)) {
+            return;
+        }
+        const requestId = latestEditRequestRef.current + 1;
+        latestEditRequestRef.current = requestId;
+        dispatch(fetchSatellite({ socket, noradId: parsedNoradId }))
+            .unwrap()
+            .then((response) => {
+                if (latestEditRequestRef.current !== requestId) {
+                    return;
+                }
+                const details = response?.details || {};
+                const transmitters = Array.isArray(response?.transmitters)
+                    ? response.transmitters
+                    : (fallbackSatellite?.transmitters || []);
+                setEditingSatellite({
+                    ...fallbackSatellite,
+                    ...details,
+                    transmitters,
+                });
+            })
+            .catch(() => {
+                // Keep the optimistic row payload if fetch fails; dialog can still open.
+            });
+    }, [dispatch, socket]);
+
+    const handleEditRow = useCallback((satellite) => {
         if (!satellite) {
             return;
         }
-        setSubmitError('');
-        setSubmitErrorFields({});
-        dispatch(setFormValues({...satellite, id: satellite.norad_id}));
+        setEditingSatellite(satellite);
         dispatch(setOpenAddDialog(true));
-    };
+        hydrateSatelliteForEdit(satellite.norad_id, satellite);
+    }, [dispatch, hydrateSatelliteForEdit]);
 
     const handleViewSatellite = (noradId) => {
         if (!noradId) {
@@ -401,7 +424,7 @@ const SatelliteTable = React.memo(function SatelliteTable() {
 
     useEffect(() => {
         dispatch(fetchSatelliteGroups({socket}));
-    }, [dispatch]);
+    }, [dispatch, socket]);
 
     // Debounced search effect
     useEffect(() => {
@@ -452,10 +475,19 @@ const SatelliteTable = React.memo(function SatelliteTable() {
     };
 
 
+    const refreshSatellites = useCallback(() => {
+        if (searchKeyword && searchKeyword.length >= 3) {
+            dispatch(searchSatellites({socket, keyword: searchKeyword}));
+            return;
+        }
+        if (satGroupId) {
+            dispatch(fetchSatellites({socket, satGroupId}));
+        }
+    }, [dispatch, satGroupId, searchKeyword, socket]);
+
     const handleAddClick = () => {
-        dispatch(resetFormValues());
-        setSubmitError('');
-        setSubmitErrorFields({});
+        latestEditRequestRef.current += 1;
+        setEditingSatellite(null);
         dispatch(setOpenAddDialog(true));
     };
 
@@ -468,80 +500,20 @@ const SatelliteTable = React.memo(function SatelliteTable() {
         if (!satellite) {
             return;
         }
-        setSubmitError('');
-        setSubmitErrorFields({});
-        dispatch(setFormValues({...satellite, id: selectedId}));
-        dispatch(setOpenAddDialog(true));
+        handleEditRow(satellite);
     };
 
     const handleCloseDialog = () => {
-        if (isSubmitting) {
-            return;
-        }
-        setSubmitError('');
-        setSubmitErrorFields({});
+        latestEditRequestRef.current += 1;
+        setEditingSatellite(null);
         dispatch(setOpenAddDialog(false));
     };
 
-    const handleInputChange = (event) => {
-        const {name, value} = event.target;
-        if (submitError) {
-            setSubmitError('');
-            setSubmitErrorFields({});
-        }
-        dispatch(setFormValues({...formValues, [name]: value}));
-    };
-
-    const handleCheckboxChange = (event) => {
-        const {name, checked} = event.target;
-        dispatch(setFormValues({...formValues, [name]: checked}));
-    };
-
-    const refreshSatellites = () => {
-        if (searchKeyword && searchKeyword.length >= 3) {
-            dispatch(searchSatellites({socket, keyword: searchKeyword}));
-            return;
-        }
-        if (satGroupId) {
-            dispatch(fetchSatellites({socket, satGroupId}));
-        }
-    };
-
-    const handleSubmit = () => {
-        if (isSubmitDisabled) {
-            return;
-        }
-        if (isSubmitting) {
-            return;
-        }
-        setIsSubmitting(true);
-        setSubmitError('');
-        setSubmitErrorFields({});
-        const payload = {
-            ...formValues,
-            norad_id: formValues.norad_id === '' ? '' : Number(formValues.norad_id),
-        };
-        dispatch(submitOrEditSatellite({socket, formValues: payload}))
-            .unwrap()
-            .then(() => {
-                dispatch(setOpenAddDialog(false));
-                dispatch(resetFormValues());
-                refreshSatellites();
-            })
-            .catch((error) => {
-                const rawMessage = typeof error === 'string' ? error : (error?.message || String(error));
-                setSubmitError(rawMessage);
-                const requiredMatch = rawMessage.match(/Missing required field:\s*(\w+)/i);
-                if (requiredMatch) {
-                    setSubmitErrorFields({ [requiredMatch[1]]: true });
-                } else if (/norad/i.test(rawMessage)) {
-                    setSubmitErrorFields({ norad_id: true });
-                }
-            })
-            .finally(() => {
-                setIsSubmitting(false);
-            });
-    };
+    const handleSatelliteSaved = useCallback(() => {
+        dispatch(setOpenAddDialog(false));
+        setEditingSatellite(null);
+        refreshSatellites();
+    }, [dispatch, refreshSatellites]);
 
     const handleDeleteClick = () => {
         const deleteRequests = selected
@@ -559,15 +531,6 @@ const SatelliteTable = React.memo(function SatelliteTable() {
                 toast.error(`${t('satellite_database.failed_delete')}: ${error}`, {autoClose: 5000});
             });
     };
-
-    const validationErrors = {
-        name: !String(formValues.name || '').trim(),
-        norad_id: !formValues.id
-            && (formValues.norad_id === '' || formValues.norad_id === null || formValues.norad_id === undefined),
-        tle1: !String(formValues.tle1 || '').trim(),
-        tle2: !String(formValues.tle2 || '').trim(),
-    };
-    const isSubmitDisabled = Object.values(validationErrors).some(Boolean);
 
     return (
         <Box elevation={3} sx={{width: '100%', marginTop: 0}}>
@@ -902,240 +865,12 @@ const SatelliteTable = React.memo(function SatelliteTable() {
                     </Button>
                 </DialogActions>
             </Dialog>
-            <Dialog
+            <SatelliteEditDialog
                 open={openAddDialog}
                 onClose={handleCloseDialog}
-                fullWidth
-                maxWidth="md"
-                PaperProps={{
-                    sx: {
-                        bgcolor: 'background.paper',
-                        border: (theme) => `1px solid ${theme.palette.divider}`,
-                        borderRadius: 2,
-                    }
-                }}
-            >
-                <DialogTitle
-                    sx={{
-                        bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
-                        borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
-                        fontSize: '1.25rem',
-                        fontWeight: 'bold',
-                        py: 2.5,
-                    }}
-                >
-                    {formValues.id
-                        ? t('satellite_database.dialog_title_edit_name', {
-                            name: formValues.name || formValues.norad_id || '',
-                        })
-                        : t('satellite_database.dialog_title_add')}
-                </DialogTitle>
-                <DialogContent sx={{ bgcolor: 'background.paper', px: 3, py: 3 }}>
-                    <Stack spacing={2} sx={{ mt: 3 }}>
-                        {submitError ? (
-                            <Alert severity="error">
-                                <AlertTitle>
-                                    {formValues.id ? t('satellite_database.failed_update') : t('satellite_database.failed_add')}
-                                </AlertTitle>
-                                {submitError}
-                            </Alert>
-                        ) : null}
-                        <TextField
-                            label={t('satellite_database.name')}
-                            name="name"
-                            value={formValues.name || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            required
-                            size="small"
-                            error={Boolean(validationErrors.name || submitErrorFields.name)}
-                            disabled={isSubmitting}
-                            sx={{
-                                '& .MuiInputBase-root': {
-                                    bgcolor: validationErrors.name || submitErrorFields.name
-                                        ? 'rgba(244, 67, 54, 0.08)'
-                                        : 'transparent',
-                                },
-                            }}
-                        />
-                        <TextField
-                            label={t('satellite_database.norad_id')}
-                            name="norad_id"
-                            value={formValues.norad_id || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            required
-                            type="number"
-                            disabled={Boolean(formValues.id) || isSubmitting}
-                            size="small"
-                            error={Boolean(validationErrors.norad_id || submitErrorFields.norad_id)}
-                            sx={{
-                                '& .MuiInputBase-root': {
-                                    bgcolor: validationErrors.norad_id || submitErrorFields.norad_id
-                                        ? 'rgba(244, 67, 54, 0.08)'
-                                        : 'transparent',
-                                },
-                            }}
-                        />
-                        <TextField
-                            label={t('satellite_database.sat_id')}
-                            name="sat_id"
-                            value={formValues.sat_id || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                        <TextField
-                            label={t('satellite_database.status')}
-                            name="status"
-                            value={formValues.status || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                        <FormControlLabel
-                            control={
-                                <Checkbox
-                                    checked={Boolean(formValues.is_frequency_violator)}
-                                    onChange={handleCheckboxChange}
-                                    name="is_frequency_violator"
-                                    size="small"
-                                    disabled={isSubmitting}
-                                />
-                            }
-                            label={t('satellite_database.is_frequency_violator')}
-                        />
-                        <TextField
-                            label={t('satellite_database.tle1')}
-                            name="tle1"
-                            value={formValues.tle1 || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            required
-                            multiline
-                            minRows={2}
-                            size="small"
-                            error={Boolean(validationErrors.tle1 || submitErrorFields.tle1)}
-                            disabled={isSubmitting}
-                            sx={{
-                                '& .MuiInputBase-root': {
-                                    bgcolor: validationErrors.tle1 || submitErrorFields.tle1
-                                        ? 'rgba(244, 67, 54, 0.08)'
-                                        : 'transparent',
-                                },
-                            }}
-                        />
-                        <TextField
-                            label={t('satellite_database.tle2')}
-                            name="tle2"
-                            value={formValues.tle2 || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            required
-                            multiline
-                            minRows={2}
-                            size="small"
-                            error={Boolean(validationErrors.tle2 || submitErrorFields.tle2)}
-                            disabled={isSubmitting}
-                            sx={{
-                                '& .MuiInputBase-root': {
-                                    bgcolor: validationErrors.tle2 || submitErrorFields.tle2
-                                        ? 'rgba(244, 67, 54, 0.08)'
-                                        : 'transparent',
-                                },
-                            }}
-                        />
-                        <TextField
-                            label={t('satellite_database.operator')}
-                            name="operator"
-                            value={formValues.operator || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                        <TextField
-                            label={t('satellite_database.countries')}
-                            name="countries"
-                            value={formValues.countries || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                        <TextField
-                            label={t('satellite_database.name_other')}
-                            name="name_other"
-                            value={formValues.name_other || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                        <TextField
-                            label={t('satellite_database.alternative_name')}
-                            name="alternative_name"
-                            value={formValues.alternative_name || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                        <TextField
-                            label={t('satellite_database.website')}
-                            name="website"
-                            value={formValues.website || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                        <TextField
-                            label={t('satellite_database.image')}
-                            name="image"
-                            value={formValues.image || ''}
-                            onChange={handleInputChange}
-                            fullWidth
-                            size="small"
-                            disabled={isSubmitting}
-                        />
-                    </Stack>
-                </DialogContent>
-                <DialogActions
-                    sx={{
-                        bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
-                        borderTop: (theme) => `1px solid ${theme.palette.divider}`,
-                        px: 3,
-                        py: 2.5,
-                        gap: 2,
-                    }}
-                >
-                    <Button
-                        onClick={handleCloseDialog}
-                        variant="outlined"
-                        disabled={isSubmitting}
-                        sx={{
-                            borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400',
-                            '&:hover': {
-                                borderColor: (theme) => theme.palette.mode === 'dark' ? 'grey.600' : 'grey.500',
-                                bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
-                            },
-                        }}
-                    >
-                        {t('satellite_database.cancel')}
-                    </Button>
-                    <Button
-                        variant="contained"
-                        onClick={handleSubmit}
-                        color="success"
-                        disabled={isSubmitDisabled || isSubmitting}
-                    >
-                        {formValues.id ? t('satellite_database.edit') : t('satellite_database.submit')}
-                    </Button>
-                </DialogActions>
-            </Dialog>
+                satelliteData={editingSatellite}
+                onSaved={handleSatelliteSaved}
+            />
             <TransmittersDialog
                 open={transmittersDialogOpen}
                 onClose={handleCloseTransmitters}
