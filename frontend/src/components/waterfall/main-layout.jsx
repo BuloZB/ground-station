@@ -32,6 +32,7 @@ import {
 } from './waterfall-slice.jsx';
 import {useDispatch, useSelector} from "react-redux";
 import MainWaterfallDisplay from "./waterfall-island.jsx";
+import DecodedInsightsIsland from "./decoded-insights-island.jsx";
 import WaterfallSettings from "./settings-column.jsx";
 import TranscriptionSubtitles from "./transcription-subtitles.jsx";
 
@@ -43,7 +44,7 @@ export const handleSetGridEditableWaterfall = function (value) {
 };
 
 export const gridLayoutStoreName = 'waterfall-view-layouts';
-const LAYOUT_SCHEMA_VERSION = 3;
+const LAYOUT_SCHEMA_VERSION = 5;
 const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
 
 // load / save layouts from localStorage
@@ -118,7 +119,7 @@ const MainLayout = React.memo(function MainLayout() {
             "x": 0,
             "y": 0,
             "w": 10,
-            "h": 25,
+            "h": 20,
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
@@ -127,7 +128,16 @@ const MainLayout = React.memo(function MainLayout() {
             "x": 10,
             "y": 0,
             "w": 2,
-            "h": 25,
+            "h": 27,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "decoding",
+            "x": 0,
+            "y": 20,
+            "w": 10,
+            "h": 7,
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
@@ -150,6 +160,15 @@ const MainLayout = React.memo(function MainLayout() {
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "decoding",
+            "x": 0,
+            "y": 25,
+            "w": 10,
+            "h": 10,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }],
         "sm": [{
             "i": "waterfall",
@@ -166,6 +185,15 @@ const MainLayout = React.memo(function MainLayout() {
             "y": 22,
             "w": 6,
             "h": 14,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "decoding",
+            "x": 0,
+            "y": 36,
+            "w": 6,
+            "h": 10,
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
@@ -188,31 +216,40 @@ const MainLayout = React.memo(function MainLayout() {
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
-        }],
-        "xxs": [{
-            "w": 2,
-            "h": 22,
-            "x": 0,
-            "y": 13,
-            "i": "waterfall",
-            "moved": false,
-            "static": false,
-            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
-            "w": 2,
-            "h": 13,
-            "x": 0,
-            "y": 0,
-            "i": "settings",
-            "moved": false,
-            "static": false,
-            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
-        }, {
-            "w": 2,
-            "h": 9,
+            "i": "decoding",
             "x": 0,
             "y": 35,
-            "i": "rig-control",
+            "w": 2,
+            "h": 10,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }],
+        "xxs": [{
+            "i": "waterfall",
+            "x": 0,
+            "y": 0,
+            "w": 2,
+            "h": 20,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "settings",
+            "x": 0,
+            "y": 20,
+            "w": 2,
+            "h": 12,
+            "moved": false,
+            "static": false,
+            "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
+        }, {
+            "i": "decoding",
+            "x": 0,
+            "y": 32,
+            "w": 2,
+            "h": 10,
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
@@ -259,6 +296,9 @@ const MainLayout = React.memo(function MainLayout() {
                 ref={waterfallComponentSettingsRef}
                 playbackRemainingSecondsRef={playbackRemainingSecondsRef}
             />
+        </StyledIslandParentScrollbar>,
+        <StyledIslandParentScrollbar key="decoding">
+            <DecodedInsightsIsland />
         </StyledIslandParentScrollbar>,
     ], []);
 

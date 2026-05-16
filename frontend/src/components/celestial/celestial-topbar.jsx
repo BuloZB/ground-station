@@ -5,6 +5,7 @@ import {
     Button,
     Chip,
     FormControl,
+    FormHelperText,
     InputLabel,
     Dialog,
     DialogActions,
@@ -88,7 +89,6 @@ const DIALOG_TITLE_SX = {
     py: 2.5,
 };
 const DIALOG_CONTENT_SX = {
-    bgcolor: 'background.paper',
     px: 3,
     py: 3,
 };
@@ -784,6 +784,12 @@ const CelestialTopBar = ({
                                         freeSolo
                                         options={safeCatalogEntries}
                                         loading={catalogLoading}
+                                        sx={{
+                                            bgcolor: 'transparent',
+                                            '& .MuiInputBase-root': {
+                                                bgcolor: 'background.paper',
+                                            },
+                                        }}
                                         value={safeSelectedCatalogEntry}
                                         inputValue={safeTargetInputValue}
                                         isOptionEqualToValue={(option, value) =>
@@ -861,13 +867,9 @@ const CelestialTopBar = ({
                                                             />
                                                         </Stack>
                                                     </Stack>
-                                                    <Typography
-                                                        variant="caption"
-                                                        color="text.secondary"
-                                                        sx={{ fontFamily: 'monospace' }}
-                                                    >
+                                                    <FormHelperText sx={{ m: 0, mt: 0.15 }}>
                                                         {option?.command}{option?.agency ? ` · ${option.agency}` : ''}
-                                                    </Typography>
+                                                    </FormHelperText>
                                                 </Stack>
                                             </Box>
                                         )}

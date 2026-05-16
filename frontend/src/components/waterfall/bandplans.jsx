@@ -160,32 +160,40 @@ export const frequencyBands = [
         color: 'rgba(244,67,54,0.4)',
         textColor: '#ffffff'
     },
+    // GNSS ranges below follow current signal specs/reference RF envelopes.
     {
-        startFrequency: 1573420000,
-        endFrequency: 1577420000,
+        startFrequency: 1560075000,
+        endFrequency: 1590765000,
         name: 'GPS L1',
         color: 'rgba(0,200,83,0.4)',
         textColor: '#ffffff'
     },
     {
-        startFrequency: 1225600000,
-        endFrequency: 1229600000,
+        startFrequency: 1212255000,
+        endFrequency: 1242945000,
         name: 'GPS L2',
         color: 'rgba(0,121,255,0.4)',
         textColor: '#ffffff'
     },
     {
-        startFrequency: 1602000000,
-        endFrequency: 1616000000,
+        startFrequency: 1598062500,
+        endFrequency: 1605375000,
         name: 'GLONASS L1',
         color: 'rgba(255,152,0,0.4)',
         textColor: '#000000'
     },
     {
-        startFrequency: 1559000000,
-        endFrequency: 1569000000,
-        name: 'BeiDou B1',
+        startFrequency: 1559052000,
+        endFrequency: 1563044000,
+        name: 'BeiDou B1I',
         color: 'rgba(139,195,74,0.4)',
+        textColor: '#ffffff'
+    },
+    {
+        startFrequency: 1559052000,
+        endFrequency: 1591788000,
+        name: 'BeiDou B1C',
+        color: 'rgba(124,179,66,0.4)',
         textColor: '#ffffff'
     },
     {
@@ -196,8 +204,8 @@ export const frequencyBands = [
         textColor: '#ffffff'
     },
     {
-        startFrequency: 1575420000,
-        endFrequency: 1575420000,
+        startFrequency: 1560075000,
+        endFrequency: 1590765000,
         name: 'QZSS L1',
         color: 'rgba(0,150,136,0.4)',
         textColor: '#ffffff'
@@ -273,8 +281,8 @@ export const frequencyBands = [
         textColor: '#ffffff'
     },
     {
-        startFrequency: 1559000000,
-        endFrequency: 1592000000,
+        startFrequency: 1563144000,
+        endFrequency: 1587696000,
         name: 'Galileo E1',
         color: 'rgba(63,81,181,0.4)',
         textColor: '#ffffff'

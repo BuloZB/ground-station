@@ -25,6 +25,7 @@ from common.constants import DictKeys, QueueMessageTypes, SocketEvents
 from common.sdrconfig import SDRConfig
 from fft.processor import fft_processor_process
 from handlers.entities.filebrowser import emit_file_browser_state
+from pipeline.orchestration.gnsssatelliteresolver import GnssSatelliteResolver
 from pipeline.streaming.iqbroadcaster import IQBroadcaster
 from vfos.state import VFOManager
 from workers.rtlsdrworker import rtlsdr_worker_process
@@ -107,6 +108,33 @@ class ProcessLifecycleManager:
             self._trace = False
         # Per-(SDR, session, VFO) restart serialization locks
         self._restart_locks = {}
+        self.gnsssatelliteresolver = GnssSatelliteResolver(logger=self.logger)
+
+    async def _enrich_gnss_output(self, data):
+        """
+        Attach backend-resolved NORAD identity to GNSS decoder output messages.
+
+        This runs on the server-side queue fanout path so frontend consumers do not
+        need to perform per-satellite DB queries over Socket.IO.
+        """
+        if data.get("decoder_type") != "gnss":
+            return
+
+        output = data.get("output")
+        if not isinstance(output, dict):
+            return
+
+        try:
+            match = await self.gnsssatelliteresolver.resolve_from_output(output)
+        except Exception as exc:
+            self.logger.debug(f"GNSS NORAD enrichment failed: {exc}")
+            return
+
+        if not match:
+            return
+
+        output["satellite_norad_id"] = match["norad_id"]
+        output["satellite_name"] = match["name"]
 
     async def get_center_frequency(self, sdr_id):
         """
@@ -992,6 +1020,9 @@ class ProcessLifecycleManager:
 
                                 # Check if this is an internal session (automated observation)
                                 is_internal = VFOManager.is_internal_session(session_id)
+
+                                if data_type == "decoder-output":
+                                    await self._enrich_gnss_output(data)
 
                                 if is_internal:
                                     # Broadcast internal session decoder events to all clients

@@ -203,7 +203,7 @@ const SdrAccordion = ({
                                 onChange={onSDRChange}
                                 size="small"
                                 label={t('sdr.sdr_label')}>
-                                <MenuItem value="none">
+                                <MenuItem value="none" disabled={isStreaming}>
                                     {t('sdr.no_sdr_selected')}
                                 </MenuItem>
                                 {/* Local SDRs */}
@@ -259,7 +259,7 @@ const SdrAccordion = ({
                                 label={t('sdr.gain_db')}
                                 value={gainValues.length ? localGain : "none"}
                                 onChange={(e) => onGainChange(e.target.value)}>
-                                <MenuItem value="none">
+                                <MenuItem value="none" disabled={isStreaming}>
                                     {t('sdr.no_gain_selected')}
                                 </MenuItem>
                                 {gainValues.map(gain => (
@@ -309,7 +309,7 @@ const SdrAccordion = ({
                                                     onGainElementChange?.(name, nextValue);
                                                 }}
                                             >
-                                                <MenuItem value="none">
+                                                <MenuItem value="none" disabled={isStreaming}>
                                                     [not configured]
                                                 </MenuItem>
                                                 {options.map((option) => (
@@ -335,7 +335,7 @@ const SdrAccordion = ({
                                 value={sampleRateValues.includes(localSampleRate) ? localSampleRate : "none"}
                                 onChange={(e) => onSampleRateChange(e.target.value)}
                                 label={t('sdr.sample_rate')}>
-                                <MenuItem value="none">
+                                <MenuItem value="none" disabled={isStreaming}>
                                     {t('sdr.no_rate_selected')}
                                 </MenuItem>
                                 {sampleRateValues.map(rate => {
@@ -371,7 +371,7 @@ const SdrAccordion = ({
                                 value={antennasList.rx.includes(selectedAntenna) ? selectedAntenna : "none"}
                                 onChange={(e) => onAntennaChange(e.target.value)}
                                 label={t('sdr.antenna')}>
-                                <MenuItem value="none">
+                                <MenuItem value="none" disabled={isStreaming}>
                                     {t('sdr.no_antenna_selected')}
                                 </MenuItem>
                                 {antennasList.rx && antennasList.rx.map(antenna => (
@@ -409,7 +409,7 @@ const SdrAccordion = ({
                                     }
                                     onChange={(e) => onClockSourceChange?.(e.target.value)}
                                 >
-                                    <MenuItem value="none">
+                                    <MenuItem value="none" disabled={isStreaming}>
                                         [not configured]
                                     </MenuItem>
                                     {clockSourceOptions.map((source) => (
@@ -443,7 +443,7 @@ const SdrAccordion = ({
                                     }
                                     onChange={(e) => onTimeSourceChange?.(e.target.value)}
                                 >
-                                    <MenuItem value="none">
+                                    <MenuItem value="none" disabled={isStreaming}>
                                         [not configured]
                                     </MenuItem>
                                     {timeSourceOptions.map((source) => (
