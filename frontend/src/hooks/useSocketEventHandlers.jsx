@@ -60,6 +60,7 @@ import {
     setErrorMessage,
     setErrorDialogOpen,
     setStartStreamingLoading,
+    updateGnssFixLifecycleFromOutput,
 } from '../components/waterfall/waterfall-slice.jsx';
 import { updateAllVFOStates, setVFOProperty } from '../components/waterfall/vfo-marker/vfo-slice.jsx';
 import { fetchFiles } from '../components/filebrowser/filebrowser-slice.jsx';
@@ -682,6 +683,10 @@ export const useSocketEventHandlers = (socket) => {
                     break;
 
                 case 'decoder-output': {
+                    // Keep a persisted GNSS fix lifecycle timeline updated from live decoder output.
+                    if (data.decoder_type === 'gnss') {
+                        dispatch(updateGnssFixLifecycleFromOutput(data));
+                    }
                     store.dispatch(decoderOutputReceived(data));
 
                     // Show toast notification only for SSTV (image output)

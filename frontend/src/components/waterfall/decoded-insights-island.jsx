@@ -208,12 +208,14 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         gridEditable,
         decodedInsightsActiveTab,
         gnssSatellitesSortModel,
+        gnssFixLifecycle,
     } = useSelector(
         (state) => ({
             outputs: state.decoders.outputs,
             gridEditable: state.waterfall.gridEditable,
             decodedInsightsActiveTab: state.waterfall.decodedInsightsActiveTab,
             gnssSatellitesSortModel: state.waterfall.gnssSatellitesSortModel,
+            gnssFixLifecycle: state.waterfall.gnssFixLifecycle,
         }),
         shallowEqual
     );
@@ -447,72 +449,6 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         };
     }, [outputs]);
 
-    const fixLifecycle = useMemo(() => {
-        // Build a simple FIX <-> NO FIX timeline from GNSS messages that carry fix semantics.
-        const fixSignals = outputs
-            .filter((item) => item?.type === 'decoder-output' && item?.decoder_type === 'gnss')
-            .map((item) => ({
-                timestampMs: Number(item.timestamp) * 1000,
-                output: item.output || {},
-            }))
-            .filter((item) => Number.isFinite(item.timestampMs))
-            .map((item) => {
-                const output = item.output || {};
-                const eventType = String(output.event || '').toLowerCase();
-                const lat = toFiniteNumber(output.latitude);
-                const lon = toFiniteNumber(output.longitude);
-                const hasCoords = lat !== null && lon !== null;
-                const hasFixQualityField = output.fix_quality !== undefined
-                    && output.fix_quality !== null
-                    && String(output.fix_quality).trim() !== '';
-                const hasFixQuality = hasFixQualityField && String(output.fix_quality).trim() !== '0';
-                const isNmea = eventType === 'nmea' || eventType === 'nmea_gga' || eventType === 'nmea_rmc';
-                const isFixSignal = hasCoords || hasFixQualityField || isNmea;
-
-                if (!isFixSignal) {
-                    return null;
-                }
-
-                return {
-                    timestampMs: item.timestampMs,
-                    status: (hasCoords || hasFixQuality) ? 'FIX' : 'NO FIX',
-                };
-            })
-            .filter((item) => item !== null)
-            .sort((a, b) => a.timestampMs - b.timestampMs);
-
-        const lifecycle = {
-            currentStatus: 'NO DATA',
-            currentFixStartedAtMs: null,
-            lastFixAcquiredAtMs: null,
-            lastFixLostAtMs: null,
-            lastFixDurationMs: null,
-        };
-
-        // Track transitions so we can display elapsed timers for the current and previous fix periods.
-        for (const signal of fixSignals) {
-            if (signal.status === lifecycle.currentStatus) {
-                continue;
-            }
-
-            if (signal.status === 'FIX') {
-                lifecycle.currentStatus = 'FIX';
-                lifecycle.currentFixStartedAtMs = signal.timestampMs;
-                lifecycle.lastFixAcquiredAtMs = signal.timestampMs;
-                continue;
-            }
-
-            if (lifecycle.currentStatus === 'FIX' && lifecycle.currentFixStartedAtMs !== null) {
-                lifecycle.lastFixDurationMs = Math.max(0, signal.timestampMs - lifecycle.currentFixStartedAtMs);
-            }
-            lifecycle.currentStatus = 'NO FIX';
-            lifecycle.currentFixStartedAtMs = null;
-            lifecycle.lastFixLostAtMs = signal.timestampMs;
-        }
-
-        return lifecycle;
-    }, [outputs]);
-
     const gnssActivity = useMemo(() => {
         const activityOutputs = outputs
             .filter((item) => item?.type === 'decoder-output' && item?.decoder_type === 'gnss')
@@ -602,6 +538,14 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
     }, [satelliteRows, selectedSatelliteId]);
 
     const gnssGridRows = satelliteRows;
+    const fixLifecycle = useMemo(() => ({
+        currentStatus: gnssFixLifecycle?.currentStatus || 'NO DATA',
+        currentFixStartedAtMs: gnssFixLifecycle?.currentFixStartedAtMs ?? null,
+        lastFixAcquiredAtMs: gnssFixLifecycle?.lastFixAcquiredAtMs ?? null,
+        lastFixLostAtMs: gnssFixLifecycle?.lastFixLostAtMs ?? null,
+        lastFixDurationMs: gnssFixLifecycle?.lastFixDurationMs ?? null,
+        lastSignalAtMs: gnssFixLifecycle?.lastSignalAtMs ?? null,
+    }), [gnssFixLifecycle]);
     const displayFixStatus = fixLifecycle.currentStatus !== 'NO DATA'
         ? fixLifecycle.currentStatus
         : receiverFix.status;
@@ -942,7 +886,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                         {`Pos: ${receiverFix.latitude !== null && receiverFix.longitude !== null ? `${receiverFix.latitude.toFixed(6)}, ${receiverFix.longitude.toFixed(6)}` : '-'} | Alt: ${receiverFix.altitudeM !== null ? `${receiverFix.altitudeM.toFixed(1)} m` : '-'}`}
                                     </Typography>
                                     <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace' }}>
-                                        {`Fix now ${currentFixElapsedMs !== null ? formatElapsedDuration(currentFixElapsedMs) : '-'} | Acq ${acquiredAgoMs !== null ? `${formatElapsedDuration(acquiredAgoMs)} ago` : '-'} | Lost ${lostAgoMs !== null ? `${formatElapsedDuration(lostAgoMs)} ago` : '-'} | Prev ${fixLifecycle.lastFixDurationMs !== null ? formatElapsedDuration(fixLifecycle.lastFixDurationMs) : '-'}`}
+                                        {`Fix now ${currentFixElapsedMs !== null ? formatElapsedDuration(currentFixElapsedMs) : '-'} | Acq ${acquiredAgoMs !== null ? `${formatElapsedDuration(acquiredAgoMs)} ago` : '-'} | Lost ${lostAgoMs !== null ? `${formatElapsedDuration(lostAgoMs)} ago` : '-'} | Last fix ${fixLifecycle.lastFixDurationMs !== null ? formatElapsedDuration(fixLifecycle.lastFixDurationMs) : '-'}`}
                                     </Typography>
                                     <Typography
                                         variant="caption"
