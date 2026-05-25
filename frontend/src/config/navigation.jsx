@@ -20,7 +20,6 @@
 import PublicIcon from '@mui/icons-material/Public';
 import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import EngineeringIcon from '@mui/icons-material/Engineering';
-import AddHomeIcon from '@mui/icons-material/AddHome';
 import {SatelliteIcon, Satellite03Icon} from "hugeicons-react";
 import RadioIcon from '@mui/icons-material/Radio';
 import InfoIcon from '@mui/icons-material/Info';
@@ -344,11 +343,6 @@ export const getNavigation = ({ showCelestial = false } = {}) => {
         segment: 'settings/preferences',
         title: i18n.t('settings', { ns: 'navigation' }),
         icon: <SettingsIcon/>,
-    },
-    {
-        segment: 'settings/location',
-        title: i18n.t('location', { ns: 'navigation' }),
-        icon: <AddHomeIcon/>,
     },
     // {
     //     segment: 'settings/users',

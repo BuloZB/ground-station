@@ -216,6 +216,23 @@ export const decodersSlice = createSlice({
             state.outputs = [];
         },
 
+        // Clear GNSS outputs for a specific decoder stream restart.
+        clearGnssOutputsForDecoder: (state, action) => {
+            const { session_id, vfo } = action.payload || {};
+            state.outputs = state.outputs.filter((output) => {
+                if (output.decoder_type !== 'gnss') {
+                    return true;
+                }
+                if (session_id && output.session_id !== session_id) {
+                    return true;
+                }
+                if (vfo !== undefined && vfo !== null && output.vfo !== vfo) {
+                    return true;
+                }
+                return false;
+            });
+        },
+
         // Clear errors only
         clearDecoderErrors: (state) => {
             state.errors = [];
@@ -383,6 +400,7 @@ export const {
     clearDecoderSession,
     clearDecoderHistory,
     clearDecoderOutputs,
+    clearGnssOutputsForDecoder,
     clearDecoderErrors,
     deleteOutput,
     deleteOutputByFilename,

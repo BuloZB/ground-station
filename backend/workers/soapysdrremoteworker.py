@@ -353,6 +353,8 @@ def soapysdr_remote_worker_process(
         }
         last_stats_send = time.time()
         stats_send_interval = 1.0  # Send stats every second
+        stream_chunk_id = 0
+        stream_sample_index = 0
 
         # CPU and memory monitoring
         process = psutil.Process()
@@ -612,47 +614,37 @@ def soapysdr_remote_worker_process(
                         logger.warning(f"Frame {frame_counter}: no data returned (sr.ret=0)")
 
                     elif sr.ret < 0:
-                        # An error occurred, handle based on the error code
+                        # An error occurred, handle based on the error code.
+                        # On any read error, discard the partial frame to avoid stitching
+                        # non-contiguous IQ into one chunk (critical for GNSS tracking).
                         stats["read_errors"] += 1
 
-                        # If the error is a timeout or stream error, clear the buffer to prevent contamination
-                        if sr.ret in [-1, -2 - 3]:
-                            # Clear the buffer to prevent contamination
-                            buffer.fill(0)
-                            samples_buffer.fill(0)
-
-                            # Reset to skip this frame
-                            buffer_position = 0
-                            break
-
-                        # Print out some warning messages based on the error code
                         if sr.ret == -1:  # SOAPY_SDR_TIMEOUT
-                            # Timeout
                             logger.warning(f"Frame {frame_counter}: readStream timeout (sr.ret=-1)")
-
                         elif sr.ret == -2:  # SOAPY_SDR_STREAM_ERROR
                             logger.warning("Stream error detected (SOAPY_SDR_STREAM_ERROR)")
-
                         elif sr.ret == -3:  # SOAPY_SDR_CORRUPTION
                             logger.warning("Data corruption detected (SOAPY_SDR_CORRUPTION)")
-
                         elif sr.ret == -4:  # SOAPY_SDR_OVERFLOW
-                            # Overflow error - the internal ring buffer filled up because we didn't read fast enough
                             logger.warning(
                                 "Buffer overflow detected (SOAPY_SDR_OVERFLOW), samples may have been lost"
                             )
-
-                            # Short sleep to allow the internal buffers to clear
-                            # time.sleep(0.01)
-
                         elif sr.ret == -5:  # SOAPY_SDR_NOT_SUPPORTED
                             logger.warning("Operation not supported (SOAPY_SDR_NOT_SUPPORTED)")
-
                         elif sr.ret == -6:  # SOAPY_SDR_TIME_ERROR
                             logger.warning("Timestamp error detected (SOAPY_SDR_TIME_ERROR)")
-
                         elif sr.ret == -7:  # SOAPY_SDR_UNDERFLOW
                             logger.warning("Buffer underflow detected (SOAPY_SDR_UNDERFLOW)")
+                        else:
+                            logger.warning(
+                                f"Frame {frame_counter}: readStream error (sr.ret={sr.ret})"
+                            )
+
+                        # Clear partial data and restart frame accumulation.
+                        buffer.fill(0)
+                        samples_buffer.fill(0)
+                        buffer_position = 0
+                        break
 
                     else:
                         # Error occurred
@@ -680,6 +672,14 @@ def soapysdr_remote_worker_process(
                 # Enforce pipeline contract: workers publish complex64 IQ samples.
                 samples = require_complex64(samples, source="soapysdr-remote-worker")
 
+                # Match local Soapy worker behavior: remove per-chunk DC offset bias.
+                samples = remove_dc_offset(samples)
+                chunk_sample_count = len(samples)
+                chunk_id = stream_chunk_id
+                chunk_start_sample = stream_sample_index
+                stream_chunk_id += 1
+                stream_sample_index += chunk_sample_count
+
                 # Stream IQ data to consumers (FFT processor, demodulators, etc.)
                 # Broadcast to both queues so FFT and demodulation can work independently
                 if has_iq_consumers:
@@ -696,6 +696,9 @@ def soapysdr_remote_worker_process(
                             "offset_freq_hz": offset_freq,
                             "sample_rate": actual_sample_rate,
                             "timestamp": time.time(),
+                            "stream_chunk_id": chunk_id,
+                            "stream_start_sample": chunk_start_sample,
+                            "stream_sample_count": chunk_sample_count,
                             "config": {
                                 "fft_size": fft_size,
                                 "fft_window": fft_window,
@@ -720,6 +723,9 @@ def soapysdr_remote_worker_process(
                                         "offset_freq_hz": offset_freq,
                                         "sample_rate": actual_sample_rate,
                                         "timestamp": time.time(),
+                                        "stream_chunk_id": chunk_id,
+                                        "stream_start_sample": chunk_start_sample,
+                                        "stream_sample_count": chunk_sample_count,
                                     }
                                     iq_queue_demod.put_nowait(demod_message)
                                     stats["iq_chunks_out"] += 1

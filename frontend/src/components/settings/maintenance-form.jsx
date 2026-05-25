@@ -71,6 +71,38 @@ const maintenanceSectionCardSx = {
     ),
 };
 
+const getMaintenanceTabsSx = (theme) => {
+    const isDark = theme.palette.mode === 'dark';
+    const fallbackDetailRow = isDark
+        ? { background: '#24292f', selected: '#323942' }
+        : { background: '#edf2f8', selected: '#ffffff' };
+
+    const detailRow = theme.palette.settingsTabs?.detailRow || {};
+    const borderColor = theme.palette.settingsTabs?.border
+        || (isDark ? '#50565f' : '#c5cfdd');
+
+    return {
+        backgroundColor: detailRow.background || fallbackDetailRow.background,
+        borderBottom: `1px solid ${borderColor}`,
+        '& .MuiTabs-indicator': {
+            display: 'none',
+        },
+        '& .MuiTab-root': {
+            color: theme.palette.text.secondary,
+            minHeight: 48,
+            padding: '12px 16px',
+            transition: 'background-color 140ms ease, color 140ms ease',
+        },
+        '& .MuiTab-root.Mui-selected': {
+            backgroundColor: detailRow.selected || fallbackDetailRow.selected,
+            color: theme.palette.text.primary,
+        },
+        [`& .${tabsClasses.scrollButtons}`]: {
+            '&.Mui-disabled': { opacity: 0.3 },
+        },
+    };
+};
+
 const MaintenanceForm = () => {
     const { t } = useTranslation('settings');
     const location = useLocation();
@@ -133,8 +165,6 @@ const MaintenanceForm = () => {
             label: t('maintenance.tabs.system_control', { defaultValue: 'System Control' }),
             subtitle: t('maintenance.tabs.system_control_subtitle', { defaultValue: 'Service-level restart and control actions' }),
             icon: <PowerSettingsNewIcon fontSize="small" />,
-            risk: 'danger',
-            riskLabel: t('maintenance.tabs.risk_danger', { defaultValue: 'Danger' }),
         },
         {
             key: 'database',
@@ -142,8 +172,6 @@ const MaintenanceForm = () => {
             label: t('maintenance.tabs.database', { defaultValue: 'Database' }),
             subtitle: t('maintenance.tabs.database_subtitle', { defaultValue: 'Backup, restore, and transmitter import' }),
             icon: <StorageIcon fontSize="small" />,
-            risk: 'danger',
-            riskLabel: t('maintenance.tabs.risk_danger', { defaultValue: 'Danger' }),
         },
     ]), [t]);
 
@@ -186,17 +214,16 @@ const MaintenanceForm = () => {
     const activeTab = tabByKey[activeTabKey] || tabMeta[0];
 
     const renderTabLabel = (tab) => (
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 0.25 }}>
-            <Box sx={{ textAlign: 'left' }}>
-                <Typography
-                    variant="body2"
-                    sx={{
-                        lineHeight: 1.2,
-                        color: tab.risk === 'danger' ? 'warning.main' : 'text.primary',
-                    }}
-                >
-                    {tab.label}
-                </Typography>
+        <Stack direction="row" spacing={1} alignItems="center">
+            <Box
+                component="span"
+                sx={{
+                    lineHeight: 1,
+                    color: tab.risk === 'danger' ? 'warning.main' : 'inherit',
+                    textAlign: 'left',
+                }}
+            >
+                {tab.label}
             </Box>
             {tab.risk === 'danger' && (
                 <Chip
@@ -241,21 +268,7 @@ const MaintenanceForm = () => {
                     scrollButtons
                     allowScrollButtonsMobile
                     aria-label={t('maintenance.tabs.aria', { defaultValue: 'maintenance tabs' })}
-                    sx={{
-                        borderBottom: 1,
-                        borderColor: 'divider',
-                        mb: 1,
-                        '& .MuiTabs-indicator': {
-                            display: 'none',
-                        },
-                        '& .MuiTab-root.Mui-selected': {
-                            backgroundColor: 'action.selected',
-                            color: 'text.primary',
-                        },
-                        [`& .${tabsClasses.scrollButtons}`]: {
-                            '&.Mui-disabled': { opacity: 0.3 },
-                        },
-                    }}
+                    sx={getMaintenanceTabsSx}
                 >
                     {tabMeta.map((tab) => (
                         <AntTab

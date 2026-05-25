@@ -36,6 +36,7 @@ import overviewSatTrackReducer from '../overview/overview-slice.jsx';
 import dashboardReducer from '../dashboard/dashboard-slice.jsx';
 import cameraReducer from '../hardware/camera-slice.jsx';
 import waterfallReducer from '../waterfall/waterfall-slice.jsx';
+import gnssReducer from '../waterfall/gnss-slice.jsx';
 import vfoReducer from '../waterfall/vfo-marker/vfo-slice.jsx';
 import sdrsReducer from '../hardware/sdr-slice.jsx';
 import versionReducer from "../dashboard/version-slice.jsx";
@@ -65,8 +66,14 @@ const waterfallPersistConfig = {
         'showLeftSideWaterFallAccessories', 'selectedAntenna', 'selectedSDRId', 'selectedOffsetMode',
         'selectedOffsetValue', 'fftAveraging', 'showRotatorDottedLines', 'autoScalePreset', 'expandedPanels',
         'packetsDrawerHeight', 'packetsDrawerOpen', 'showNeighboringTransmitters', 'showBookmarkSources',
-        'decodedInsightsActiveTab', 'gnssSatellitesSortModel',
         'sdrSettingsById']
+};
+
+// Persist GNSS UI preferences only (not live lifecycle summary).
+const gnssPersistConfig = {
+    key: 'gnss',
+    storage,
+    whitelist: ['decodedInsightsActiveTab', 'gnssSatellitesSortModel']
 };
 
 // Persist configuration for VFO slice
@@ -285,6 +292,7 @@ const celestialDisplayPersistConfig = {
 
 // Wrap reducers with persistReducer
 const persistedWaterfallReducer = persistReducer(waterfallPersistConfig, waterfallReducer);
+const persistedGnssReducer = persistReducer(gnssPersistConfig, gnssReducer);
 const persistedVfoReducer = persistReducer(vfoPersistConfig, vfoReducer);
 const persistedRigsReducer = persistReducer(rigsPersistConfig, rigsReducer);
 const persistedRotatorsReducer = persistReducer(rotatorsPersistConfig, rotatorsReducer);
@@ -320,6 +328,7 @@ const persistedCelestialDisplayReducer = persistReducer(celestialDisplayPersistC
 export const store = configureStore({
     reducer: {
         waterfall: persistedWaterfallReducer,
+        gnss: persistedGnssReducer,
         vfo: persistedVfoReducer,
         rigs: persistedRigsReducer,
         rotators: persistedRotatorsReducer,

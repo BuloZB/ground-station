@@ -18,6 +18,7 @@ import asyncio
 import logging
 import multiprocessing
 import os
+from typing import Dict, Tuple
 
 import numpy as np
 
@@ -25,6 +26,7 @@ from common.constants import DictKeys, QueueMessageTypes, SocketEvents
 from common.sdrconfig import SDRConfig
 from fft.processor import fft_processor_process
 from handlers.entities.filebrowser import emit_file_browser_state
+from pipeline.orchestration.gnssfix import derive_gnss_fix_status_from_output, gnss_fix_stream_key
 from pipeline.orchestration.gnsssatelliteresolver import GnssSatelliteResolver
 from pipeline.streaming.iqbroadcaster import IQBroadcaster
 from vfos.state import VFOManager
@@ -108,14 +110,16 @@ class ProcessLifecycleManager:
             self._trace = False
         # Per-(SDR, session, VFO) restart serialization locks
         self._restart_locks = {}
+        # Track last known fix state per GNSS stream so backend can mark fix acquire/loss transitions.
+        self._gnss_fix_status_by_stream: Dict[Tuple[str, str], str] = {}
         self.gnsssatelliteresolver = GnssSatelliteResolver(logger=self.logger)
 
     async def _enrich_gnss_output(self, data):
         """
-        Attach backend-resolved NORAD identity to GNSS decoder output messages.
+        Attach backend-resolved GNSS metadata to decoder output messages.
 
         This runs on the server-side queue fanout path so frontend consumers do not
-        need to perform per-satellite DB queries over Socket.IO.
+        need per-message DB queries or duplicate fix transition logic.
         """
         if data.get("decoder_type") != "gnss":
             return
@@ -124,17 +128,29 @@ class ProcessLifecycleManager:
         if not isinstance(output, dict):
             return
 
+        # Backend-authoritative fix status/transition marker used by the frontend lifecycle reducer.
+        fix_status = derive_gnss_fix_status_from_output(output)
+        if fix_status:
+            output["gnss_fix_status"] = fix_status
+            stream_key = gnss_fix_stream_key(data)
+            previous_status = self._gnss_fix_status_by_stream.get(stream_key)
+            status_changed = previous_status != fix_status
+            output["gnss_fix_status_changed"] = status_changed
+            if status_changed:
+                output["gnss_fix_transition"] = "acquired" if fix_status == "FIX" else "lost"
+            else:
+                output.pop("gnss_fix_transition", None)
+            self._gnss_fix_status_by_stream[stream_key] = fix_status
+
         try:
             match = await self.gnsssatelliteresolver.resolve_from_output(output)
         except Exception as exc:
             self.logger.debug(f"GNSS NORAD enrichment failed: {exc}")
             return
 
-        if not match:
-            return
-
-        output["satellite_norad_id"] = match["norad_id"]
-        output["satellite_name"] = match["name"]
+        if match:
+            output["satellite_norad_id"] = match["norad_id"]
+            output["satellite_name"] = match["name"]
 
     async def get_center_frequency(self, sdr_id):
         """
@@ -458,6 +474,8 @@ class ProcessLifecycleManager:
                 "decoders": {},  # Will store decoder threads per session (SSTV, AFSK, Morse, etc.)
                 "fft_stats": {},  # Latest stats from FFT processor
                 "device": sdr_device,  # Store device info for runtime snapshots
+                # Keep full applied SDR config for change detection in update_configuration().
+                "config": dict(config),
             }
 
             # Send initial configuration
@@ -629,12 +647,16 @@ class ProcessLifecycleManager:
 
         process_info = self.processes[sdr_id]
 
-        # Check if sample rate or center frequency is changing
+        # Check if sample rate or center frequency is changing.
+        # Compare against the effective full config (old config merged with incoming partial update)
+        # so gain-only patches never look like sample-rate/center-frequency changes.
         old_config = process_info.get("config", {})
+        effective_config = dict(old_config)
+        effective_config.update(config)
         old_sample_rate = old_config.get("sample_rate")
-        new_sample_rate = config.get("sample_rate")
+        new_sample_rate = effective_config.get("sample_rate")
         old_center_freq = old_config.get("center_freq")
-        new_center_freq = config.get("center_freq")
+        new_center_freq = effective_config.get("center_freq")
 
         # If sample rate OR center frequency changed, flush all queues
         # Note: Treat None -> value (or value -> None) as a change as well so that
@@ -709,8 +731,8 @@ class ProcessLifecycleManager:
         # Send configuration to the process
         process_info["config_queue"].put(config)
 
-        # Store the new config for future comparisons
-        process_info["config"] = config
+        # Store the full effective config for future comparisons.
+        process_info["config"] = effective_config
 
         self.logger.info(f"Sent configuration update to SDR process for device {sdr_id}")
 
@@ -1020,6 +1042,17 @@ class ProcessLifecycleManager:
 
                                 # Check if this is an internal session (automated observation)
                                 is_internal = VFOManager.is_internal_session(session_id)
+
+                                # Reset backend transition memory when a GNSS decoder reports terminal/non-tracking states.
+                                if (
+                                    data_type == "decoder-status"
+                                    and data.get("decoder_type") == "gnss"
+                                ):
+                                    status = str(data.get("status") or "").strip().lower()
+                                    if status in {"idle", "error", "closed"}:
+                                        self._gnss_fix_status_by_stream.pop(
+                                            gnss_fix_stream_key(data), None
+                                        )
 
                                 if data_type == "decoder-output":
                                     await self._enrich_gnss_output(data)

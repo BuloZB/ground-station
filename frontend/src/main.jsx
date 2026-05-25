@@ -119,6 +119,11 @@ const router = createBrowserRouter([
                         path: "settings",
                         children: [
                             {
+                                path: "backend",
+                                Component: SettingsTabSettings,
+                            },
+                            {
+                                // Backward-compatible alias for existing deep links/bookmarks.
                                 path: "settings",
                                 Component: SettingsTabSettings,
                             },

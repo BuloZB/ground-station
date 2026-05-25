@@ -66,6 +66,16 @@ async def update_vfo_parameters(
     old_vfo_state = vfomanager.get_vfo_state(sid, vfo_id) if vfo_id > 0 else None
     old_locked_transmitter_id = old_vfo_state.locked_transmitter_id if old_vfo_state else None
     old_parameters_enabled = old_vfo_state.parameters_enabled if old_vfo_state else True
+    # Track whether a decoder was already running before this VFO update.
+    # If the decoder is started within this same update call, we should not
+    # immediately force-restart it just because parametersEnabled transitioned
+    # from the default in-memory VFO state.
+    sdr_id_for_session = session_tracker.get_session_sdr(sid)
+    had_running_decoder_before_update = (
+        bool(process_manager.get_active_decoder(sdr_id_for_session, sid, vfo_id))
+        if (vfo_id > 0 and sdr_id_for_session)
+        else False
+    )
 
     # Extract decoder-specific parameters from incoming data (if present)
     # These are sent from the UI when user changes decoder parameters
@@ -210,21 +220,42 @@ async def update_vfo_parameters(
                 if not new_parameters_enabled:
                     # Parameters disabled - clear cache so decoder uses defaults
                     if override_key in _decoder_param_overrides_cache:
-                        logger.info(
-                            f"Custom parameters disabled for VFO {vfo_id} - clearing overrides and restarting decoder with defaults"
-                        )
+                        if had_running_decoder_before_update:
+                            logger.info(
+                                f"Custom parameters disabled for VFO {vfo_id} - clearing overrides and restarting decoder with defaults"
+                            )
+                        else:
+                            logger.info(
+                                f"Custom parameters disabled for VFO {vfo_id} - clearing overrides and using defaults for initial decoder start"
+                            )
                         del _decoder_param_overrides_cache[override_key]
                     else:
-                        logger.info(
-                            f"Custom parameters disabled for VFO {vfo_id} - restarting decoder with defaults"
-                        )
+                        if had_running_decoder_before_update:
+                            logger.info(
+                                f"Custom parameters disabled for VFO {vfo_id} - restarting decoder with defaults"
+                            )
+                        else:
+                            logger.info(
+                                f"Custom parameters disabled for VFO {vfo_id} - using defaults for initial decoder start"
+                            )
                 else:
                     # Parameters enabled - use cached overrides (if any)
-                    logger.info(
-                        f"Custom parameters enabled for VFO {vfo_id} - restarting decoder with custom values"
-                    )
+                    if had_running_decoder_before_update:
+                        logger.info(
+                            f"Custom parameters enabled for VFO {vfo_id} - restarting decoder with custom values"
+                        )
+                    else:
+                        logger.info(
+                            f"Custom parameters enabled for VFO {vfo_id} - using custom values for initial decoder start"
+                        )
 
-                await handle_vfo_decoder_state(vfo_state, sid, logger, force_restart=True)
+                if had_running_decoder_before_update:
+                    await handle_vfo_decoder_state(vfo_state, sid, logger, force_restart=True)
+                else:
+                    logger.debug(
+                        f"Skipping immediate restart for VFO {vfo_id} after parametersEnabled change "
+                        f"(no decoder was running before this update)"
+                    )
 
         # Check if decoder parameters changed (requires restart)
         # This handles cases where modulation parameters change (e.g., FSK baudrate, framing, etc.)

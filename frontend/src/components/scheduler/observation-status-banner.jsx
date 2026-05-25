@@ -455,6 +455,7 @@ export default function ObservationStatusBanner() {
                 </DialogTitle>
                 <DialogContent
                     sx={{
+                        pt: '24px !important',
                         bgcolor: (theme) => (
                             theme.palette.mode === 'dark'
                                 ? theme.palette.background.elevated

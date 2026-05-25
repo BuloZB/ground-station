@@ -61,6 +61,11 @@ import {
     setErrorDialogOpen,
     setStartStreamingLoading,
 } from '../components/waterfall/waterfall-slice.jsx';
+import {
+    resetGnssFixLifecycle,
+    updateGnssFixLifecycleFromStatus,
+    updateGnssFixLifecycleFromOutput,
+} from '../components/waterfall/gnss-slice.jsx';
 import { updateAllVFOStates, setVFOProperty } from '../components/waterfall/vfo-marker/vfo-slice.jsx';
 import { fetchFiles } from '../components/filebrowser/filebrowser-slice.jsx';
 import {
@@ -76,6 +81,7 @@ import {
     decoderStatusChanged,
     decoderProgressUpdated,
     decoderOutputReceived,
+    clearGnssOutputsForDecoder,
     setCurrentSessionId,
     cleanupStaleDecoders,
 } from '../components/decoders/decoders-slice.jsx';
@@ -376,6 +382,11 @@ export const useSocketEventHandlers = (socket) => {
         // SDR streaming status
         socket.on('sdr-status', (data) => {
             if (data['streaming'] === true) {
+                const wasStreaming = Boolean(store.getState()?.waterfall?.isStreaming);
+                if (!wasStreaming) {
+                    // Start of a new stream session: clear stale GNSS fix lifecycle status.
+                    store.dispatch(resetGnssFixLifecycle());
+                }
                 store.dispatch(setIsStreaming(true));
                 store.dispatch(setStartStreamingLoading(false));
             } else if (data['streaming'] === false) {
@@ -658,6 +669,16 @@ export const useSocketEventHandlers = (socket) => {
         socket.on('decoder-data', (data) => {
             switch (data.type) {
                 case 'decoder-status':
+                    // GNSS decoder restart: clear GNSS table/fix timeline so UI reflects a fresh session.
+                    if (data.decoder_type === 'gnss') {
+                        dispatch(updateGnssFixLifecycleFromStatus(data));
+                    }
+                    if (data.decoder_type === 'gnss' && String(data.status || '').toLowerCase() === 'starting') {
+                        store.dispatch(clearGnssOutputsForDecoder({
+                            session_id: data.session_id,
+                            vfo: data.vfo,
+                        }));
+                    }
                     store.dispatch(decoderStatusChanged({
                         session_id: data.session_id,
                         status: data.status,
@@ -682,6 +703,10 @@ export const useSocketEventHandlers = (socket) => {
                     break;
 
                 case 'decoder-output': {
+                    // Keep a persisted GNSS fix lifecycle timeline updated from live decoder output.
+                    if (data.decoder_type === 'gnss') {
+                        dispatch(updateGnssFixLifecycleFromOutput(data));
+                    }
                     store.dispatch(decoderOutputReceived(data));
 
                     // Show toast notification only for SSTV (image output)

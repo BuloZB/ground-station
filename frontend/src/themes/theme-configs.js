@@ -58,6 +58,21 @@ export const themeConfigs = {
             play: '#59d98b',
             stop: '#ff5d6c',
         },
+        settingsTabs: {
+            border: '#515861',
+            mainRow: {
+                background: '#2c3137',
+                selected: '#3a414a',
+            },
+            subRow: {
+                background: '#282d33',
+                selected: '#363d46',
+            },
+            detailRow: {
+                background: '#252a30',
+                selected: '#333a43',
+            },
+        },
     },
 
     'slate-blue': {
@@ -94,6 +109,21 @@ export const themeConfigs = {
         action: {
             play: '#3ecf8e',
             stop: '#ff6b6b',
+        },
+        settingsTabs: {
+            border: '#49515b',
+            mainRow: {
+                background: '#2a3139',
+                selected: '#39414b',
+            },
+            subRow: {
+                background: '#252c34',
+                selected: '#343c46',
+            },
+            detailRow: {
+                background: '#232931',
+                selected: '#313944',
+            },
         },
     },
 
@@ -132,6 +162,21 @@ export const themeConfigs = {
             play: '#2e7d32',
             stop: '#c62828',
         },
+        settingsTabs: {
+            border: '#c5cfdd',
+            mainRow: {
+                background: '#e6ebf3',
+                selected: '#f4f7fb',
+            },
+            subRow: {
+                background: '#eaf0f7',
+                selected: '#f7f9fc',
+            },
+            detailRow: {
+                background: '#edf2f8',
+                selected: '#ffffff',
+            },
+        },
     },
     night: {
         mode: 'dark',
@@ -167,6 +212,21 @@ export const themeConfigs = {
         action: {
             play: '#4caf50',
             stop: '#cf6679',
+        },
+        settingsTabs: {
+            border: '#484848',
+            mainRow: {
+                background: '#2a2a2a',
+                selected: '#3a3a3a',
+            },
+            subRow: {
+                background: '#252525',
+                selected: '#353535',
+            },
+            detailRow: {
+                background: '#222222',
+                selected: '#313131',
+            },
         },
     },
 
@@ -210,6 +270,21 @@ export const themeConfigs = {
         action: {
             play: '#6fb300',
             stop: '#8b2500',
+        },
+        settingsTabs: {
+            border: '#4e5751',
+            mainRow: {
+                background: '#2f3530',
+                selected: '#3e4640',
+            },
+            subRow: {
+                background: '#2a302b',
+                selected: '#39413b',
+            },
+            detailRow: {
+                background: '#252b26',
+                selected: '#343c36',
+            },
         },
     },
 
@@ -265,6 +340,21 @@ export const themeConfigs = {
         action: {
             play: '#88cc00',
             stop: '#ff3300',
+        },
+        settingsTabs: {
+            border: '#52584a',
+            mainRow: {
+                background: '#30352f',
+                selected: '#3f463d',
+            },
+            subRow: {
+                background: '#2b312b',
+                selected: '#3a4138',
+            },
+            detailRow: {
+                background: '#262c26',
+                selected: '#353d33',
+            },
         },
     },
 };

@@ -213,7 +213,7 @@ const ServiceControlCard = () => {
                 maxWidth="sm"
             >
                 <DialogTitle>{t('maintenance.confirm_restart_title')}</DialogTitle>
-                <DialogContent>
+                <DialogContent sx={{ pt: '24px !important' }}>
                     <Stack spacing={1.5}>
                         <Typography variant="body2">
                             {t('maintenance.confirm_restart_message')}

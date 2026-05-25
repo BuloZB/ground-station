@@ -18,7 +18,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Chip, Divider, Tooltip, Typography, useTheme } from '@mui/material';
+import { Box, Chip, Tooltip, Typography, useTheme } from '@mui/material';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import { alpha } from '@mui/material/styles';
 import { shallowEqual, useDispatch, useSelector } from 'react-redux';
@@ -31,21 +31,13 @@ import {
     WaterfallStatusBarPaper,
 } from '../common/common.jsx';
 import DecodedPacketsDrawer from './decoded-packets-drawer.jsx';
+import GnssFixQualityTimeline from './gnss-fix-quality-timeline.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDateTime, formatTime } from '../../utils/date-time.js';
 import {
     setDecodedInsightsActiveTab,
     setGnssSatellitesSortModel,
-} from './waterfall-slice.jsx';
-
-const CONSTELLATION_BY_CODE = {
-    G: 'GPS',
-    E: 'GALILEO',
-    R: 'GLONASS',
-    C: 'BEIDOU',
-    B: 'BEIDOU',
-    J: 'QZSS',
-};
+} from './gnss-slice.jsx';
 
 const CONSTELLATION_OPERATOR_META = {
     GPS: { flag: '🇺🇸', label: 'United States' },
@@ -55,105 +47,25 @@ const CONSTELLATION_OPERATOR_META = {
     GALILEO: { flag: '🇪🇺', label: 'European Union' },
 };
 
-function normalizeConstellation(value) {
-    if (!value) return '';
-    const raw = String(value).trim();
-    const upper = raw.toUpperCase();
-    if (CONSTELLATION_BY_CODE[upper]) {
-        return CONSTELLATION_BY_CODE[upper];
-    }
-    if (upper === 'GALILEO') return 'GALILEO';
-    if (upper === 'GLONASS') return 'GLONASS';
-    if (upper === 'BEIDOU') return 'BEIDOU';
-    if (upper === 'GPS') return 'GPS';
-    if (upper === 'QZSS') return 'QZSS';
-    return raw;
-}
-
-function parsePrnValue(value) {
-    if (value === null || value === undefined) return null;
-    const match = String(value).toUpperCase().match(/(\d{1,3})/);
-    if (!match) return null;
-    const parsed = Number(match[1]);
-    return Number.isFinite(parsed) ? parsed : null;
-}
-
-function extractChannel(output) {
-    if (output?.channel !== undefined && output?.channel !== null) {
-        const parsed = Number(output.channel);
-        return Number.isFinite(parsed) ? parsed : null;
-    }
-    const message = String(output?.message || '');
-    const match = message.match(/channel\s+(\d+)/i);
-    if (!match) return null;
-    const parsed = Number(match[1]);
-    return Number.isFinite(parsed) ? parsed : null;
-}
-
-function extractSatelliteIdentity(output) {
-    if (!output) return null;
-
-    const code = String(output.satellite_system || '').trim().toUpperCase();
-    const prnFromFields = parsePrnValue(output.satellite_prn);
-    if (code && Number.isFinite(prnFromFields)) {
-        const constellation = normalizeConstellation(code);
-        return {
-            constellation,
-            prn: prnFromFields,
-        };
-    }
-
-    const satelliteText = String(output.satellite || '');
-    const prnNameMatch = satelliteText.match(/([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
-    if (prnNameMatch) {
-        const parsedPrn = parsePrnValue(prnNameMatch[2]);
-        if (!Number.isFinite(parsedPrn)) {
-            return null;
-        }
-        return {
-            constellation: normalizeConstellation(prnNameMatch[1]),
-            prn: parsedPrn,
-        };
-    }
-
-    const message = String(output.message || '');
-    const acqMatch = message.match(/for satellite\s+([A-Z])\s+(\d+)/i);
-    if (acqMatch) {
-        return {
-            constellation: normalizeConstellation(acqMatch[1]),
-            prn: parsePrnValue(acqMatch[2]),
-        };
-    }
-
-    const trackingMatch = message.match(/for satellite\s+([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
-    if (trackingMatch) {
-        const parsedPrn = parsePrnValue(trackingMatch[2]);
-        if (!Number.isFinite(parsedPrn)) {
-            return null;
-        }
-        return {
-            constellation: normalizeConstellation(trackingMatch[1]),
-            prn: parsedPrn,
-        };
-    }
-
-    return null;
-}
-
-function getStateForEvent(eventType, message, fallbackState = 'detected') {
-    const normalizedMessage = String(message || '').toLowerCase();
-    if (eventType === 'acquisition') return 'acquired';
-    if (eventType === 'tracking' || eventType === 'nmea' || eventType === 'nmea_gga' || eventType === 'nmea_rmc') {
-        return 'tracking';
-    }
-    if (normalizedMessage.includes('loss of lock')) return 'lost';
-    if (normalizedMessage.includes('idle state')) return 'idle';
-    return fallbackState;
-}
-
 function toFiniteNumber(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatElapsedDuration(durationMs) {
+    if (!Number.isFinite(durationMs) || durationMs < 0) return '-';
+    const totalSeconds = Math.floor(durationMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+    }
+    return `${seconds}s`;
 }
 
 function getOperatorMetadata(constellation) {
@@ -192,19 +104,27 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         gridEditable,
         decodedInsightsActiveTab,
         gnssSatellitesSortModel,
+        gnssSatellitesById,
+        gnssReceiverSnapshot,
+        gnssActivitySnapshot,
+        gnssFixQualityTimeline,
+        gnssFixLifecycle,
     } = useSelector(
         (state) => ({
             outputs: state.decoders.outputs,
             gridEditable: state.waterfall.gridEditable,
-            decodedInsightsActiveTab: state.waterfall.decodedInsightsActiveTab,
-            gnssSatellitesSortModel: state.waterfall.gnssSatellitesSortModel,
+            decodedInsightsActiveTab: state.gnss.decodedInsightsActiveTab,
+            gnssSatellitesSortModel: state.gnss.gnssSatellitesSortModel,
+            gnssSatellitesById: state.gnss.gnssSatellitesById,
+            gnssReceiverSnapshot: state.gnss.receiverSnapshot,
+            gnssActivitySnapshot: state.gnss.activitySnapshot,
+            gnssFixQualityTimeline: state.gnss.gnssFixQualityTimeline,
+            gnssFixLifecycle: state.gnss.gnssFixLifecycle,
         }),
         shallowEqual
     );
     const activeTab = decodedInsightsActiveTab === 'gnss' ? 'gnss' : 'packets';
-    const gnssSortModel = Array.isArray(gnssSatellitesSortModel)
-        ? gnssSatellitesSortModel
-        : [{ field: 'lastSeen', sort: 'desc' }];
+    const gnssSortModel = gnssSatellitesSortModel;
 
     const formatTimestamp = useCallback((value) => {
         if (!value) return '-';
@@ -223,101 +143,13 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         });
     }, [timezone, locale]);
 
-    const { satelliteRows, gnssEventCount } = useMemo(() => {
-        const gnssOutputs = outputs
-            .filter((item) => item?.type === 'decoder-output' && item?.decoder_type === 'gnss')
-            .map((item) => ({
-                timestampMs: Number(item.timestamp) * 1000,
-                output: item.output || {},
-            }))
-            .filter((item) => Number.isFinite(item.timestampMs))
-            .sort((a, b) => a.timestampMs - b.timestampMs);
-
-        const rowsById = new Map();
-
-        for (const item of gnssOutputs) {
-            const output = item.output || {};
-            const identity = extractSatelliteIdentity(output);
-            if (!identity || !identity.constellation || !Number.isFinite(identity.prn)) {
-                continue;
-            }
-
-            const id = `${identity.constellation}-${identity.prn}`;
-            const eventType = String(output.event || 'event');
-            const message = String(output.message || '');
-            const eventState = getStateForEvent(eventType, message);
-            const channel = extractChannel(output);
-
-            if (!rowsById.has(id)) {
-                rowsById.set(id, {
-                    id,
-                    satelliteId: `${identity.constellation} ${String(identity.prn).padStart(2, '0')}`,
-                    constellation: identity.constellation,
-                    prn: identity.prn,
-                    state: eventState,
-                    eventCount: 0,
-                    acquisitionCount: 0,
-                    trackingCount: 0,
-                    nmeaCount: 0,
-                    firstSeen: item.timestampMs,
-                    lastSeen: item.timestampMs,
-                    lastChannel: channel,
-                    lastEvent: eventType,
-                    lastMessage: message || '-',
-                    latitude: null,
-                    longitude: null,
-                    altitudeM: null,
-                    fixQuality: null,
-                    matchedNorad: null,
-                    matchedName: '-',
-                    events: [],
-                });
-            }
-
-            const row = rowsById.get(id);
-            row.eventCount += 1;
-            row.firstSeen = Math.min(row.firstSeen, item.timestampMs);
-            row.lastSeen = Math.max(row.lastSeen, item.timestampMs);
-            row.lastChannel = channel ?? row.lastChannel;
-            row.lastEvent = eventType;
-            row.lastMessage = message || row.lastMessage;
-            row.state = eventState || row.state;
-
-            if (eventType === 'acquisition') row.acquisitionCount += 1;
-            if (eventType === 'tracking') row.trackingCount += 1;
-            if (eventType === 'nmea' || eventType === 'nmea_gga' || eventType === 'nmea_rmc') row.nmeaCount += 1;
-
-            if (output.latitude !== undefined && output.latitude !== null) row.latitude = output.latitude;
-            if (output.longitude !== undefined && output.longitude !== null) row.longitude = output.longitude;
-            if (output.altitude_m !== undefined && output.altitude_m !== null) row.altitudeM = output.altitude_m;
-            if (output.fix_quality !== undefined && output.fix_quality !== null) row.fixQuality = output.fix_quality;
-            const matchedNorad = toFiniteNumber(output.satellite_norad_id);
-            if (matchedNorad !== null) {
-                row.matchedNorad = matchedNorad;
-            }
-            if (String(output.satellite_name || '').trim()) {
-                row.matchedName = String(output.satellite_name).trim();
-            }
-
-            row.events.push({
-                timestampMs: item.timestampMs,
-                eventType,
-                state: eventState,
-                channel,
-                message: message || '-',
-            });
-        }
-
-        const rows = Array.from(rowsById.values()).sort((a, b) => b.lastSeen - a.lastSeen);
-        for (const row of rows) {
-            row.events.sort((a, b) => b.timestampMs - a.timestampMs);
-        }
-
-        return {
-            satelliteRows: rows,
-            gnssEventCount: gnssOutputs.length,
-        };
-    }, [outputs]);
+    const satelliteRows = useMemo(() => {
+        return Object.values(gnssSatellitesById || {}).sort((a, b) => {
+            const aSeen = Number(a?.lastSeen) || 0;
+            const bSeen = Number(b?.lastSeen) || 0;
+            return bSeen - aSeen;
+        });
+    }, [gnssSatellitesById]);
 
     const packetOutputCount = useMemo(() => {
         return outputs.filter(
@@ -371,65 +203,42 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
     }, [outputs, relativeNowMs]);
 
     const receiverFix = useMemo(() => {
-        const gnssOutputs = outputs
-            .filter((item) => item?.type === 'decoder-output' && item?.decoder_type === 'gnss')
-            .map((item) => ({
-                timestampMs: Number(item.timestamp) * 1000,
-                output: item.output || {},
-            }))
-            .filter((item) => Number.isFinite(item.timestampMs))
-            .sort((a, b) => b.timestampMs - a.timestampMs);
-
-        const fix = {
-            lastUpdateMs: null,
-            latitude: null,
-            longitude: null,
-            altitudeM: null,
-            fixQuality: null,
-            satellites: null,
-        };
-
-        for (const item of gnssOutputs) {
-            const output = item.output || {};
-            const eventType = String(output.event || '').toLowerCase();
-            const lat = toFiniteNumber(output.latitude);
-            const lon = toFiniteNumber(output.longitude);
-            const alt = toFiniteNumber(output.altitude_m);
-            const sats = toFiniteNumber(output.satellites);
-
-            const isNmea = eventType === 'nmea' || eventType === 'nmea_gga' || eventType === 'nmea_rmc';
-            const hasCoords = lat !== null && lon !== null;
-            if (fix.lastUpdateMs === null && (isNmea || hasCoords)) {
-                fix.lastUpdateMs = item.timestampMs;
-            }
-
-            if (fix.latitude === null && lat !== null) fix.latitude = lat;
-            if (fix.longitude === null && lon !== null) fix.longitude = lon;
-            if (fix.altitudeM === null && alt !== null) fix.altitudeM = alt;
-            if ((fix.fixQuality === null || fix.fixQuality === '') && output.fix_quality !== undefined && output.fix_quality !== null && String(output.fix_quality) !== '') {
-                fix.fixQuality = String(output.fix_quality);
-            }
-            if (fix.satellites === null && sats !== null) fix.satellites = sats;
-
-            if (
-                fix.lastUpdateMs !== null &&
-                fix.latitude !== null &&
-                fix.longitude !== null &&
-                fix.altitudeM !== null &&
-                fix.fixQuality !== null &&
-                fix.satellites !== null
-            ) {
-                break;
-            }
-        }
-
+        const fix = gnssReceiverSnapshot || {};
         const hasCoords = fix.latitude !== null && fix.longitude !== null;
         const hasFixQuality = fix.fixQuality !== null && fix.fixQuality !== '' && fix.fixQuality !== '0';
         return {
-            ...fix,
+            lastUpdateMs: fix.lastUpdateMs ?? null,
+            latitude: fix.latitude ?? null,
+            longitude: fix.longitude ?? null,
+            altitudeM: fix.altitudeM ?? null,
+            fixQuality: fix.fixQuality ?? null,
+            satellites: fix.satellites ?? null,
+            utcTime: fix.utcTime ?? null,
             status: hasCoords || hasFixQuality ? 'FIX' : (fix.lastUpdateMs ? 'NO FIX' : 'NO DATA'),
         };
-    }, [outputs]);
+    }, [gnssReceiverSnapshot]);
+
+    const gnssActivity = useMemo(() => {
+        const activity = gnssActivitySnapshot || {};
+        const lastSeenMs = activity.lastHeartbeatMs ?? null;
+        const packetsPerSec = toFiniteNumber(activity.packetsPerSec) || 0;
+        const monitorObsPerSec = toFiniteNumber(activity.monitorObsPerSec) || 0;
+        const lossOfLockTotal = toFiniteNumber(activity.lossOfLockTotal) || 0;
+        const lossOfLockDelta = toFiniteNumber(activity.lossOfLockDelta) || 0;
+        const fresh = lastSeenMs !== null && (relativeNowMs - lastSeenMs) <= 3500;
+        const active = fresh && (Boolean(activity.hasActivity) || packetsPerSec > 0 || monitorObsPerSec > 0);
+
+        return {
+            active,
+            heartbeatAlive: fresh,
+            lastSeenMs,
+            hasPvt: Boolean(activity.hasPvt),
+            packetsPerSec,
+            monitorObsPerSec,
+            lossOfLockTotal,
+            lossOfLockDelta,
+        };
+    }, [gnssActivitySnapshot, relativeNowMs]);
 
     const gnssStatusStats = useMemo(() => {
         let trackingSatCount = 0;
@@ -445,23 +254,13 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
             }
         }
 
-        // Keep a short moving window so operators can quickly tell whether GNSS events
-        // are still arriving without opening detailed logs.
-        const recentWindowStartMs = relativeNowMs - 60_000;
-        const recentEventCount = outputs.filter((item) => {
-            if (item?.type !== 'decoder-output' || item?.decoder_type !== 'gnss') return false;
-            const tsMs = Number(item?.timestamp) * 1000;
-            return Number.isFinite(tsMs) && tsMs >= recentWindowStartMs;
-        }).length;
-
         return {
             trackingSatCount,
             acquiredSatCount,
             lostSatCount,
-            recentEventCount,
             latestGnssEventMs,
         };
-    }, [outputs, relativeNowMs, satelliteRows]);
+    }, [satelliteRows]);
 
     useEffect(() => {
         if (!selectedSatelliteId || !satelliteRows.find((row) => row.id === selectedSatelliteId)) {
@@ -472,7 +271,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
     useEffect(() => {
         const interval = window.setInterval(() => {
             setRelativeNowMs(Date.now());
-        }, 5000);
+        }, 1000);
 
         return () => window.clearInterval(interval);
     }, []);
@@ -482,6 +281,53 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
     }, [satelliteRows, selectedSatelliteId]);
 
     const gnssGridRows = satelliteRows;
+    const fixLifecycle = useMemo(() => ({
+        currentStatus: gnssFixLifecycle?.currentStatus || 'NO DATA',
+        currentFixStartedAtMs: gnssFixLifecycle?.currentFixStartedAtMs ?? null,
+        lastFixAcquiredAtMs: gnssFixLifecycle?.lastFixAcquiredAtMs ?? null,
+        lastClosedFixAcquiredAtMs: gnssFixLifecycle?.lastClosedFixAcquiredAtMs ?? null,
+        lastFixLostAtMs: gnssFixLifecycle?.lastFixLostAtMs ?? null,
+        lastFixDurationMs: gnssFixLifecycle?.lastFixDurationMs ?? null,
+        lastSignalAtMs: gnssFixLifecycle?.lastSignalAtMs ?? null,
+        noFixSinceAtMs: gnssFixLifecycle?.noFixSinceAtMs ?? null,
+    }), [gnssFixLifecycle]);
+    const displayFixStatus = fixLifecycle.currentStatus !== 'NO DATA'
+        ? fixLifecycle.currentStatus
+        : receiverFix.status;
+    const currentFixElapsedMs = (displayFixStatus === 'FIX' && fixLifecycle.currentFixStartedAtMs !== null)
+        ? Math.max(0, relativeNowMs - fixLifecycle.currentFixStartedAtMs)
+        : null;
+    const noFixElapsedMs = (displayFixStatus !== 'FIX' && fixLifecycle.noFixSinceAtMs !== null)
+        ? Math.max(0, relativeNowMs - fixLifecycle.noFixSinceAtMs)
+        : null;
+    const acquiredAgoMs = fixLifecycle.lastFixAcquiredAtMs !== null
+        ? Math.max(0, relativeNowMs - fixLifecycle.lastFixAcquiredAtMs)
+        : null;
+    const lostAgoMs = fixLifecycle.lastFixLostAtMs !== null
+        ? Math.max(0, relativeNowMs - fixLifecycle.lastFixLostAtMs)
+        : null;
+    const lastFixAcquiredAgoMs = fixLifecycle.lastClosedFixAcquiredAtMs !== null
+        ? Math.max(0, relativeNowMs - fixLifecycle.lastClosedFixAcquiredAtMs)
+        : null;
+    const gnssHeaderStatusColor = displayFixStatus === 'FIX'
+        ? theme.palette.success.main
+        : displayFixStatus === 'NO FIX'
+            ? theme.palette.warning.main
+            : theme.palette.info.main;
+    const gnssRxStatusLabel = gnssActivity.active
+        ? `${gnssActivity.packetsPerSec.toFixed(1)} pkt/s`
+        : (gnssActivity.heartbeatAlive ? 'alive' : 'waiting');
+    const gnssRxStatusColor = gnssActivity.active
+        ? theme.palette.success.main
+        : gnssActivity.heartbeatAlive
+            ? theme.palette.info.main
+            : theme.palette.text.secondary;
+    const gnssFixStatusColor = displayFixStatus === 'FIX'
+        ? theme.palette.success.main
+        : displayFixStatus === 'NO FIX'
+            ? theme.palette.warning.main
+            : theme.palette.text.secondary;
+    const gnssFixStatusYesNo = displayFixStatus === 'FIX' ? 'YES' : 'NO';
 
     const gnssColumns = useMemo(() => ([
         {
@@ -534,6 +380,22 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
             },
         },
         {
+            field: 'prn',
+            headerName: 'PRN',
+            minWidth: 72,
+            flex: 0.45,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => {
+                const prn = toFiniteNumber(params.value);
+                return (
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                        {prn !== null ? String(Math.trunc(prn)).padStart(2, '0') : '-'}
+                    </Typography>
+                );
+            },
+        },
+        {
             field: 'state',
             headerName: 'State',
             minWidth: 95,
@@ -568,7 +430,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         },
         {
             field: 'acquisitionCount',
-            headerName: 'Acq',
+            headerName: 'Acqs',
             minWidth: 65,
             flex: 0.4,
             align: 'center',
@@ -583,6 +445,52 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
             headerAlign: 'center',
         },
         {
+            field: 'lastCn0DbHz',
+            headerName: 'C/N0',
+            minWidth: 95,
+            flex: 0.6,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => {
+                const value = toFiniteNumber(params.value);
+                let cn0Color = 'text.disabled';
+                if (value !== null) {
+                    if (value < 25) cn0Color = 'error.main';
+                    else if (value < 35) cn0Color = 'warning.main';
+                    else if (value < 45) cn0Color = 'info.main';
+                    else cn0Color = 'success.main';
+                }
+                return (
+                    <Typography
+                        variant="caption"
+                        sx={{
+                            color: cn0Color,
+                            fontFamily: 'monospace',
+                            fontWeight: value !== null ? 700 : 500,
+                        }}
+                    >
+                        {value !== null ? value.toFixed(1) : '-'}
+                    </Typography>
+                );
+            },
+        },
+        {
+            field: 'lastCarrierDopplerHz',
+            headerName: 'Doppler Hz',
+            minWidth: 115,
+            flex: 0.72,
+            align: 'center',
+            headerAlign: 'center',
+            renderCell: (params) => {
+                const value = toFiniteNumber(params.value);
+                return (
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                        {value !== null ? value.toFixed(1) : '-'}
+                    </Typography>
+                );
+            },
+        },
+        {
             field: 'lastSeen',
             headerName: 'Last Seen',
             minWidth: 170,
@@ -594,27 +502,6 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                     timezone={timezone}
                     locale={locale}
                 />
-            ),
-        },
-        {
-            field: 'lastMessage',
-            headerName: 'Last Message',
-            minWidth: 300,
-            flex: 2.1,
-            renderCell: (params) => (
-                <Typography
-                    variant="caption"
-                    sx={{
-                        color: 'text.secondary',
-                        fontFamily: 'monospace',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        width: '100%',
-                    }}
-                >
-                    {params.value}
-                </Typography>
             ),
         },
     ]), [locale, relativeNowMs, timezone]);
@@ -650,24 +537,28 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                     value="packets"
                     label={`PACKETS (${packetOutputCount})`}
                     sx={{
+                        '&.MuiTab-root': {
+                            fontSize: '0.68rem !important',
+                        },
                         minHeight: 30,
                         height: 30,
                         minWidth: 0,
                         px: 1.25,
                         py: 0.25,
-                        fontSize: '0.72rem',
                     }}
                 />
                 <AntTab
                     value="gnss"
                     label={`GNSS (${satelliteRows.length})`}
                     sx={{
+                        '&.MuiTab-root': {
+                            fontSize: '0.68rem !important',
+                        },
                         minHeight: 30,
                         height: 30,
                         minWidth: 0,
                         px: 1.25,
                         py: 0.25,
-                        fontSize: '0.72rem',
                     }}
                 />
             </AntTabs>
@@ -681,34 +572,77 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                         <WaterfallStatusBarPaper
                             elevation={0}
                             sx={{
-                                height: 28,
-                                minHeight: 28,
+                                height: 30,
+                                minHeight: 30,
                                 borderTop: `1px solid ${theme.palette.border.main}`,
                                 borderBottom: 'none',
                                 px: 1,
-                                gap: 0.65,
-                                flexWrap: 'wrap',
                                 overflow: 'hidden',
                             }}
                         >
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
-                                Packets
-                            </Typography>
-                            <Chip size="small" variant="outlined" label={`Decoded ${packetOutputCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`Decoders ${packetStatusStats.decoderTypeCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`Telemetry ${packetStatusStats.telemetryCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`Files ${packetStatusStats.fileOutputCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`1m ${packetStatusStats.recentPacketCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                                {`Last ${packetStatusStats.latestPacketMs ? formatTimestamp(packetStatusStats.latestPacketMs) : '-'}`}
-                            </Typography>
+                            <Box
+                                sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 0.5,
+                                    fontSize: '0.72rem',
+                                    fontFamily: 'monospace',
+                                    color: 'text.secondary',
+                                    width: '100%',
+                                    minWidth: 0,
+                                    overflowX: 'hidden',
+                                    overflowY: 'hidden',
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary', fontSize: '0.68rem' }}>
+                                    PKTS
+                                </Typography>
+                                <Box sx={{ opacity: 0.55 }}>•</Box>
+                                <Box sx={{ display: 'flex', gap: 0.45, flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
+                                    <Box component="span">dec: <Box component="span" sx={{ fontWeight: 700 }}>{packetOutputCount}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">types: <Box component="span" sx={{ fontWeight: 700 }}>{packetStatusStats.decoderTypeCount}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">tlm: <Box component="span" sx={{ fontWeight: 700 }}>{packetStatusStats.telemetryCount}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">files: <Box component="span" sx={{ fontWeight: 700 }}>{packetStatusStats.fileOutputCount}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">1m: <Box component="span" sx={{ fontWeight: 700 }}>{packetStatusStats.recentPacketCount}</Box></Box>
+                                </Box>
+                                <Typography
+                                    variant="caption"
+                                    sx={{
+                                        color: 'text.secondary',
+                                        whiteSpace: 'nowrap',
+                                        marginLeft: 'auto',
+                                        flex: '0 0 auto',
+                                        fontSize: '0.65rem',
+                                    }}
+                                >
+                                    {`last: ${packetStatusStats.latestPacketMs ? formatTimestamp(packetStatusStats.latestPacketMs) : '-'}`}
+                                </Typography>
+                            </Box>
                         </WaterfallStatusBarPaper>
                     </Box>
                 )}
 
                 {activeTab === 'gnss' && (
                     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' }}>
+                        {/* Keep GNSS content in three explicit columns: table, details/events, summary. */}
+                        <Box
+                            sx={{
+                                flex: 1,
+                                minHeight: 0,
+                                display: 'grid',
+                                gridTemplateColumns: {
+                                    xs: 'minmax(0, 1fr)',
+                                    md: 'minmax(0, 2.35fr) minmax(0, 1fr) minmax(0, 0.65fr)',
+                                },
+                                gridTemplateRows: 'minmax(0, 1fr)',
+                                overflow: 'hidden',
+                            }}
+                        >
                             <Box sx={{ flex: 1, minWidth: 0 }}>
                                 <DataGrid
                                     rows={gnssGridRows}
@@ -751,157 +685,326 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                 />
                             </Box>
 
-                            <Divider orientation="vertical" flexItem sx={{ borderColor: theme.palette.border.main }} />
+                            <Box
+                                sx={{
+                                    minWidth: 0,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    minHeight: 0,
+                                    borderLeft: { xs: 0, md: `1px solid ${theme.palette.border.main}` },
+                                    borderTop: { xs: `1px solid ${theme.palette.border.main}`, md: 0 },
+                                }}
+                            >
+                                <Box
+                                    sx={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        gap: 0.75,
+                                        px: 1.25,
+                                        py: 0.7,
+                                        borderBottom: `1px solid ${theme.palette.border.main}`,
+                                        backgroundColor: alpha(theme.palette.background.default, 0.45),
+                                    }}
+                                >
+                                    <Typography variant="caption" sx={{ color: 'text.primary', fontWeight: 700, fontSize: '0.7rem', lineHeight: 1.1 }}>
+                                        Satellite Details
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.1, maxWidth: '70%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {selectedSatellite ? selectedSatellite.satelliteId : 'No selection'}
+                                    </Typography>
+                                </Box>
+
+                                <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 1.25, py: 1 }}>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.7 }}>
+                                        {!selectedSatellite && (
+                                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                Select a satellite row to inspect its latest events.
+                                            </Typography>
+                                        )}
+
+                                        {selectedSatellite && (
+                                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8 }}>
+                                                <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                                                    {`${selectedSatellite.satelliteId} details`}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                    {`First seen: ${formatTimestamp(selectedSatellite.firstSeen)}`}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                    {`Last seen: ${formatTimestamp(selectedSatellite.lastSeen)}`}
+                                                </Typography>
+                                                {(selectedSatellite.matchedNorad !== null || selectedSatellite.matchedName !== '-') && (
+                                                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                        {`Resolved: ${selectedSatellite.matchedName !== '-' ? selectedSatellite.matchedName : 'Unknown'}${selectedSatellite.matchedNorad !== null ? ` (${selectedSatellite.matchedNorad})` : ''}`}
+                                                    </Typography>
+                                                )}
+                                                {(selectedSatellite.latitude !== null && selectedSatellite.longitude !== null) && (
+                                                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                        {`Position: ${selectedSatellite.latitude.toFixed(6)}, ${selectedSatellite.longitude.toFixed(6)}${selectedSatellite.altitudeM !== null ? ` alt ${selectedSatellite.altitudeM.toFixed(1)}m` : ''}`}
+                                                    </Typography>
+                                                )}
+                                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                    {`Signal: C/N0 ${toFiniteNumber(selectedSatellite.lastCn0DbHz) !== null ? toFiniteNumber(selectedSatellite.lastCn0DbHz).toFixed(1) : '-'} | Doppler ${toFiniteNumber(selectedSatellite.lastCarrierDopplerHz) !== null ? toFiniteNumber(selectedSatellite.lastCarrierDopplerHz).toFixed(1) : '-'} Hz | UTC ${selectedSatellite.lastUtcTime || '-'}`}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                    Recent events:
+                                                </Typography>
+                                                {(selectedSatellite.events || []).slice(0, 10).map((event, idx) => (
+                                                    <Typography
+                                                        key={`${selectedSatellite.id}-${event.timestampMs}-${idx}`}
+                                                        variant="caption"
+                                                        sx={{
+                                                            color: 'text.secondary',
+                                                            fontFamily: 'monospace',
+                                                            whiteSpace: 'nowrap',
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                        }}
+                                                    >
+                                                        {`${formatTimestamp(event.timestampMs)} | ${String(event.eventType).toUpperCase()} | ${event.message}${toFiniteNumber(event.cn0DbHz) !== null ? ` | C/N0 ${toFiniteNumber(event.cn0DbHz).toFixed(1)}` : ''}${toFiniteNumber(event.carrierDopplerHz) !== null ? ` | DOP ${toFiniteNumber(event.carrierDopplerHz).toFixed(1)}Hz` : ''}${event.utcTime ? ` | UTC ${event.utcTime}` : ''}`}
+                                                    </Typography>
+                                                ))}
+                                                {(selectedSatellite.events || []).length === 0 && (
+                                                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                        No events for this satellite yet.
+                                                    </Typography>
+                                                )}
+                                            </Box>
+                                        )}
+                                    </Box>
+                                </Box>
+                            </Box>
 
                             <Box
                                 sx={{
-                                    width: '36%',
-                                    minWidth: 320,
-                                    maxWidth: 460,
-                                    px: 1.25,
-                                    py: 1,
-                                    overflowY: 'auto',
+                                    minWidth: 0,
+                                    minHeight: 0,
+                                    borderLeft: { xs: 0, md: `1px solid ${theme.palette.border.main}` },
+                                    borderTop: { xs: `1px solid ${theme.palette.border.main}`, md: 0 },
+                                    display: 'flex',
+                                    flexDirection: 'column',
                                 }}
                             >
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8 }}>
-                                    <Box
-                                        sx={{
-                                            display: 'flex',
-                                            flexDirection: 'row',
-                                            alignItems: 'center',
-                                            gap: 0.75,
-                                            flexWrap: 'wrap',
-                                        }}
-                                    >
-                                        <Chip
-                                            size="small"
-                                            variant="outlined"
-                                            label={`Detected ${satelliteRows.length}`}
-                                            sx={{ height: 20, fontSize: '0.66rem' }}
-                                        />
-                                        <Chip
-                                            size="small"
-                                            variant="outlined"
-                                            label={`Events ${gnssEventCount}`}
-                                            sx={{ height: 20, fontSize: '0.66rem' }}
-                                        />
-                                        <Chip
-                                            size="small"
-                                            color={satelliteRows.length > 0 ? 'success' : 'default'}
-                                            variant={satelliteRows.length > 0 ? 'filled' : 'outlined'}
-                                            label={satelliteRows.length > 0 ? 'Active' : 'Waiting'}
-                                            sx={{ height: 20, fontSize: '0.66rem', fontWeight: 700 }}
-                                        />
-                                    </Box>
-
-                                    <Divider sx={{ borderColor: theme.palette.border.main }} />
-
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.55 }}>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-                                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
-                                                Receiver Fix
-                                            </Typography>
-                                            <Chip
-                                                size="small"
-                                                color={receiverFix.status === 'FIX' ? 'success' : receiverFix.status === 'NO FIX' ? 'warning' : 'default'}
-                                                variant={receiverFix.status === 'FIX' ? 'filled' : 'outlined'}
-                                                label={receiverFix.status}
-                                                sx={{ height: 18, fontSize: '0.63rem', fontWeight: 700 }}
-                                            />
-                                        </Box>
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                            {`Last update: ${receiverFix.lastUpdateMs ? formatTimestamp(receiverFix.lastUpdateMs) : '-'}`}
+                                <Box
+                                    sx={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 0.35,
+                                        px: 1.25,
+                                        py: 0.7,
+                                        backgroundColor: alpha(theme.palette.background.paper, 0.94),
+                                        backgroundImage: `linear-gradient(${alpha(gnssHeaderStatusColor, 0.08)}, ${alpha(gnssHeaderStatusColor, 0.08)})`,
+                                        backdropFilter: 'blur(6px)',
+                                        borderBottom: `1px solid ${theme.palette.border.main}`,
+                                        boxShadow: `0 8px 12px -12px ${alpha(theme.palette.common.black, 0.65)}`,
+                                        flex: 1,
+                                        minHeight: 0,
+                                        overflowY: 'auto',
+                                    }}
+                                >
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.75 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.primary', fontWeight: 700, fontSize: '0.7rem', lineHeight: 1.1 }}>
+                                            GNSS Summary
                                         </Typography>
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                            {`Position: ${receiverFix.latitude !== null && receiverFix.longitude !== null ? `${receiverFix.latitude.toFixed(6)}, ${receiverFix.longitude.toFixed(6)}` : '-'}`}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                            {`Altitude: ${receiverFix.altitudeM !== null ? `${receiverFix.altitudeM.toFixed(1)} m` : '-'}`}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                            {`Fix quality: ${receiverFix.fixQuality !== null ? receiverFix.fixQuality : '-'} | Satellites: ${receiverFix.satellites !== null ? receiverFix.satellites : '-'}`}
+                                        <Typography
+                                            variant="caption"
+                                            sx={{
+                                                fontSize: '0.68rem',
+                                                fontWeight: 700,
+                                                color: displayFixStatus === 'FIX'
+                                                    ? 'success.main'
+                                                    : displayFixStatus === 'NO FIX'
+                                                        ? 'warning.main'
+                                                        : 'text.secondary',
+                                                lineHeight: 1.1,
+                                            }}
+                                        >
+                                            {displayFixStatus}
                                         </Typography>
                                     </Box>
-
-                                    <Divider sx={{ borderColor: theme.palette.border.main }} />
-
-                                    {!selectedSatellite && (
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                            Select a satellite row to inspect its latest events.
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Detected satellites:
                                         </Typography>
-                                    )}
-
-                                    {selectedSatellite && (
-                                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8 }}>
-                                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
-                                                {`${selectedSatellite.satelliteId} details`}
-                                            </Typography>
-                                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                                {`First seen: ${formatTimestamp(selectedSatellite.firstSeen)}`}
-                                            </Typography>
-                                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                                {`Last seen: ${formatTimestamp(selectedSatellite.lastSeen)}`}
-                                            </Typography>
-                                            {(selectedSatellite.latitude !== null && selectedSatellite.longitude !== null) && (
-                                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                                    {`Position: ${selectedSatellite.latitude.toFixed(6)}, ${selectedSatellite.longitude.toFixed(6)}${selectedSatellite.altitudeM !== null ? ` alt ${selectedSatellite.altitudeM.toFixed(1)}m` : ''}`}
-                                                </Typography>
-                                            )}
-                                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                                {`Recent events:`}
-                                            </Typography>
-                                            {selectedSatellite.events.slice(0, 10).map((event, idx) => (
-                                                <Typography
-                                                    key={`${selectedSatellite.id}-${event.timestampMs}-${idx}`}
-                                                    variant="caption"
-                                                    sx={{
-                                                        color: 'text.secondary',
-                                                        fontFamily: 'monospace',
-                                                        whiteSpace: 'nowrap',
-                                                        overflow: 'hidden',
-                                                        textOverflow: 'ellipsis',
-                                                    }}
-                                                >
-                                                    {`${formatTimestamp(event.timestampMs)} | ${String(event.eventType).toUpperCase()} | ${event.message}`}
-                                                </Typography>
-                                            ))}
-                                        </Box>
-                                    )}
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontWeight: 700, marginLeft: 'auto', textAlign: 'right' }}>
+                                            {satelliteRows.length}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Fix quality:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontWeight: 700, marginLeft: 'auto', textAlign: 'right' }}>
+                                            {receiverFix.fixQuality !== null ? receiverFix.fixQuality : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Position:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {receiverFix.latitude !== null && receiverFix.longitude !== null ? `${receiverFix.latitude.toFixed(6)}, ${receiverFix.longitude.toFixed(6)}` : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Altitude:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {receiverFix.altitudeM !== null ? `${receiverFix.altitudeM.toFixed(1)} m` : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            UTC time:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {receiverFix.utcTime || '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Current fix duration:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {currentFixElapsedMs !== null ? formatElapsedDuration(currentFixElapsedMs) : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Time without fix:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {displayFixStatus === 'FIX' || noFixElapsedMs === null ? '-' : formatElapsedDuration(noFixElapsedMs)}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Fix acquired:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {acquiredAgoMs !== null ? `${formatElapsedDuration(acquiredAgoMs)} ago` : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Fix lost:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {lostAgoMs !== null ? `${formatElapsedDuration(lostAgoMs)} ago` : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Last fix acquired:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontFamily: 'monospace', marginLeft: 'auto', textAlign: 'right' }}>
+                                            {lastFixAcquiredAgoMs !== null ? `${formatElapsedDuration(lastFixAcquiredAgoMs)} ago` : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                            Last update:
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, marginLeft: 'auto', textAlign: 'right' }}>
+                                            {receiverFix.lastUpdateMs ? formatTimestamp(receiverFix.lastUpdateMs) : '-'}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ mt: 0.6 }}>
+                                        <GnssFixQualityTimeline
+                                            timeline={gnssFixQualityTimeline}
+                                            nowMs={relativeNowMs}
+                                        />
+                                    </Box>
                                 </Box>
                             </Box>
                         </Box>
                         <WaterfallStatusBarPaper
                             elevation={0}
                             sx={{
-                                height: 28,
-                                minHeight: 28,
+                                height: 30,
+                                minHeight: 30,
                                 borderTop: `1px solid ${theme.palette.border.main}`,
                                 borderBottom: 'none',
                                 px: 1,
-                                gap: 0.65,
-                                flexWrap: 'wrap',
                                 overflow: 'hidden',
                             }}
                         >
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
-                                GNSS
-                            </Typography>
-                            <Chip size="small" variant="outlined" label={`Satellites ${satelliteRows.length}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`Tracking ${gnssStatusStats.trackingSatCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`Acquired ${gnssStatusStats.acquiredSatCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`Lost ${gnssStatusStats.lostSatCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`Events ${gnssEventCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip size="small" variant="outlined" label={`1m ${gnssStatusStats.recentEventCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
-                            <Chip
-                                size="small"
-                                color={receiverFix.status === 'FIX' ? 'success' : receiverFix.status === 'NO FIX' ? 'warning' : 'default'}
-                                variant={receiverFix.status === 'FIX' ? 'filled' : 'outlined'}
-                                label={`Fix ${receiverFix.status}`}
-                                sx={{ height: 18, fontSize: '0.62rem', fontWeight: 700 }}
-                            />
-                            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                                {`Last ${gnssStatusStats.latestGnssEventMs ? formatTimestamp(gnssStatusStats.latestGnssEventMs) : '-'}`}
-                            </Typography>
+                            <Box
+                                sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 0.5,
+                                    fontSize: '0.72rem',
+                                    fontFamily: 'monospace',
+                                    color: 'text.secondary',
+                                    width: '100%',
+                                    minWidth: 0,
+                                    overflowX: 'hidden',
+                                    overflowY: 'hidden',
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary', fontSize: '0.68rem' }}>
+                                    GNSS
+                                </Typography>
+                                <Box sx={{ opacity: 0.55 }}>•</Box>
+                                <Box sx={{ display: 'flex', gap: 0.45, flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
+                                    <Box component="span">sat: <Box component="span" sx={{ fontWeight: 700 }}>{satelliteRows.length}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">trk: <Box component="span" sx={{ fontWeight: 700 }}>{gnssStatusStats.trackingSatCount}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">acq: <Box component="span" sx={{ fontWeight: 700 }}>{gnssStatusStats.acquiredSatCount}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">lost: <Box component="span" sx={{ fontWeight: 700 }}>{gnssStatusStats.lostSatCount}</Box></Box>
+                                    <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
+                                    <Box component="span">loss ev: <Box component="span" sx={{ fontWeight: 700 }}>{gnssActivity.lossOfLockTotal}</Box></Box>
+                                </Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.55, marginLeft: 'auto', flex: '0 0 auto' }}>
+                                    <Box
+                                        component="span"
+                                        sx={{
+                                            px: 0.7,
+                                            py: 0.15,
+                                            borderRadius: 0.75,
+                                            border: `1px solid ${alpha(gnssRxStatusColor, 0.35)}`,
+                                            backgroundColor: alpha(gnssRxStatusColor, 0.08),
+                                            color: gnssRxStatusColor,
+                                            fontWeight: 700,
+                                            fontSize: '0.66rem',
+                                        }}
+                                    >
+                                        {`rx: ${gnssRxStatusLabel}`}
+                                    </Box>
+                                    <Box
+                                        component="span"
+                                        sx={{
+                                            px: 0.7,
+                                            py: 0.15,
+                                            borderRadius: 0.75,
+                                            border: `1px solid ${alpha(gnssFixStatusColor, 0.35)}`,
+                                            backgroundColor: alpha(gnssFixStatusColor, 0.08),
+                                            color: gnssFixStatusColor,
+                                            fontWeight: 700,
+                                            fontSize: '0.66rem',
+                                        }}
+                                    >
+                                        {`fix: ${gnssFixStatusYesNo}`}
+                                    </Box>
+                                    <Typography
+                                        variant="caption"
+                                        sx={{
+                                            color: 'text.secondary',
+                                            whiteSpace: 'nowrap',
+                                            display: { xs: 'none', lg: 'inline' },
+                                            fontSize: '0.65rem',
+                                        }}
+                                    >
+                                        {`last: ${gnssStatusStats.latestGnssEventMs ? formatTimestamp(gnssStatusStats.latestGnssEventMs) : '-'}`}
+                                    </Typography>
+                                </Box>
+                            </Box>
                         </WaterfallStatusBarPaper>
                     </Box>
                 )}

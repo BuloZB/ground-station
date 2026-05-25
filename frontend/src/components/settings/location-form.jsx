@@ -21,8 +21,13 @@ import React, { useEffect } from 'react';
 import {
     Box,
     Button,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
     Skeleton,
     Stack,
+    TextField,
     Typography,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -123,6 +128,10 @@ const LocationPage = () => {
     const [cityLoading, setCityLoading] = React.useState(false);
     const [elevationLoading, setElevationLoading] = React.useState(false);
     const [savedState, setSavedState] = React.useState(null);
+    const [manualDialogOpen, setManualDialogOpen] = React.useState(false);
+    const [manualLatInput, setManualLatInput] = React.useState('');
+    const [manualLonInput, setManualLonInput] = React.useState('');
+    const [manualInputError, setManualInputError] = React.useState('');
     const mapRef = React.useRef(null);
 
     const {
@@ -343,6 +352,57 @@ const LocationPage = () => {
         }
     };
 
+    const handleOpenManualCoordinatesDialog = () => {
+        if (hasLocation) {
+            setManualLatInput(normalizedLocation.lat.toFixed(6));
+            setManualLonInput(normalizedLocation.lon.toFixed(6));
+        } else {
+            setManualLatInput('');
+            setManualLonInput('');
+        }
+        setManualInputError('');
+        setManualDialogOpen(true);
+    };
+
+    const handleCloseManualCoordinatesDialog = () => {
+        setManualInputError('');
+        setManualDialogOpen(false);
+    };
+
+    const handleApplyManualCoordinates = async () => {
+        const parsedLat = Number.parseFloat(manualLatInput.trim());
+        const parsedLon = Number.parseFloat(manualLonInput.trim());
+
+        // Validate user-entered decimal coordinates before hydrating map/location state.
+        if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
+            setManualInputError(t('location.manual_coordinates_invalid', {
+                defaultValue: 'Enter valid numeric latitude and longitude values.',
+            }));
+            return;
+        }
+
+        if (parsedLat < -90 || parsedLat > 90 || parsedLon < -180 || parsedLon > 180) {
+            setManualInputError(t('location.manual_coordinates_range_error', {
+                defaultValue: 'Latitude must be between -90 and 90, and longitude between -180 and 180.',
+            }));
+            return;
+        }
+
+        dispatch(setLocation({ lat: parsedLat, lon: parsedLon }));
+        dispatch(setQth(getMaidenhead(parsedLat, parsedLon)));
+        reCenterMap(parsedLat, parsedLon);
+
+        setManualLatInput(parsedLat.toFixed(6));
+        setManualLonInput(parsedLon.toFixed(6));
+        setManualInputError('');
+        setManualDialogOpen(false);
+
+        setCityLoading(true);
+        const city = await getNearestCity(parsedLat, parsedLon);
+        setNearestCity(city);
+        setCityLoading(false);
+    };
+
     const handleSetLocation = async () => {
         if (!canSave) return;
 
@@ -474,6 +534,17 @@ const LocationPage = () => {
                                         variant="outlined"
                                         color="primary"
                                         fullWidth
+                                        disabled={locationLoading || locationSaving}
+                                        aria-label={t('location.enter_coordinates', { defaultValue: 'Enter Coordinates' })}
+                                        onClick={handleOpenManualCoordinatesDialog}
+                                    >
+                                        {t('location.enter_coordinates', { defaultValue: 'Enter Coordinates' })}
+                                    </Button>
+
+                                    <Button
+                                        variant="outlined"
+                                        color="primary"
+                                        fullWidth
                                         disabled={!hasLocation}
                                         aria-label={t('location.copy_coordinates')}
                                         onClick={handleCopyCoordinates}
@@ -585,10 +656,20 @@ const LocationPage = () => {
                     </Grid>
                 </Grid>
 
-                <SettingsActionFooter statusText={statusLabel} sticky>
+                <SettingsActionFooter
+                    statusText={statusLabel}
+                    sticky
+                    mobileInline
+                    sx={{
+                        backgroundColor: (theme) => (
+                            theme.palette.mode === 'dark'
+                                ? alpha(theme.palette.grey[700], 0.18)
+                                : alpha(theme.palette.grey[100], 0.9)
+                        ),
+                    }}
+                >
                     <Button
                         variant="outlined"
-                        color="inherit"
                         disabled={!canReset}
                         onClick={handleResetLocation}
                     >
@@ -596,7 +677,6 @@ const LocationPage = () => {
                     </Button>
                     <Button
                         variant="contained"
-                        color="primary"
                         disabled={!canSave || !isDifferentFromSaved}
                         aria-label={t('location.save_location')}
                         onClick={handleSetLocation}
@@ -607,6 +687,68 @@ const LocationPage = () => {
                     </Button>
                 </SettingsActionFooter>
             </Stack>
+
+            <Dialog
+                open={manualDialogOpen}
+                onClose={handleCloseManualCoordinatesDialog}
+                fullWidth
+                maxWidth="xs"
+                PaperProps={{
+                    component: 'form',
+                    onSubmit: (event) => {
+                        event.preventDefault();
+                        handleApplyManualCoordinates();
+                    },
+                }}
+            >
+                <DialogTitle>
+                    {t('location.manual_coordinates_title', { defaultValue: 'Set Coordinates Manually' })}
+                </DialogTitle>
+                <DialogContent sx={{ pt: '20px !important' }}>
+                    <Stack spacing={2} sx={{ pt: 1 }}>
+                        <TextField
+                            label={t('location.latitude')}
+                            type="number"
+                            value={manualLatInput}
+                            onChange={(event) => {
+                                setManualLatInput(event.target.value);
+                                if (manualInputError) {
+                                    setManualInputError('');
+                                }
+                            }}
+                            inputProps={{ min: -90, max: 90, step: 'any' }}
+                            autoFocus
+                            fullWidth
+                        />
+                        <TextField
+                            label={t('location.longitude')}
+                            type="number"
+                            value={manualLonInput}
+                            onChange={(event) => {
+                                setManualLonInput(event.target.value);
+                                if (manualInputError) {
+                                    setManualInputError('');
+                                }
+                            }}
+                            inputProps={{ min: -180, max: 180, step: 'any' }}
+                            fullWidth
+                        />
+                        <Typography variant="caption" color={manualInputError ? 'error.main' : 'text.secondary'}>
+                            {manualInputError || t('location.manual_coordinates_hint', {
+                                defaultValue: 'Use decimal degrees. Example: 37.9838, 23.7275',
+                            })}
+                        </Typography>
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleCloseManualCoordinatesDialog}>
+                        {t('location.cancel', { defaultValue: 'Cancel' })}
+                    </Button>
+                    <Button type="submit" variant="contained">
+                        {t('location.apply_coordinates', { defaultValue: 'Apply Coordinates' })}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </SettingsSurface>
     );
 };

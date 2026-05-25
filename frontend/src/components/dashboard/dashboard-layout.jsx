@@ -907,9 +907,11 @@ export default function Layout() {
         if (
             segment === 'settings/preferences' &&
             (
-                currentPath.startsWith('settings/settings')
+                currentPath.startsWith('settings/backend')
+                || currentPath.startsWith('settings/settings')
                 || currentPath.startsWith('settings/preferences')
                 || currentPath.startsWith('settings/integrations')
+                || currentPath.startsWith('settings/location')
             )
         ) {
             return true;
