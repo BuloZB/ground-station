@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  *
  */
-
-
 import React, { useEffect, useRef, useState } from 'react';
 import {getClassNamesBasedOnGridEditing, TitleBar} from "./common.jsx";
 import { FormControl, InputLabel, MenuItem, Select, Button,
@@ -29,7 +27,6 @@ import {useDispatch, useSelector} from 'react-redux';
 import {
     setSelectedCameraId
 } from "../hardware/camera-slice.jsx";
-import VideoWebRTCPlayer from './video-webrtc.jsx';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 
 const CameraView = () => {
@@ -85,11 +82,6 @@ const CameraView = () => {
                     </FormControl>
                 </Grid>
 
-                {selectedCamera['type'] === 'webrtc' && (
-                    <React.Suspense fallback={<CircularProgress/>}>
-                        <VideoWebRTCPlayer src={selectedCamera['url']}/>
-                    </React.Suspense>
-                )}
                 {selectedCamera['type'] === 'hls' && (
                     <React.Suspense fallback={<CircularProgress/>}>
                     </React.Suspense>

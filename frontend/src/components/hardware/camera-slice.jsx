@@ -81,17 +81,24 @@ export const submitOrEditCamera = createAsyncThunk(
     }
 );
 
-const defaultCamera = {
+const defaultSelectedCamera = {
     id: null,
     name: '',
     url: '',
     type: '',
 };
 
+const defaultFormCamera = {
+    id: null,
+    name: '',
+    url: '',
+    type: 'mjpeg',
+};
+
 const camerasSlice = createSlice({
     name: 'cameras',
     initialState: {
-        selectedCamera: defaultCamera,
+        selectedCamera: defaultSelectedCamera,
         selectedCameraId: "",
         cameras: [],
         status: 'idle', // 'idle' | 'loading' | 'succeeded' | 'failed'
@@ -101,7 +108,7 @@ const camerasSlice = createSlice({
         selected: [],
         loading: false,
         pageSize: 10,
-        formValues: defaultCamera,
+        formValues: defaultFormCamera,
     },
     reducers: {
         setCameras: (state, action) => {
@@ -129,7 +136,7 @@ const camerasSlice = createSlice({
             };
         },
         resetFormValues: (state) => {
-            state.formValues = defaultCamera;
+            state.formValues = defaultFormCamera;
         },
         setError: (state, action) => {
             state.error = action.payload;
@@ -139,7 +146,8 @@ const camerasSlice = createSlice({
         },
         setSelectedCameraId: (state, action) => {
             state.selectedCameraId = action.payload;
-            state.selectedCamera = state.cameras.find(camera => camera.id === action.payload) || defaultCamera;
+            state.selectedCamera =
+                state.cameras.find(camera => camera.id === action.payload) || defaultSelectedCamera;
         },
     },
     extraReducers: (builder) => {
@@ -192,7 +200,7 @@ const camerasSlice = createSlice({
                 state.loading = false;
                 state.status = 'succeeded';
                 state.cameras = action.payload; // Add a new camera or update existing
-                state.formValues = defaultCamera; // Reset the form values
+                state.formValues = defaultFormCamera; // Reset the form values
             })
             // Rejected: store the error message
             .addCase(submitOrEditCamera.rejected, (state, action) => {
