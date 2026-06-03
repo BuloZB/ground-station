@@ -162,7 +162,6 @@ export default function CameraTable() {
                                                 }
                                             })}
                                             variant={'filled'}>
-                                            <MenuItem value="webrtc">{t('camera.webrtc')}</MenuItem>
                                             <MenuItem value="hls">{t('camera.hls')}</MenuItem>
                                             <MenuItem value="mjpeg">{t('camera.mjpeg')}</MenuItem>
                                         </Select>

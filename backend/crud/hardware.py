@@ -25,6 +25,7 @@ from common.common import logger, serialize_object
 from db.models import Cameras, Rigs, Rotators, SDRs
 
 VALID_AZIMUTH_MODES = {"0_360", "-180_180"}
+SUPPORTED_CAMERA_TYPES = {"hls", "mjpeg"}
 
 
 def _normalize_optional_float(value):
@@ -33,6 +34,15 @@ def _normalize_optional_float(value):
     if isinstance(value, str) and value.strip() == "":
         return None
     return float(value)
+
+
+def _normalize_camera_type(value: object) -> str:
+    """Normalize and validate supported camera stream types."""
+    normalized = str(value or "").strip().lower()
+    if normalized not in SUPPORTED_CAMERA_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_CAMERA_TYPES))
+        raise ValueError(f"camera type must be one of: {supported}")
+    return normalized
 
 
 async def fetch_rotators(
@@ -415,6 +425,7 @@ async def add_camera(session: AsyncSession, data: dict) -> dict:
     Create and add a new camera record.
     """
     try:
+        camera_type = _normalize_camera_type(data.get("type", "mjpeg"))
         new_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
         stmt = (
@@ -423,7 +434,7 @@ async def add_camera(session: AsyncSession, data: dict) -> dict:
                 id=new_id,
                 name=data["name"],
                 url=data.get("url", ""),
-                type=data.get("type", "webrtc"),
+                type=camera_type,
                 added=now,
                 updated=now,
             )
@@ -447,6 +458,7 @@ async def edit_camera(session: AsyncSession, data: dict) -> dict:
     Edit an existing camera record by updating provided fields.
     """
     try:
+        data = dict(data or {})
         # Extract camera_id from data
         camera_id = data.pop("id", None)
         camera_id = uuid.UUID(camera_id)
@@ -463,6 +475,9 @@ async def edit_camera(session: AsyncSession, data: dict) -> dict:
         camera = result.scalar_one_or_none()
         if not camera:
             return {"success": False, "error": f"Camera with id {camera_id} not found."}
+
+        if "type" in data:
+            data["type"] = _normalize_camera_type(data["type"])
 
         # Add updated timestamp
         data["updated"] = datetime.now(timezone.utc)

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Efstratios Goudelis
 
-from server.default_satellite_groups import DEFAULT_SYSTEM_SATELLITE_GROUPS
+from constants.satellitegroups import DEFAULT_SYSTEM_SATELLITE_GROUPS
 
 
 def test_default_system_satellite_groups_are_non_empty_and_unique():

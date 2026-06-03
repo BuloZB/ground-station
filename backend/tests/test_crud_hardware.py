@@ -379,14 +379,14 @@ class TestCamerasCRUD:
         camera_data = {
             "name": "Test Camera",
             "url": "http://localhost:1984/stream.html",
-            "type": "webrtc",
+            "type": "mjpeg",
         }
 
         result = await add_camera(db_session, camera_data)
 
         assert result["success"] is True
         assert result["data"]["name"] == "Test Camera"
-        assert result["data"]["type"] == "webrtc"
+        assert result["data"]["type"] == "mjpeg"
 
     async def test_fetch_cameras_all(self, db_session):
         """Test fetching all cameras."""

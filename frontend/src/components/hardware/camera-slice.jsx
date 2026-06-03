@@ -26,13 +26,16 @@ export const fetchCameras = createAsyncThunk(
         try {
             // Example: you could wrap socket events with a Promise
             return await new Promise((resolve, reject) => {
-                socket.emit('data_request', 'get-cameras', null, (res) => {
-                    if (res.success) {
-                        resolve(res.data);
-                    } else {
-                        reject(new Error('Failed to fetch cameras'));
-                    }
-                });
+                socket.emit("api.call", {
+  cmd: 'get-cameras',
+  data: null
+}, res => {
+  if (res.success) {
+    resolve(res.data);
+  } else {
+    reject(new Error('Failed to fetch cameras'));
+  }
+});
             });
         } catch (error) {
             return rejectWithValue(error.message);
@@ -46,13 +49,16 @@ export const deleteCameras = createAsyncThunk(
         try {
             // Wrap your socket call in a Promise
             return await new Promise((resolve, reject) => {
-                socket.emit('data_submission', 'delete-camera', selectedIds, (response) => {
-                    if (response.success) {
-                        resolve(response.data);
-                    } else {
-                        reject(new Error('Failed to delete cameras'));
-                    }
-                });
+                socket.emit("api.call", {
+  cmd: 'delete-camera',
+  data: selectedIds
+}, response => {
+  if (response.success) {
+    resolve(response.data);
+  } else {
+    reject(new Error('Failed to delete cameras'));
+  }
+});
             });
         } catch (error) {
             return rejectWithValue(error.message);
@@ -66,14 +72,17 @@ export const submitOrEditCamera = createAsyncThunk(
         const action = formValues.id ? 'edit-camera' : 'submit-camera';
         try {
             return await new Promise((resolve, reject) => {
-                socket.emit('data_submission', action, formValues, (response) => {
-                    if (response.success) {
-                        dispatch(setOpenAddDialog(false));
-                        resolve(response.data);
-                    } else {
-                        reject(new Error(`Failed to ${action === 'edit-camera' ? 'edit' : 'add'} camera`));
-                    }
-                });
+                socket.emit("api.call", {
+  cmd: action,
+  data: formValues
+}, response => {
+  if (response.success) {
+    dispatch(setOpenAddDialog(false));
+    resolve(response.data);
+  } else {
+    reject(new Error(`Failed to ${action === 'edit-camera' ? 'edit' : 'add'} camera`));
+  }
+});
             });
         } catch (error) {
             return rejectWithValue(error.message);
@@ -81,17 +90,24 @@ export const submitOrEditCamera = createAsyncThunk(
     }
 );
 
-const defaultCamera = {
+const defaultSelectedCamera = {
     id: null,
     name: '',
     url: '',
     type: '',
 };
 
+const defaultFormCamera = {
+    id: null,
+    name: '',
+    url: '',
+    type: 'mjpeg',
+};
+
 const camerasSlice = createSlice({
     name: 'cameras',
     initialState: {
-        selectedCamera: defaultCamera,
+        selectedCamera: defaultSelectedCamera,
         selectedCameraId: "",
         cameras: [],
         status: 'idle', // 'idle' | 'loading' | 'succeeded' | 'failed'
@@ -101,7 +117,7 @@ const camerasSlice = createSlice({
         selected: [],
         loading: false,
         pageSize: 10,
-        formValues: defaultCamera,
+        formValues: defaultFormCamera,
     },
     reducers: {
         setCameras: (state, action) => {
@@ -129,7 +145,7 @@ const camerasSlice = createSlice({
             };
         },
         resetFormValues: (state) => {
-            state.formValues = defaultCamera;
+            state.formValues = defaultFormCamera;
         },
         setError: (state, action) => {
             state.error = action.payload;
@@ -139,7 +155,8 @@ const camerasSlice = createSlice({
         },
         setSelectedCameraId: (state, action) => {
             state.selectedCameraId = action.payload;
-            state.selectedCamera = state.cameras.find(camera => camera.id === action.payload) || defaultCamera;
+            state.selectedCamera =
+                state.cameras.find(camera => camera.id === action.payload) || defaultSelectedCamera;
         },
     },
     extraReducers: (builder) => {
@@ -192,7 +209,7 @@ const camerasSlice = createSlice({
                 state.loading = false;
                 state.status = 'succeeded';
                 state.cameras = action.payload; // Add a new camera or update existing
-                state.formValues = defaultCamera; // Reset the form values
+                state.formValues = defaultFormCamera; // Reset the form values
             })
             // Rejected: store the error message
             .addCase(submitOrEditCamera.rejected, (state, action) => {
